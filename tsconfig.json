@@ -12,6 +12,13 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["spike/**/*.mjs", "spike/**/*.cjs", "test/**/*.mjs"],
+  "include": [
+    "spike/**/*.mjs",
+    "spike/**/*.cjs",
+    "test/**/*.mjs",
+    "src/**/*.mjs",
+    "src/**/*.cjs",
+    "scripts/**/*.mjs"
+  ],
   "exclude": ["node_modules", "tmp"]
 }

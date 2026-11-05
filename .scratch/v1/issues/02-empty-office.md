@@ -4,7 +4,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] 启动后 5 秒内出现办公室画面与 4 个空工位，且工位来自数据库而非硬编码
 - [ ] 业务宿主的在线状态在界面上可见
