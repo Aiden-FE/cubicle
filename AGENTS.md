@@ -7,7 +7,7 @@
 **Cubicle** —— 一间看得见的办公室：AI 数字员工在工位上干活，你招聘、派活、验收。
 Windows 优先的桌面应用（Electron + React + PixiJS），不绑定任何 agent 引擎（统一适配层调用本机 pi / codex / claude / dsh / qoder…）。
 
-**当前状态：蓝图已完成，尚未开工。** 下一步是 M0 探路（见下）。
+**当前状态：M0 已通过（2026-11-05，见 `docs/spike-m0.md`）；下一步 = M1（研发票 02）。**
 
 ## 先读顺序
 
@@ -38,15 +38,11 @@ Windows 优先的桌面应用（Electron + React + PixiJS），不绑定任何 a
 
 决策票回答「为什么这样做」，研发票回答「下一步做什么」—— 不要混用。
 
-## 开工：M0 探路（= 研发票 01，最高优先，先证伪）
+## M0 探路：已通过（= 研发票 01）
 
-开工前必须验证三件事，任何一件不成立架构就要改：
+2026-11-05 三关全过：Electron 45.2.1 内嵌 Node 24.22.1；pi 1.5.0 SDK 在 utilityProcess 吐出 text delta + 工具事件；codex-cli 0.163.0 JSONL 可归一化。重跑 `npm run spike`，证据与三条备选路径见 `docs/spike-m0.md`。
 
-1. **Electron 内嵌 Node ≥ 22.19**（pi 的硬要求）——`process.versions.node`
-2. **pi SDK 在 utilityProcess 里能吐 token 事件**（`createAgentSession` + `subscribe`）
-3. **`codex exec` headless 输出可解析**（JSONL/JSON；本机已装已登录）
-
-产出：一个 spike 脚本 + 结论记录（建议 `docs/spike-m0.md`），然后才进 M1。
+两个环境坑：启动 Electron 前删 `ELECTRON_RUN_AS_NODE`；codex `-C` 一律传绝对路径。
 
 ## 硬约束（改这些等于改蓝图，先开票）
 

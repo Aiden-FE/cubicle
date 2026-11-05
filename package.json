@@ -1,0 +1,25 @@
+{
+  "name": "cubicle",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "一间看得见的办公室：AI 数字员工在工位上干活，你招聘、派活、验收。",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "spike": "node spike/run.mjs",
+    "test": "node --test",
+    "typecheck": "tsc -p tsconfig.json",
+    "check": "npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.1",
+    "electron": "45.2.1",
+    "typescript": "5.9.3",
+    "yaml": "2.9.0"
+  }
+}

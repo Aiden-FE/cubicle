@@ -4,7 +4,7 @@
 
 - **形态**：Windows 优先的桌面应用（Electron + React + PixiJS）
 - **引擎**：不绑定任何 agent 引擎 —— 统一适配层调用本机已装的 pi / codex / claude / dsh / qoder…
-- **状态**：**蓝图已完成，尚未开工**。下一步 = M0 探路。
+- **状态**：**M0 已通过（2026-11-05）**；下一步 = M1（研发票 02：能开机的空办公室）。
 
 ## 从这里开始
 
@@ -24,18 +24,23 @@
   issues/                决策票（每张一个决策 + Answer）
   prototypes/            可点原型（throwaway，勿直接进主干）
   research/              调研资产
+.scratch/v1/             v1 研发票（13 张，下一步做什么）
+docs/spike-m0.md         M0 探路结论（三关全过）
+spike/                   M0 探路脚本（npm run spike 可重跑）
+test/                    归一化解析器单测
 GLOSSARY.md              领域术语
 ```
 
-## 下一步：M0 探路（2–3 人日）
+## M0 探路：已通过（2026-11-05）
 
-开工前必须先证伪的三件事：
+开工前必须证伪的三件事，全部成立：
 
-1. **Electron 内嵌 Node ≥ 22.19**（pi 的硬要求；不满足则锁 Electron 版本或降级 pi 适配器）
-2. **pi SDK 在 utilityProcess 里能吐 token 事件**（`createAgentSession` + `subscribe`）
-3. **`codex exec` headless 输出可解析**（JSONL / JSON，本机已装已登录）
+1. **Electron 内嵌 Node ≥ 22.19** → Electron 45.2.1 内嵌 **Node 24.22.1**（PASS）
+2. **pi SDK 在 utilityProcess 里能吐 token 事件** → pi 1.5.0，收到 6 条 text delta + `read` 工具 start/end（PASS）
+3. **`codex exec` headless 输出可解析** → codex-cli 0.163.0，JSONL 归一化出文本 / shell 工具 / turn end（PASS）
 
-这三件任何一件不成立，架构就要改 —— 所以先花两天验证，再写界面。
+重跑 `npm run spike`；版本、证据、映射表与三条备选路径见 [docs/spike-m0.md](docs/spike-m0.md)。
+**下一步 = M1：研发票 02「能开机的空办公室」。**
 
 ## 核心约束（来自蓝图）
 
