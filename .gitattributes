@@ -1,0 +1,14 @@
+# 统一换行符，避免跨机器 diff 噪音
+* text=auto eol=lf
+
+# 二进制资产不做文本处理
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.mp4 binary
