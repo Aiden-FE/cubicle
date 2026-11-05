@@ -12,6 +12,12 @@
 
 export const ENVELOPE_VERSION = 1;
 
+/** Shared topic names so the boundary stays one edit away from the semantics. */
+export const TOPICS = {
+  hostStatus: "host.status",
+  domainChanged: "domain.changed",
+};
+
 /**
  * @typedef {"invoke" | "reply" | "event"} EnvelopeKind
  *

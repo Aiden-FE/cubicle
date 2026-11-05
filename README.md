@@ -4,7 +4,7 @@
 
 - **形态**：Windows 优先的桌面应用（Electron + React + PixiJS）
 - **引擎**：不绑定任何 agent 引擎 —— 统一适配层调用本机已装的 pi / codex / claude / dsh / qoder…
-- **状态**：**M0 已通过（2026-11-05）**；下一步 = M1（研发票 02：能开机的空办公室）。
+- **状态**：**M1 开工 —— 研发票 02「能开机的空办公室」已通过（2026-11-05）**；下一步 = 研发票 03（招聘第一个员工）。
 
 ## 从这里开始
 
@@ -40,7 +40,13 @@ GLOSSARY.md              领域术语
 3. **`codex exec` headless 输出可解析** → codex-cli 0.163.0，JSONL 归一化出文本 / shell 工具 / turn end（PASS）
 
 重跑 `npm run spike`；版本、证据、映射表与三条备选路径见 [docs/spike-m0.md](docs/spike-m0.md)。
-**下一步 = M1：研发票 02「能开机的空办公室」。**
+
+## M1 骨架：票 02 已通过（2026-11-05）
+
+应用能开机：办公室画面 + 4 个空工位来自 SQLite（`node:sqlite`，零原生依赖）；
+三层进程就位 —— main（窗口/宿主监管/16ms 合帧）· AgentHost（utilityProcess，DB 单写者）· renderer（React 18 纯视图）。
+验收一条命令：`npm run build:renderer && npm run e2e:02`；票与实现说明见 [.scratch/v1/issues/02-empty-office.md](.scratch/v1/issues/02-empty-office.md)。
+**下一步 = 研发票 03「招聘第一个员工」。**
 
 ## 核心约束（来自蓝图）
 

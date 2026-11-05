@@ -1,21 +1,26 @@
 /**
  * Renderer bridge (sandboxed preload).
  *
- * Exposes just two verbs over the typed envelope protocol:
- *   invoke(method, payload) → Promise  (correlated reply)
- *   onEvents(handler)       → unsubscribe  (coalesced host event batches)
+ * Exposes two verbs over the typed envelope protocol:
+ *   invoke(method, payload)        → Promise (correlated reply, times out)
+ *   subscribe(topic, handler)      → unsubscribe (per-topic event delivery)
+ * Topic filtering happens here, at the boundary — the view never sniffs
+ * batches it did not ask for.
  */
 const { contextBridge, ipcRenderer } = require("electron");
 
-/** @type {Map<string, { resolve: (v: unknown) => void, reject: (e: Error) => void }>} */
+const INVOKE_TIMEOUT_MS = 8000;
+
+/** @type {Map<string, { resolve: (v: unknown) => void, reject: (e: Error) => void, timer: NodeJS.Timeout }>} */
 const pending = new Map();
-/** @type {Set<(events: unknown[]) => void>} */
-const listeners = new Set();
+/** @type {Map<string, Set<(event: any) => void>>} */
+const topicHandlers = new Map();
 let seq = 0;
 
 ipcRenderer.on("cubicle:reply", (_event, envelope) => {
   const waiter = pending.get(envelope?.id);
   if (!waiter) return;
+  clearTimeout(waiter.timer);
   pending.delete(envelope.id);
   if (envelope.ok) {
     waiter.resolve(envelope.payload);
@@ -29,7 +34,11 @@ ipcRenderer.on("cubicle:reply", (_event, envelope) => {
 
 ipcRenderer.on("cubicle:events", (_event, batch) => {
   if (!Array.isArray(batch)) return;
-  for (const listener of listeners) listener(batch);
+  for (const envelope of batch) {
+    const handlers = topicHandlers.get(envelope?.topic);
+    if (!handlers) continue;
+    for (const handler of handlers) handler(envelope);
+  }
 });
 
 contextBridge.exposeInMainWorld("cubicle", {
@@ -42,7 +51,14 @@ contextBridge.exposeInMainWorld("cubicle", {
     return new Promise((resolve, reject) => {
       seq += 1;
       const id = `r${seq}-${Date.now().toString(36)}`;
-      pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        const err = new Error(`AgentHost did not answer ${method} within ${INVOKE_TIMEOUT_MS}ms`);
+        // @ts-ignore — code rides along for callers that care.
+        err.code = "host_timeout";
+        reject(err);
+      }, INVOKE_TIMEOUT_MS);
+      pending.set(id, { resolve, reject, timer });
       ipcRenderer.send("cubicle:invoke", {
         v: 1,
         kind: "invoke",
@@ -55,11 +71,22 @@ contextBridge.exposeInMainWorld("cubicle", {
   },
 
   /**
-   * @param {(events: unknown[]) => void} handler
+   * @param {string} topic
+   * @param {(event: any) => void} handler
    * @returns {() => void}
    */
-  onEvents(handler) {
-    listeners.add(handler);
-    return () => listeners.delete(handler);
+  subscribe(topic, handler) {
+    let handlers = topicHandlers.get(topic);
+    if (!handlers) {
+      handlers = new Set();
+      topicHandlers.set(topic, handlers);
+    }
+    handlers.add(handler);
+    return () => {
+      const current = topicHandlers.get(topic);
+      if (!current) return;
+      current.delete(handler);
+      if (current.size === 0) topicHandlers.delete(topic);
+    };
   },
 });

@@ -1,4 +1,5 @@
 import React from "react";
+import { deskStyle } from "./scene/domScene.js";
 
 /**
  * The main canvas — always the office. Desks are drawn from database rows.
@@ -44,12 +45,8 @@ export function OfficeFloor({ snapshot, status, bridgeError }) {
  * @param {{ desk: import("./App.jsx").OfficeSnapshotData["desks"][number] }} props
  */
 function DeskCard({ desk }) {
-  const style = {
-    left: `calc(${(desk.x / 640) * 100}% - 78px)`,
-    top: `calc(${(desk.y / 440) * 100}% - 52px)`,
-  };
   return (
-    <div className="desk" data-testid="desk" data-empty="true" style={style}>
+    <div className="desk" data-testid="desk" data-empty="true" style={deskStyle(desk)}>
       <div className="desk-monitor">
         <div className="desk-screen" />
       </div>

@@ -100,7 +100,7 @@ test("createProjectGroup seeds four empty desks for the new group", async () => 
   }
 });
 
-test("officeSnapshot points at the first company and its first project group", async () => {
+test("officeSnapshot points at the first company and its most recent project group", async () => {
   const { dataDir, dispose } = await withTempDir("snapshot");
   try {
     const store = openStore({ dataDir });
@@ -110,14 +110,14 @@ test("officeSnapshot points at the first company and its first project group", a
 
     const other = store.createCompany({ name: "第二公司" });
     store.createProjectGroup({ companyId: other.id, name: "另一组" });
-    store.createProjectGroup({ companyId: defaultCompany.id, name: "默认二组" });
+    const newerGroup = store.createProjectGroup({ companyId: defaultCompany.id, name: "默认二组" });
 
     const snapshot = store.officeSnapshot();
     assert.equal(snapshot.activeCompanyId, defaultCompany.id);
-    assert.equal(snapshot.activeGroupId, defaultGroup.id);
+    assert.equal(snapshot.activeGroupId, newerGroup.id);
     assert.deepEqual(
       snapshot.desks.map((d) => d.groupId),
-      [defaultGroup.id, defaultGroup.id, defaultGroup.id, defaultGroup.id],
+      [newerGroup.id, newerGroup.id, newerGroup.id, newerGroup.id],
     );
     store.close();
   } finally {

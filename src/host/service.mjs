@@ -5,7 +5,8 @@
  * with a reply envelope plus any domain events that the mutation produced.
  * Handlers never touch processes or transport — just the store.
  */
-import { createReply, createErrorReply, createEvent } from "../shared/envelope.mjs";
+import { createReply, createErrorReply, createEvent, TOPICS } from "../shared/envelope.mjs";
+import { appError } from "../shared/apperror.mjs";
 
 /**
  * @typedef {import("../shared/envelope.mjs").InvokeEnvelope} InvokeEnvelope
@@ -24,20 +25,9 @@ function requireName(payload, field) {
   const record = /** @type {Record<string, unknown>} */ (payload ?? {});
   const value = record[field];
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw serviceError("invalid_payload", `${field} must be a non-empty string`);
+    throw appError("invalid_payload", `${field} must be a non-empty string`);
   }
   return value.trim();
-}
-
-/**
- * @param {string} code
- * @param {string} message
- * @returns {Error & { code: string }}
- */
-function serviceError(code, message) {
-  const err = /** @type {Error & { code: string }} */ (new Error(`${code}: ${message}`));
-  err.code = code;
-  return err;
 }
 
 /**
@@ -61,7 +51,7 @@ export function createService({ store, hostInfo }) {
     "projectGroup.create"(payload) {
       const companyId = Number(/** @type {Record<string, unknown>} */ (payload ?? {}).companyId);
       if (!Number.isInteger(companyId) || companyId <= 0) {
-        throw serviceError("invalid_payload", "companyId must be a positive integer");
+        throw appError("invalid_payload", "companyId must be a positive integer");
       }
       const name = requireName(payload, "name");
       const group = store.createProjectGroup({ companyId, name });
@@ -91,7 +81,7 @@ export function createService({ store, hostInfo }) {
       }
       try {
         const { payload, event } = method(invoke.payload);
-        const events = event ? [createEvent("domain.changed", event)] : [];
+        const events = event ? [createEvent(TOPICS.domainChanged, event)] : [];
         return { reply: createReply(invoke, payload), events };
       } catch (err) {
         const code = /** @type {{ code?: string }} */ (err ?? {}).code ?? "internal";

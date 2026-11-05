@@ -7,13 +7,13 @@
  * keeps running and the fresh view resubscribes.
  */
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { app, BrowserWindow, ipcMain, utilityProcess } from "electron";
 
 import { createHostSupervisor } from "./supervisor.mjs";
 import { createEventCoalescer } from "./coalescer.mjs";
-import { createEvent, createErrorReply, parseEnvelope } from "../shared/envelope.mjs";
+import { createEvent, createErrorReply, parseEnvelope, TOPICS } from "../shared/envelope.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(here, "..", "..");
@@ -29,6 +29,26 @@ if (process.env.CUBICLE_DATA_DIR) {
 } else {
   app.setPath("userData", path.join(app.getPath("appData"), "cubicle"));
 }
+
+if (process.env.CUBICLE_PROBE_USERDATA) {
+  // Evidence for the acceptance run: exercise this exact resolution, then
+  // quit before touching the filesystem.
+  appendFileSyncProbe(process.env.CUBICLE_PROBE_USERDATA, {
+    userData: app.getPath("userData"),
+    appData: app.getPath("appData"),
+  });
+  app.exit(0);
+}
+
+/**
+ * @param {string} file
+ * @param {Record<string, unknown>} payload
+ */
+function appendFileSyncProbe(file, payload) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  appendFileSync(file, JSON.stringify(payload, null, 2) + "\n");
+}
+
 mkdirSync(app.getPath("userData"), { recursive: true });
 
 const e2eEnabled = process.argv.includes("--cubicle-e2e");
@@ -62,7 +82,7 @@ const eventCoalescer = createEventCoalescer({
  */
 function publishHostStatus(status) {
   eventCoalescer.push(
-    createEvent("host.status", {
+    createEvent(TOPICS.hostStatus, {
       ...lastHostInfo,
       state: status.state,
       pid: status.pid ?? lastHostInfo.pid ?? null,
@@ -91,7 +111,7 @@ const supervisor = createHostSupervisor({
   onMessage: (raw) => {
     const envelope = parseEnvelope(raw);
     if (!envelope) return;
-    if (envelope.kind === "event" && envelope.topic === "host.status") {
+    if (envelope.kind === "event" && envelope.topic === TOPICS.hostStatus) {
       lastHostInfo = /** @type {Record<string, unknown>} */ (envelope.payload) ?? {};
       publishHostStatus({ state: "online", pid: supervisor.pid });
       return;
@@ -139,14 +159,12 @@ function createMainWindow() {
 ipcMain.on("cubicle:invoke", (_event, raw) => {
   const envelope = parseEnvelope(raw);
   if (!envelope || envelope.kind !== "invoke") return;
-  if (supervisor.state === "offline" || supervisor.state === "stopped") {
+  if (supervisor.state === "offline" || supervisor.state === "stopped" || !supervisor.send(envelope)) {
     sendToRenderer(
       "cubicle:reply",
       createErrorReply(envelope, { code: "host_offline", message: "AgentHost is not running" }),
     );
-    return;
   }
-  supervisor.send(envelope);
 });
 
 app.whenReady().then(async () => {
@@ -154,7 +172,7 @@ app.whenReady().then(async () => {
   createMainWindow();
 
   if (e2eEnabled) {
-    const { runE2E } = await import("./e2e-02.mjs");
+    const { runE2E } = await import(pathToFileURL(path.join(rootDir, "scripts", "e2e-02-runner.mjs")).href);
     const exitCode = await runE2E({
       app,
       getMainWindow: () => mainWindow,

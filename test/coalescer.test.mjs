@@ -14,7 +14,6 @@ function fakeTimers() {
       pending.push({ id, ms, fn });
       return id;
     },
-    clearTimeoutFn() {},
     runDue() {
       const due = pending.splice(0, pending.length);
       for (const entry of due) entry.fn();
@@ -23,33 +22,45 @@ function fakeTimers() {
   };
 }
 
-test("events pushed inside one frame flush as a single batch after 16ms", () => {
+test("events inside one frame flush as a single batch after 16ms", () => {
   const timers = fakeTimers();
   /** @type {unknown[][]} */
   const sent = [];
   const coalescer = createEventCoalescer({ send: (batch) => sent.push(batch), setTimeoutFn: timers.setTimeoutFn });
 
   coalescer.push(createEvent("domain.changed", { reason: "first" }));
-  coalescer.push(createEvent("host.status", { state: "online" }));
-  coalescer.push(createEvent("domain.changed", { reason: "second" }));
+  coalescer.push(createEvent("host.status", { state: "starting" }));
 
   assert.deepEqual(timers.scheduled(), [16]);
   assert.equal(sent.length, 0);
   timers.runDue();
 
   assert.equal(sent.length, 1);
-  assert.equal(sent[0].length, 2);
   assert.deepEqual(
     sent[0].map((env) => /** @type {{ topic: string }} */ (env).topic),
     ["domain.changed", "host.status"],
   );
+});
+
+test("idempotent status topics collapse to the newest within a frame", () => {
+  const timers = fakeTimers();
+  /** @type {unknown[][]} */
+  const sent = [];
+  const coalescer = createEventCoalescer({ send: (batch) => sent.push(batch), setTimeoutFn: timers.setTimeoutFn });
+
+  coalescer.push(createEvent("host.status", { state: "online", pid: 1 }));
+  coalescer.push(createEvent("host.status", { state: "offline", pid: null }));
+  timers.runDue();
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].length, 1);
   assert.deepEqual(
-    /** @type {{ payload: { reason: string } }} */ (sent[0][0]).payload,
-    { reason: "second" },
+    /** @type {{ payload: { state: string } }} */ (sent[0][0]).payload,
+    { state: "offline", pid: null },
   );
 });
 
-test("each frame sends at most one batch and a new frame opens after a flush", () => {
+test("domain events never collapse: each survives its frame in order", () => {
   const timers = fakeTimers();
   /** @type {unknown[][]} */
   const sent = [];
@@ -57,20 +68,19 @@ test("each frame sends at most one batch and a new frame opens after a flush", (
 
   coalescer.push(createEvent("domain.changed", { n: 1 }));
   coalescer.push(createEvent("domain.changed", { n: 2 }));
-  timers.runDue();
-  coalescer.push(createEvent("domain.changed", { n: 3 }));
+  coalescer.push(createEvent("host.status", { state: "starting" }));
   timers.runDue();
 
-  assert.equal(sent.length, 2);
-  assert.equal(sent[0].length, 1);
+  assert.equal(sent.length, 1);
+  const topics = sent[0].map((env) => /** @type {{ topic: string }} */ (env).topic);
+  assert.deepEqual(topics, ["domain.changed", "domain.changed", "host.status"]);
   assert.deepEqual(
     /** @type {{ payload: { n: number } }} */ (sent[0][0]).payload,
-    { n: 2 },
+    { n: 1 },
   );
-  assert.equal(sent[1].length, 1);
   assert.deepEqual(
-    /** @type {{ payload: { n: number } }} */ (sent[1][0]).payload,
-    { n: 3 },
+    /** @type {{ payload: { n: number } }} */ (sent[0][1]).payload,
+    { n: 2 },
   );
 });
 

@@ -1,12 +1,16 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { OfficeFloor } from "./OfficeFloor.jsx";
 import { RailPanel } from "./RailPanel.jsx";
 import { StatusChip } from "./StatusChip.jsx";
+
+// Topic names mirrored from src/shared/envelope.mjs TOPICS (process boundary).
+const TOPICS = { hostStatus: "host.status", domainChanged: "domain.changed" };
 
 export function App() {
   const [snapshot, setSnapshot] = useState(/** @type {OfficeSnapshotData | null} */ (null));
   const [status, setStatus] = useState(/** @type {HostStatusData} */ ({ state: "starting" }));
   const [bridgeError, setBridgeError] = useState(/** @type {string | null} */ (null));
+  const lastHostState = useRef(/** @type {string | null} */ (null));
 
   const refresh = useCallback(async () => {
     try {
@@ -20,18 +24,23 @@ export function App() {
 
   useEffect(() => {
     void refresh();
-    const unsubscribe = window.cubicle.onEvents((batch) => {
-      let domainChanged = false;
-      for (const envelope of batch) {
-        if (envelope.topic === "host.status") {
-          setStatus((prev) => ({ ...prev, .../** @type {HostStatusData} */ (envelope.payload) }));
-        } else if (envelope.topic === "domain.changed") {
-          domainChanged = true;
-        }
+    const unsubscribeStatus = window.cubicle.subscribe(TOPICS.hostStatus, (envelope) => {
+      const payload = /** @type {HostStatusData} */ (envelope.payload);
+      setStatus((prev) => ({ ...prev, ...payload }));
+      // A host that just (re)appeared: re-pull the domain data even if the
+      // view loaded while the host was still down or restarting.
+      if (payload.state === "online" && lastHostState.current !== "online") {
+        void refresh();
       }
-      if (domainChanged) void refresh();
+      lastHostState.current = payload.state;
     });
-    return unsubscribe;
+    const unsubscribeDomain = window.cubicle.subscribe(TOPICS.domainChanged, () => {
+      void refresh();
+    });
+    return () => {
+      unsubscribeStatus();
+      unsubscribeDomain();
+    };
   }, [refresh]);
 
   return (

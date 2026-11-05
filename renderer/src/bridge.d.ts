@@ -1,11 +1,6 @@
 /**
  * Bridge types exposed by src/preload/index.cjs on window.cubicle.
  */
-export interface CubicleBridge {
-  invoke(method: string, payload?: unknown): Promise<unknown>;
-  onEvents(handler: (events: EventBatch) => void): () => void;
-}
-
 export interface EventEnvelope {
   v: 1;
   kind: "event";
@@ -15,7 +10,16 @@ export interface EventEnvelope {
   ts: number;
 }
 
-export type EventBatch = EventEnvelope[];
+export interface CubicleBridge {
+  invoke(method: string, payload?: unknown): Promise<unknown>;
+  subscribe(topic: string, handler: (event: EventEnvelope) => void): () => void;
+}
+
+/** Topic names mirrored from src/shared/envelope.mjs TOPICS (realm boundary). */
+export const TOPICS = {
+  hostStatus: "host.status",
+  domainChanged: "domain.changed",
+};
 
 declare global {
   interface Window {

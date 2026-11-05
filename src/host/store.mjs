@@ -11,6 +11,8 @@ import { DatabaseSync } from "node:sqlite";
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 
+import { appError } from "../shared/apperror.mjs";
+
 /**
  * @typedef {object} CompanyRow
  * @property {number} id
@@ -72,17 +74,6 @@ const DESK_SLOTS = [
   { x: 140, y: 300 },
   { x: 380, y: 300 },
 ];
-
-/**
- * @param {string} code
- * @param {string} message
- * @returns {Error & { code: string }}
- */
-function storeError(code, message) {
-  const err = /** @type {Error & { code: string }} */ (new Error(`${code}: ${message}`));
-  err.code = code;
-  return err;
-}
 
 /**
  * @param {Record<string, unknown>} row
@@ -159,7 +150,7 @@ export function openStore({ dataDir }) {
     /** @param {{ companyId: number, name: string }} input @returns {GroupRow} */
     createProjectGroup({ companyId, name }) {
       const company = db.prepare("SELECT id FROM company WHERE id = ?").get(companyId);
-      if (!company) throw storeError("unknown_company", `no company with id ${companyId}`);
+      if (!company) throw appError("unknown_company", `no company with id ${companyId}`);
       const createdAt = new Date().toISOString();
       const info = db
         .prepare("INSERT INTO project_group (company_id, name, created_at) VALUES (?, ?, ?)")
@@ -183,14 +174,19 @@ export function openStore({ dataDir }) {
       return rows.map((row) => toDesk(/** @type {Record<string, unknown>} */ (row)));
     },
 
-    /** @returns {OfficeSnapshot} */
+    /**
+     * @returns {OfficeSnapshot}
+     */
     officeSnapshot() {
       const companies = db.prepare("SELECT * FROM company ORDER BY id").all().map((row) =>
         toCompany(/** @type {Record<string, unknown>} */ (row)),
       );
+      // M1 has no switcher: the office shows the first company and its most
+      // recently created group, so a freshly built group's desks reach the
+      // canvas (and the DB→view path stays provable).
       const activeCompanyId = companies[0]?.id ?? 0;
       const groups = this.listGroups({ companyId: activeCompanyId });
-      const activeGroupId = groups[0]?.id ?? null;
+      const activeGroupId = groups.at(-1)?.id ?? null;
       const desks = activeGroupId === null ? [] : this.listDesks({ groupId: activeGroupId });
       return { companies, activeCompanyId, groups, activeGroupId, desks };
     },

@@ -12,7 +12,7 @@ async function main() {
     throw new Error("CUBICLE_DATA_DIR is required");
   }
 
-  const [{ openStore }, { createService }, { parseEnvelope, createEvent }] = await Promise.all([
+  const [{ openStore }, { createService }, { parseEnvelope, createEvent, TOPICS }] = await Promise.all([
     import("./store.mjs"),
     import("./service.mjs"),
     import("../shared/envelope.mjs"),
@@ -40,12 +40,13 @@ async function main() {
   });
 
   const heartbeat = () =>
-    send(createEvent("host.status", { state: "online", ...hostInfo }));
+    send(createEvent(TOPICS.hostStatus, { state: "online", ...hostInfo }));
   heartbeat();
   setInterval(heartbeat, 2000);
 }
 
 main().catch((err) => {
-  console.error("AgentHost failed to start:", err);
+  // A GUI-subsystem process may have no console: stderr handles are enough.
+  process.stderr.write(`AgentHost failed to start: ${err && err.stack ? err.stack : err}\n`);
   process.exitCode = 1;
 });

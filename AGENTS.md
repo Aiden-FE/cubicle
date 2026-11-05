@@ -7,7 +7,7 @@
 **Cubicle** —— 一间看得见的办公室：AI 数字员工在工位上干活，你招聘、派活、验收。
 Windows 优先的桌面应用（Electron + React + PixiJS），不绑定任何 agent 引擎（统一适配层调用本机 pi / codex / claude / dsh / qoder…）。
 
-**当前状态：M0 已通过（2026-11-05，见 `docs/spike-m0.md`）；下一步 = M1（研发票 02）。**
+**当前状态：M0 已通过（2026-11-05，见 `docs/spike-m0.md`）；M1 进行中 —— 研发票 02「能开机的空办公室」已通过（`src/` 三层骨架 + `npm run e2e:02`）；下一步 = 研发票 03。**
 
 ## 先读顺序
 
@@ -43,6 +43,13 @@ Windows 优先的桌面应用（Electron + React + PixiJS），不绑定任何 a
 2026-11-05 三关全过：Electron 45.2.1 内嵌 Node 24.22.1；pi 1.5.0 SDK 在 utilityProcess 吐出 text delta + 工具事件；codex-cli 0.163.0 JSONL 可归一化。重跑 `npm run spike`，证据与三条备选路径见 `docs/spike-m0.md`。
 
 两个环境坑：启动 Electron 前删 `ELECTRON_RUN_AS_NODE`；codex `-C` 一律传绝对路径。
+
+## M1 骨架（研发票 02）环境坑
+
+- **`app.setName()` 在模块顶层调用会原生崩溃（0xC0000005）** —— Electron 45.2.1 实证；用 `app.setPath("userData", …)` 替代。
+- SQLite 用内嵌 Node 24 的 `node:sqlite`（主进程与 utilityProcess 均实证可用），零原生依赖。
+- agent 会话里 Electron 对 `%APPDATA%` 的新建写入被系统策略拒绝（EPERM/0x5）；`CUBICLE_DATA_DIR` 会连同 userData 一起重定向，e2e/测试用它把工作区当数据目录。
+- Electron 是 GUI 子系统进程：console 输出不进父进程管道，探针输出一律 `process.stdout.write` 或落盘。
 
 ## 硬约束（改这些等于改蓝图，先开票）
 
