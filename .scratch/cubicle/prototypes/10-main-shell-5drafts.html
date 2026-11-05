@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8"/>
+<title>Cubicle · PROTOTYPE 10 主界面五稿（会丢弃，勿提交）</title>
+<!--
+  PROTOTYPE（wayfinder 10 票 · web-design-engineer）
+  五份主界面稿件，?d=1..5 或悬浮条/←→键切换；同一间娃娃屋办公室贯穿（09 票既定）。
+  硬约束：工单创建/列表不得挤占主空间 —— 全部走浮层。
+  稿1 剧场 Stage     ：发丝顶栏 + 右缘任务把手抽屉
+  稿2 代价轨 Rail    ：左 56px 窄轨（公司/工单台/设置），画布全宽
+  稿3 导演竖幕 Strip ：右上唯一活跃任务胶囊 → 横向时间线；档案柜浮层
+  稿4 双世界 Modes   ：办公室态 ⇄ 工单台态（办公室变暗降饱和继续活）
+  稿5 信箱 Dock      ：100% 净办公室 + 右下托盘 ✉ 徽章
+-->
+<style>
+:root{
+  --paper:#FAF9F6; --panel:#FFFFFF; --line:#E7E4DE; --ink:#23262A; --ink2:#8A8F98;
+  --run:#E2574C; --ok:#1E7C46; --wait:#B46A00; --coal:#25282C;
+  --sh1:0 1px 2px rgba(35,38,42,.06); --sh3:0 3px 10px rgba(35,38,42,.10); --sh8:0 8px 24px rgba(35,38,42,.16);
+  --r-panel:12px; --r-card:10px;
+}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%;font-family:"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;background:var(--paper);color:var(--ink);overflow:hidden}
+button{font:inherit;cursor:pointer}
+#cv{position:fixed;inset:0;display:block}
+.num{font-variant-numeric:tabular-nums}
+.chip{display:inline-flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:7px 13px;font-size:12.5px;box-shadow:var(--sh1);cursor:pointer;white-space:nowrap}
+.chip:hover{box-shadow:var(--sh3)}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+.dot.r{background:var(--run)}.dot.g{background:var(--ok)}.dot.w{background:var(--wait)}.dot.n{background:#C9CDCF}
+.badge{font-size:10.5px;padding:1px 7px;border-radius:999px}
+.badge.g{background:#E7F5EC;color:var(--ok)}.badge.y{background:#FDF3E2;color:var(--wait)}.badge.n{background:#F1F3F5;color:var(--ink2)}.badge.r{background:#FBE9E7;color:var(--run)}.badge.w{background:#FDF3E2;color:var(--wait)}
+/* 顶栏通用 */
+.topbar{position:fixed;top:10px;left:14px;right:14px;display:flex;gap:8px;align-items:center;z-index:30;flex-wrap:wrap}
+.gear{width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--panel);box-shadow:var(--sh1);font-size:14px;display:flex;align-items:center;justify-content:center}
+/* 底部 composer（受保护元素） */
+#composer{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;width:min(680px,calc(100vw - 280px));display:flex;gap:8px;z-index:30}
+#composer input{flex:1;border:1px solid var(--line);background:#fff;border-radius:999px;padding:13px 18px;font-size:13.5px;outline:none;box-shadow:var(--sh3)}
+#composer input:focus{border-color:var(--coal)}
+#composer .go{border:none;background:var(--coal);color:#fff;border-radius:999px;padding:0 22px;font-size:13.5px}
+.pop{position:fixed;z-index:70;background:#fff;border:1px solid var(--line);border-radius:var(--r-panel);box-shadow:var(--sh8);display:none}
+.pop.on{display:block;animation:popin .18s ease-out}
+@keyframes popin{from{opacity:0;transform:translateY(6px)}to{opacity:1}}
+/* 稿1 抽屉 */
+#d1Handle{position:fixed;right:0;top:50%;transform:translateY(-50%);width:30px;height:120px;border-radius:10px 0 0 10px;background:#fff;border:1px solid var(--line);border-right:none;box-shadow:var(--sh3);z-index:35;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;cursor:pointer}
+#d1Handle .bar{width:2px;height:44px;background:var(--ink2);border-radius:2px}
+#d1Drawer{position:fixed;top:56px;bottom:86px;right:12px;width:356px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-panel);box-shadow:var(--sh8);z-index:40;display:none;flex-direction:column;overflow:hidden}
+#d1Drawer.on{display:flex}
+.dtabs{display:flex;gap:6px;padding:12px 14px 0}
+.dtab{font-size:12.5px;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--panel)}
+.dtab.on{background:var(--coal);color:#fff;border-color:var(--coal)}
+.dlist{flex:1;overflow:auto;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.tk{border:1px solid var(--line);border-radius:var(--r-card);padding:10px 12px;cursor:pointer}
+.tk:hover{border-color:var(--coal)}
+.tk .t1{font-size:13px;font-weight:600;display:flex;gap:8px;align-items:center;justify-content:space-between}
+.tk .t2{font-size:11.5px;color:var(--ink2);margin-top:5px;display:flex;gap:10px;align-items:center}
+.tk .prog{height:4px;background:#F0EDE7;border-radius:3px;margin-top:8px;overflow:hidden}
+.tk .prog i{display:block;height:100%;background:var(--run);border-radius:3px}
+.dclose{position:absolute;top:10px;right:10px;border:none;background:none;font-size:16px;color:var(--ink2)}
+/* 稿2 rail */
+#rail{position:fixed;left:0;top:0;bottom:0;width:56px;background:var(--panel);border-right:1px solid var(--line);z-index:35;display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:8px}
+#rail .rbtn{width:38px;height:38px;border-radius:10px;border:1px solid transparent;background:none;position:relative;font-size:15px}
+#rail .rbtn:hover{background:#F5F3EF;border-color:var(--line)}
+#rail .repill{position:relative}
+#rail .rsub{position:absolute;left:58px;top:10px;width:396px;max-height:70vh;overflow:auto;padding:14px;z-index:60}
+#rail .co{width:32px;height:32px;border-radius:10px;background:var(--coal);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600}
+/* 稿3 strip */
+#strip{position:fixed;top:52px;right:14px;width:328px;background:#fff;border:1px solid var(--line);border-radius:var(--r-panel);box-shadow:var(--sh3);z-index:35;padding:12px 14px;cursor:pointer}
+#strip .s1{display:flex;justify-content:space-between;align-items:center;font-size:13px;font-weight:600}
+#strip .s2{font-size:11.5px;color:var(--ink2);margin-top:6px;display:flex;gap:12px;align-items:center}
+#stripX{max-height:0;overflow:hidden;transition:max-height .22s ease-out}
+#stripX.on{max-height:220px}
+.tl{display:flex;gap:0;margin-top:10px;align-items:flex-start}
+.tl i{width:26px;height:4px;border-radius:3px;background:#F0EDE7;margin-top:5px}
+.tl i.d{background:var(--run)}
+.tl .n{font-size:10.5px;color:var(--ink2);position:absolute}
+/* 稿4 board 两态 */
+#modeSw{display:flex;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:3px;box-shadow:var(--sh1)}
+#modeSw button{border:none;background:none;border-radius:999px;padding:7px 16px;font-size:12.5px;color:var(--ink2)}
+#modeSw button.on{background:var(--coal);color:#fff}
+#board{position:fixed;top:56px;bottom:86px;left:calc(56px + 14px);right:14px;background:#fff;border:1px solid var(--line);border-radius:var(--r-panel);box-shadow:var(--sh8);z-index:40;display:none;grid-template-columns:360px 1fr;overflow:hidden}
+#board.on{display:grid}
+.bcol{display:flex;flex-direction:column;min-height:0}
+.blist{overflow:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
+.bhead{padding:12px 16px;border-bottom:1px solid var(--line);font-size:13px;font-weight:600;display:flex;justify-content:space-between;align-items:center}
+.bdetail{overflow:auto;padding:0}
+/* 稿5 dock */
+#dock{position:fixed;right:16px;bottom:84px;z-index:35;display:flex;flex-direction:column;align-items:flex-end;gap:10px}
+.fab{width:46px;height:46px;border-radius:50%;border:1px solid var(--line);background:#fff;box-shadow:var(--sh3);font-size:16px;display:flex;align-items:center;justify-content:center;position:relative}
+#inboxPop{right:16px;bottom:140px;width:320px;max-height:60vh;overflow:auto;padding:12px}
+/* stat bar */
+#statbar{position:fixed;left:14px;bottom:18px;z-index:30}
+/* Tweaks */
+#tweaksBtn{position:fixed;right:16px;bottom:18px;width:38px;height:38px;border-radius:50%;border:1px solid var(--line);background:#fff;box-shadow:var(--sh3);z-index:55}
+#tweaks{position:fixed;right:16px;bottom:64px;width:236px;padding:12px;z-index:55}
+#tweaks label{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;padding:7px 2px;border-bottom:1px dashed var(--line)}
+.tg{width:34px;height:19px;border-radius:999px;background:#E4E7EA;position:relative;transition:.15s}
+.tg::after{content:"";position:absolute;left:2px;top:2px;width:15px;height:15px;border-radius:50%;background:#fff;box-shadow:var(--sh1);transition:.15s}
+.tg.on{background:var(--coal)}.tg.on::after{left:17px}
+/* 悬浮切换条 */
+#switcher{position:fixed;left:50%;transform:translateX(-50%);bottom:64px;display:flex;align-items:center;gap:6px;background:#1c1c1c;color:#fff;border-radius:999px;padding:7px 10px;z-index:65;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+#switcher button{background:none;border:none;color:#fff;font-size:15px;cursor:pointer;padding:0 6px}
+#switcher .label{font-size:12px;color:#ffd479;white-space:nowrap}
+#toast{position:fixed;top:52px;left:50%;transform:translateX(-50%);background:var(--coal);color:#fff;padding:9px 16px;border-radius:999px;font-size:13px;z-index:95;opacity:0;transition:opacity .3s;pointer-events:none}
+body[class*=t-off]{filter:none}
+/* 公司菜单 */
+#cMenu{width:250px}
+.menu-item{padding:9px 11px;border-radius:9px;font-size:13px;cursor:pointer;display:flex;justify-content:space-between;gap:8px}
+.menu-item:hover{background:#F5F4F1}
+.menu-hint{font-size:11px;color:var(--ink2);padding:7px 11px;border-top:1px dashed var(--line);margin-top:4px;line-height:1.5}
+/* 招聘弹窗（定案：中屏弹窗） */
+#hireWrap{position:fixed;inset:0;background:rgba(35,38,42,.4);display:none;align-items:center;justify-content:center;z-index:80}
+#hireWrap.on{display:flex}
+#hireCard{width:min(520px,93vw);max-height:78vh;overflow:auto;padding:20px;position:relative}
+#hireCard h3{font-size:15px;display:flex;justify-content:space-between;align-items:center}
+#hSteps{display:flex;gap:8px;margin:12px 0}
+#hSteps span{flex:1;height:4px;border-radius:3px;background:#EFEDE8}
+#hSteps span.on{background:var(--coal)}
+.roleCard{border:1px solid var(--line);border-radius:var(--r-card);padding:12px;cursor:pointer;margin-bottom:8px}
+.roleCard.sel{border-color:var(--coal);box-shadow:var(--sh1)}
+.kv{font-size:12.5px;color:var(--ink2);line-height:1.85}
+.kv b{color:var(--ink);font-weight:600}
+.btn2{border:1px solid var(--line);background:#fff;border-radius:10px;padding:9px 16px;font-size:13px}
+.btn1{border:1px solid var(--coal);background:var(--coal);color:#fff;border-radius:10px;padding:9px 16px;font-size:13px}
+/* 档案柜/详情 */
+.detail{font-size:12.5px;line-height:2}
+.detail .kv{line-height:1.9}
+.filelist{border:1px dashed var(--line);border-radius:var(--r-card);padding:10px;margin-top:8px;color:var(--ink2);font-size:12px;line-height:1.7}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+
+<div class="chip" style="position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:98;background:var(--coal);color:#ffd479;border:none;cursor:default">PROTOTYPE · 五稿 · 勿提交</div>
+
+<!-- ===================== 稿1 剧场 Stage ===================== -->
+<div class="frame-c" data-d="1">
+  <div class="topbar" style="background:linear-gradient(rgba(250,249,246,.9),rgba(250,249,246,0));padding-bottom:12px">
+    <span class="chip" onclick="coMenuAt(this)"><b>星尘工作室</b> · 软件项目组 ▾</span>
+    <span class="chip"><span class="dot g"></span> 上班中 <span class="num" style="color:var(--ink2)">2/4 工位</span></span>
+    <span style="flex:1"></span>
+    <span class="chip" onclick="enginePop(this)">Engine ⚙ <span class="badge g">codex ✓</span><span class="badge y">pi 配 key</span></span>
+  </div>
+  <div id="d1Handle" onclick="d1Toggle(true)"><div class="bar"></div><span class="badge r num" id="d1Badge" style="border:none;background:var(--run);color:#fff;padding:1px 6px">3</span></div>
+  <div id="d1Drawer">
+    <button class="dclose" onclick="d1Toggle(false)">✕</button>
+    <div class="dtabs"><span class="dtab on">进行中 (1)</span><span class="dtab">待验收 (1)</span><span class="dtab">档案 (1)</span></div>
+    <div class="dlist" id="d1List"></div>
+  </div>
+</div>
+
+<!-- ===================== 稿2 代价轨 Rail ===================== -->
+<div class="frame-c" data-d="2">
+  <div id="rail">
+    <div class="repill">
+      <button class="co" onclick="coMenuAt(this)" title="公司切换">星</button>
+    </div>
+    <div style="height:1px;width:24px;background:var(--line)"></div>
+    <button class="rbtn" id="d2Mail" title="工单台" onclick="d2Toggle()">✉<span class="badge r num" style="position:absolute;top:-4px;right:-6px;border:none;background:var(--run);color:#fff;padding:1px 5px;font-size:10px">3</span></button>
+    <button class="rbtn" title="员工" onclick="toast('花名册浮层（原型）')">👥</button>
+    <div style="flex:1"></div>
+    <button class="rbtn" title="引擎中心" onclick="enginePop(this)">⚙</button>
+  </div>
+  <div class="chip" style="position:fixed;top:10px;left:72px;z-index:30"><b>软件项目组</b><span class="dot g"></span></div>
+  <div class="pop" id="d2Panel" style="left:72px;top:56px;bottom:86px;width:396px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><b style="font-size:13px">工单台</b><button style="border:none;background:none;font-size:15px;color:var(--ink2)" onclick="d2Toggle()">✕</button></div>
+    <div class="dlist" id="d2List" style="flex:unset;max-height:100%"></div>
+  </div>
+</div>
+
+<!-- ===================== 稿3 导演竖幕 Strip ===================== -->
+<div class="frame-c" data-d="3">
+  <div class="topbar">
+    <span class="chip" onclick="coMenuAt(this)"><b>星尘工作室</b> ▾</span><span class="chip">软件组</span>
+    <span style="flex:1"></span>
+    <span class="chip" onclick="openCabinet(this)">档案柜</span>
+    <span class="gear" onclick="enginePop(this)">⚙</span>
+  </div>
+  <div id="strip" onclick="stripToggle()">
+    <div class="s1"><span><span class="dot r"></span> 任务 #1</span><span class="num" style="color:var(--ink2)" id="stripTok">18.3k tok</span></div>
+    <div class="s2"><span>导出 CSV 功能</span><span>步骤 3/4</span></div>
+    <div class="prog" style="height:4px;background:#F0EDE7;border-radius:3px;margin-top:8px"><i style="display:block;width:75%;height:100%;background:var(--run);border-radius:3px"></i></div>
+    <div class="tl" id="tlRow"></div>
+    <div id="stripX" onclick="event.stopPropagation()">
+      <div class="detail" style="margin-top:12px">
+        <div><b>1.</b> 读懂 CLI 结构 <b style="color:var(--ok)">✓</b></div>
+        <div><b>2.</b> add export 子命令 <b style="color:var(--ok)">✓</b></div>
+        <div><b>3.</b> 写三条测试 <b style="color:var(--ok)">✓</b></div>
+        <div><b style="color:var(--wait)">4.</b> 自验后 commit（进行中）</div>
+        <div style="margin-top:8px;color:var(--ink2)">阿码 · pi · 自己 commit（06 票）</div>
+      </div>
+    </div>
+  </div>
+  <div class="chip" id="stripCabinet" style="position:fixed;top:10px;display:none" onclick="openCabinet(this)">
+  </div>
+</div>
+
+<!-- ===================== 稿4 双世界 Modes ===================== -->
+<div class="frame-c" data-d="4">
+  <div class="topbar">
+    <span class="chip" onclick="coMenuAt(this)"><b>星尘工作室</b> ⇄</span>
+    <span style="flex:1"></span>
+    <div id="modeSw">
+      <button class="on" id="m1" onclick="setMode('office')">① 办公室</button>
+      <button id="m2" onclick="setMode('board')">② 工单台 <span style="opacity:.6">⌘2</span></button>
+    </div>
+    <span class="gear" onclick="enginePop(this)">⚙</span>
+  </div>
+  <div id="board">
+    <div class="bcol">
+      <div class="bhead">工单台<span class="chip" style="cursor:default"><span class="dot g"></span> 办公室在后台继续运行</span></div>
+      <div class="blist" id="d4List" style="border-right:1px solid var(--line)"></div>
+    </div>
+    <div class="bcol">
+      <div class="bhead">详情</div>
+      <div class="bdetail" id="d4Detail"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== 稿5 信箱 Dock ===================== -->
+<div class="frame-c" data-d="5">
+  <div class="topbar">
+    <span class="chip" onclick="coMenuAt(this)">◷ <b>星尘</b> ▾</span>
+    <span style="flex:1"></span>
+    <span class="gear" onclick="enginePop(this)">⚙</span>
+  </div>
+  <div id="dock">
+    <button class="fab" onclick="openCabinet(this)" title="档案柜">🗄</button>
+    <button class="fab" id="d5Mail" onclick="d5Toggle()" title="收件箱" style="border-color:var(--coal)">
+      ✉<span class="badge r num" style="position:absolute;top:-5px;right:-5px;border:none;background:var(--run);color:#fff;padding:1px 6px;font-size:10.5px">3</span>
+    </button>
+  </div>
+  <div class="pop" id="d5Pop" style="width:330px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><b style="font-size:13px">收件箱</b><button style="border:none;background:none;color:var(--ink2);font-size:15px" onclick="d5Toggle()">✕</button></div>
+    <div class="dlist" id="d5List" style="flex:unset"></div>
+  </div>
+</div>
+
+<!-- ============ 共享：输入 / 招聘 / 引擎 / 公司菜单 / 档案柜 ============ -->
+<div id="composer">
+  <input id="compIn" placeholder="对阿码说句话：「给项目加一个把任务导出成 CSV 的功能，要有测试」"/>
+  <button class="go" onclick="sendTask()">派活 ▶</button>
+</div>
+<div class="chip" id="statbar"><span class="dot g"></span>工作中 · <span class="num" id="statTok">0 tok</span> · 重启不丢 · 切公司不中断</div>
+
+<div class="pop" id="cMenu">
+  <div class="menu-item"><b>星尘工作室</b><span>✓ 当前</span></div>
+  <div class="menu-item" onclick="toast('切到第二家公司 —— 后台任务不中断（13 票）')">未命名公司 · 软件项目组<span class="badge y">2 活跃</span></div>
+  <div class="menu-item" onclick="toast('新建公司 = 回到开场向导（10 票）')">＋ 新建公司…</div>
+  <div class="menu-hint">切换只是换视图；进行中的工作继续跑，程序退出才中断。</div>
+</div>
+
+<div class="pop" id="engPop" style="width:360px;padding:14px">
+  <div style="display:flex;justify-content:space-between;margin-bottom:10px"><b style="font-size:13px">引擎中心</b><button style="border:none;background:none;color:var(--ink2)" onclick="hidePop('engPop')">✕</button></div>
+  <div class="eCard" style="display:flex;justify-content:space-between;align-items:center;border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:7px;font-size:13px"><div><b>pi</b> · 默认引擎<div class="kv">SDK 型 · 事件最全 · MIT</div></div><span class="badge y">待配 key</span></div>
+  <div class="eCard" style="display:flex;justify-content:space-between;align-items:center;border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:7px;font-size:13px"><div><b>codex</b><div class="kv">本机 CLI · Apache-2.0</div></div><span class="badge g">已登录</span></div>
+  <div class="eCard" style="display:flex;justify-content:space-between;align-items:center;border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:7px;font-size:13px"><div><b>dsh</b><div class="kv">本机桌面 · 专有</div></div><span class="badge g">可用</span></div>
+  <div class="eCard" style="display:flex;justify-content:space-between;align-items:center;border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:7px;font-size:13px"><div><b>claude / qoder / gemini</b><div class="kv">未安装</div></div><span class="badge n">未装</span></div>
+  <div class="kv">单任务默认 <b class="num">500,000</b> token 软闸（04 票）· 只调用本机自装（14 票）</div>
+</div>
+
+<div class="pop" id="cabinet" style="left:50%;top:50%;transform:translate(-50%,-50%);width:min(680px,94vw);max-height:76vh;overflow:auto;padding:16px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><b style="font-size:14px">档案柜 · 全部工单</b><button style="border:none;background:none;color:var(--ink2);font-size:16px" onclick="hidePop('cabinet')">✕</button></div>
+  <div id="bcabList"></div>
+</div>
+
+<div id="hireWrap"><div class="pop wire" id="hireCard" style="position:static;box-shadow:var(--sh8)">
+  <h3>招聘<button style="border:none;background:none;color:var(--ink2);font-size:14px" onclick="hideHire()">✕</button></h3>
+  <div id="hSteps"><span class="on"></span><span></span><span></span></div>
+  <div id="hBody"></div>
+</div></div>
+
+<button id="tweaksBtn" onclick="$('tweaks').classList.toggle('on')">✥</button>
+<div class="pop" id="tweaks">
+  <b style="font-size:12.5px">Tweaks</b>
+  <label>头顶名牌<input type="checkbox" class="tg on" onchange="TW.name=this.checked" checked></label>
+  <label>员工气泡<input type="checkbox" class="tg on" onchange="TW.bub=this.checked" checked></label>
+  <label>呼吸/敲击幅度<input type="checkbox" class="tg" onchange="TW.calm=this.checked"></label>
+</div>
+
+<div id="switcher">
+  <button id="pV">◀</button><span class="label" id="vLabel"></span><button id="nV">▶</button>
+</div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+/* ============ 共享状态 ============ */
+const $=id=>document.getElementById(id);
+const DRAFTS=["Stage 剧场","Rail 后台轨","Strip 导演竖幕","Modes 双世界","Dock 信箱"];
+let draft=Number(new URLSearchParams(location.search).get("d")||1);
+if(!(draft>=1&&draft<=5))draft=1;
+const TW={name:true,bub:true,calm:false};
+const ST={mode:"office",tokens:12400,arcOpen:false,bubble:0};
+const TICKETS=[
+ {id:1,t:"给项目加导出 CSV 功能",st:"进行中",stc:"r",who:"阿码 · pi",meta:"步骤 3/4 · 自己 commit",prog:75,art:"diff 3 文件 +42/-20 · 测试 5 passed · 12.4k tok"},
+ {id:2,t:"产品说明文档初稿",st:"待验收",stc:"w",who:"文文 · pi",meta:"收尾报告就绪",prog:100,art:"docs/spec.md · 收尾报告 220 字 · 6.2k tok"},
+ {id:3,t:"整理待办导出脚本",st:"已完成",stc:"g",who:"阿码 · pi",meta:"已 commit a1c3f5",prog:100,art:"scripts/touchup.js · 3.1k tok"}
+];
+/* ============ 工单卡 HTML ============ */
+function tkCard(i,detail=false){
+  const t=TICKETS[i];
+  const stBadge=`<span class="badge ${t.stc}">${t.st}</span>`;
+  return `<div class="tk" onclick="tkDetail(${i})" style="${detail?"border-color:var(--coal)":""}">
+    <div class="t1"><span>${t.t}</span>${stBadge}</div>
+    <div class="t2"><span class="dot ${t.stc}"></span>${t.who}<span>${t.meta}</span></div>
+    <div class="prog"><i style="width:${t.prog}%;background:var(${t.stc==="r"?"--run":t.stc==="y"?"--wait":"--ok"})"></i></div>
+    ${detail?`<div class="filelist">${t.art}</div>`:""}
+  </div>`;
+}
+function listHTML(ids){return ids.map(i=>tkCard(i)).join("")}
+function detailHTML(i){const t=TICKETS[i];return `<div style="padding:14px">
+  <div style="font-size:15px;font-weight:700;margin-bottom:4px">工单 #${t.id} · ${t.t}</div>
+  <div class="kv" style="color:var(--ink2);margin-bottom:10px">${t.who} · 员工自主 commit（06 票）· 失败也入镜（01 票）</div>
+  <div class="detail"><b>四件套</b>（06 票）<div class="filelist">${t.art}</div></div>
+  <div style="display:flex;gap:8px;margin-top:12px">${t.st==="待验收"?`<button class="btn1" onclick="verdict(1)">通过</button><button class="btn2" onclick="verdict(0)">打回</button>`:`<span class="badge ${t.stc}">${t.st}</span>`}</div>
+</div>`}
+function verdict(pass){toast(pass?"已通过 · 任务完成":"已打回 · 同任务追加迭代")}
+/* ============ 各稿域名行为 ============ */
+function d1Toggle(on){$("d1Drawer").classList.toggle("on",on);if(on)$("d1Badge").style.display="none";else $("d1Badge").style.display="";}
+function d2Toggle(){$("d2Panel").classList.toggle("on")}
+function d5Toggle(){
+  const p=$("d5Pop");
+  if(p.classList.contains("on")){hidePop("d5Pop");return;}
+  showPop("d5Pop",$("d5Mail")); // 底部 FAB 锚点 → 自动翻到按钮上方
+  p.style.left="auto";p.style.right="16px";
+}
+function stripToggle(){$("stripX").classList.toggle("on");}
+function setMode(m){ST.mode=m;$("m1").classList.toggle("on",m==="office");$("m2").classList.toggle("on",m==="board");
+  $("board").classList.toggle("on",m==="board");}
+function openCabinet(el){$("bcabList").innerHTML=listHTML([0,1,2]);showPop("cabinet",el);}
+function sendTask(){
+  const v=$("compIn").value.trim();if(!v)return;
+  const el=document.createElement("div");el.className="tk";
+  el.innerHTML=`<div class="t1"><span>${v.length>26?v.slice(0,26)+"…":v}</span><span class="badge r">排程中</span></div><div class="t2">规划调用 → 建 #4（08 票）</div>`;
+  ($("d1List")||$("d2List")).prepend(el);
+  toast("已创建工单 · 规划调用确认后派给阿码（08 票）");$("compIn").value="";
+}
+/* pop 定位开关 */
+let curPop=null;
+function showPop(id,anchor){
+  const p=$(id);p.classList.add("on");
+  if(anchor){const r=anchor.getBoundingClientRect();
+    p.style.left=Math.min(innerWidth-p.offsetWidth-12,Math.max(12,r.left))+"px";
+    p.style.top=(r.bottom+8)+"px";
+    if(r.bottom+330>innerHeight)p.style.top=Math.max(10,r.top-p.offsetHeight-8)+"px";}
+  curPop=id;
+}
+function hidePop(id){if(!id)return;const el=$(id);if(el)el.classList.remove("on");curPop=null;}
+function coMenuAt(el){showPop("cMenu",el);}
+function enginePop(el){showPop("engPop",el);}
+document.addEventListener("pointerdown",e=>{
+  if(!e.target.closest(".pop")&&!e.target.closest(".chip")&&!e.target.closest(".rbtn")&&!e.target.closest(".gear")&&!e.target.closest("#coCard")){if(curPop)hidePop(curPop);}
+});
+/* ============ 招聘三步（定案：中屏） ============ */
+const ROLES=[["程序员 · 阿码","🟥","承接「加功能/修 bug」playbook；git 工作流 + 测试先行"],
+ ["测试 · 编编","🟩","跑测试与验收辅助；命令测试优先"],
+ ["产品经理 · 文文","🟪","「写文档」playbook；规划调用的人格载体"]];
+let hireStep=0,roleSel=0,hired=false,hiredIdx=-1;
+function openHire(){hireStep=0;renderHire();$("hireWrap").classList.add("on");}
+function hideHire(){$("hireWrap").classList.remove("on");}
+function renderHire(){
+  $("hBody").innerHTML=[
+   `<div class="kv" style="margin-bottom:10px"><b>① 选预设角色</b>（招聘三步 · 10 票定案）</div>`+
+   ROLES.map((r,i)=>`<div class="roleCard ${roleSel===i?"sel":""}" onclick="roleSel=${i};renderHire()"><b>${r[1]} ${r[0]}</b><div class="kv">${r[2]}</div></div>`).join(""),
+   `<div class="kv" style="margin-bottom:10px"><b>② 能力清单</b>（此刻<b>快照</b>固化 · 05 票）</div>
+    <div class="kv"><b>人格</b>：工程师语气 · 动手前先说计划 · 汇报说人话<br>
+    <b>技能</b>：git 工作流（<b>自己 commit</b> · 不主动 push · 06 票）· 测试先行<br>
+    <b>工具</b>：read/write/edit/grep · bash（07 票策略已挂）<br>
+    <b>引擎</b>：pi <span class="badge y">待配 key →</span>　<b>成本</b>：50 万 tok 软闸</div>`,
+   `<div class="kv" style="margin-bottom:10px"><b>③ 确认录用</b></div>
+    <div class="kv">✔ 创建 <b>${ROLES[roleSel][0]}</b>（02 票快照语义）<br>✔ 独立会话目录 · 不碰你本机引擎设置（03/04 票）<br>✔ 占用工位 2/4；离职归档，历史保留</div>`
+  ][hireStep];
+  [...$("hSteps").children].forEach((s,i)=>s.classList.toggle("on",i<=hireStep));
+  $("hBody").innerHTML+=`<div style="display:flex;justify-content:space-between;margin-top:14px">
+  <button class="btn2" onclick="hireStep=Math.max(0,hireStep-1);renderHire()">← 上一步</button>
+  ${hireStep<2?`<button class="btn1" onclick="hireStep++;renderHire()">下一步 →</button>`:`<button class="btn1" onclick="doHire()">录用 ✅</button>`}</div>`;
+}
+function doHire(){
+  hired=true;hiredIdx=roleSel;$("hireWrap").classList.remove("on");
+  TICKETS.push({id:4,t:"（欢迎工单：熟悉工作区）",st:"进行中",stc:"r",who:ROLES[roleSel][0],meta:"入职引导",prog:5,art:"员工已就位"});
+  refreshLists();toast("录用完成 · 工位点亮 · 欢迎"+"🎉".slice(0,0));toast(ROLES[roleSel][0]+" 已入职，工位点亮 ✅");
+}
+function refreshLists(){
+  const ids=[0,1,2];
+  $("d1List").innerHTML=listHTML(ids.filter(i=>TICKETS[i].st!=="已完成"))+listHTML([TICKETS.findIndex(t=>t.st==="已完成")]).slice(0,0)+"";
+  $("d1List").innerHTML=listHTML([0,1])+(hired?`<div class="kv" style="text-align:center;color:var(--ink2)">— 档案 —</div>`+tkCard(2):tkCard(2));
+  $("d2List").innerHTML=listHTML([0,1,2])+(hired?tkCard(3):"");
+  $("d4List").innerHTML=listHTML([0,1,2])+(hired?tkCard(3):"");$("d4Detail").innerHTML=detailHTML(0);
+  $("d5List").innerHTML=listHTML([0,1,2]);
+  $("bcabList").innerHTML=listHTML([0,1,2])+(hired?tkCard(3):"");
+}
+function tkDetail(i){
+  if(draft===1){$("d1List").innerHTML=tkCard(i,true)+listHTML([0,1,2].filter(x=>x!==i));}
+  else if(draft===2){$("d2List").innerHTML=tkCard(i,true)+listHTML([0,1,2].filter(x=>x!==i));}
+  else if(draft===4){$("d4Detail").innerHTML=detailHTML(i);}
+  else if(draft===5){$("d5List").innerHTML=tkCard(i,true)+listHTML([0,1,2].filter(x=>x!==i));}
+}
+/* ============ 切换 ============ */
+function setDraft(d){draft=d;
+  document.querySelectorAll(".frame-c").forEach(f=>f.style.display=(Number(f.dataset.d)===d)?"block":"none");
+  $("vLabel").textContent="稿"+d+" "+DRAFTS[d-1];
+  try{hidePop(curPop);refreshLists();}catch(err){console.erronly&&0;}
+  const u=new URL(location);u.searchParams.set("d",d);history.replaceState(null,"",u);
+  setModeSafe();
+}
+function setModeSafe(){if(draft!==4){setMode("office");}}
+$("pV").onclick=()=>setDraft(draft===1?5:draft-1);
+$("nV").onclick=()=>setDraft(draft===5?1:draft+1);
+addEventListener("keydown",e=>{
+  if(/INPUT|TEXTAREA/.test((document.activeElement||{}).tagName||""))return;
+  if(e.key==="ArrowLeft")$("pV").click();
+  if(e.key==="ArrowRight")$("nV").click();
+});
+/* ============ 办公室画布（09 票既定舞台，共用） ============ */
+const cv=$("cv"),ctx=cv.getContext("2d");
+function fit(){const d=devicePixelRatio||1;cv.width=innerWidth*d;cv.height=innerHeight*d;cv.style.width=innerWidth+"px";cv.style.height=innerHeight+"px";ctx.setTransform(d,0,0,d,0,0)}
+addEventListener("resize",fit);fit();
+function rr(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath()}
+function toast(m){const t=$("toast");t.textContent=m;t.style.opacity=1;clearTimeout(t._h);t._h=setTimeout(()=>t.style.opacity=0,2000)}
+const FRA=[0.14,0.345,0.575,0.805];
+function insetLeft(){return draft===2?72:0;}
+function deskX(f){const wl=insetLeft();return wl+(innerWidth-wl)*f}
+function deskY(){return innerHeight*0.60}
+function worker(){return draft>=0}
+const SCARF={0:"#E2574C",1:"#1E7C46",2:"#7C4DBE"};
+const BUBBLES=["正在读 cli.ts","正在写 export.ts","测试 5 passed ✅","统一 UTC 时区…","git commit a1b2c3"];
+function drawOffice(t){
+  const o={dy:deskY()};
+  const g=ctx.createLinearGradient(0,innerHeight*.2,0,innerHeight);g.addColorStop(0,"#FBF9F6");g.addColorStop(1,"#EDE7DF");
+  ctx.fillStyle=g;ctx.fillRect(0,0,innerWidth,innerHeight);
+  if(ST.mode==="board"&&draft===4){ctx.fillStyle="rgba(240,237,230,.72)";ctx.fillRect(0,0,innerWidth,innerHeight);}
+  /* 门 */
+  ctx.fillStyle="#DAD3C8";rr(ctx,deskX(-0.02)+0,o.dy-4,12,innerHeight*0.5,6);ctx.fill();
+  /* 咖啡机 */
+  drawCoffee(deskX(0.94),o.dy-64);
+  /* 沙发 */
+  drawCouch(deskX(0.9),innerHeight*.83);
+  /* 绿植 */
+  drawPlant(deskX(0.03),innerHeight*.78);
+  /* 地毯 */
+  ctx.fillStyle="rgba(226,87,76,.06)";ctx.beginPath();ctx.ellipse(deskX(0.36),innerHeight*.86,innerWidth*.13,innerHeight*.045,0,0,7);ctx.fill();
+  /* 桌位 */
+  FRA.forEach((f,i)=>{
+    const occ=(i===0)||(hired&&i===1);
+    deskUnit(deskX(f),o.dy,occ,i===1&&!hired);
+  });
+  /* 名牌（Tweaks 可关） */
+  if(TW.name){
+    namePlate(deskX(FRA[0]),o.dy-innerHeight*0.155,"阿码 · 程序员",STATENAME(),Math.round(ST.tokens));
+    if(hired)namePlate(deskX(FRA[1]),o.dy-innerHeight*0.155,"编编 · 测试","入职引导",Math.round(ST.tokens*0.35));
+    else namePlate(deskX(FRA[1]),o.dy-innerHeight*0.155,"空工位 · 招聘","点击开三步",null);
+  }
+  /* 气泡（Tweaks 可关） */
+  if(TW.bub){
+    const txt=BUBBLES[ST.bubble%BUBBLES.length];
+    const x=(hired&&ST.bubble%3===2)?deskX(FRA[1]):deskX(FRA[0]);
+    bubble(x,o.dy-innerHeight*0.185,txt);
+  }
+}
+const STATENAME=()=>["读文件","写代码","跑测试","自验提交","收尾"][ST.bubble%5];
+function drawCoffee(x,y){ctx.fillStyle="#fff";ctx.strokeStyle="#E0D9CE";rr(ctx,x-24,y,48,54,10);ctx.fill();ctx.stroke();
+  ctx.fillStyle="#8A8F98";ctx.font="14px serif";ctx.fillText("☕",x-7,y+30);ctx.fillStyle="#EDE8DF";ctx.fillRect(x-12,y+38,24,9);}
+function drawCouch(x,y){ctx.fillStyle="#D8CDBB";rr(ctx,x-64,y-24,128,42,14);ctx.fill();ctx.fillStyle="#CBBFAA";rr(ctx,x-72,y-34,144,14,8);ctx.fill();}
+function drawPlant(x,y){ctx.fillStyle="#C9B99F";ctx.fillRect(x-9,y-4,18,16);ctx.fillStyle="#7FA37C";ctx.beginPath();ctx.ellipse(x,y-18,13,17,0,0,7);ctx.fill();ctx.beginPath();ctx.ellipse(x-11,y-10,8,11,.5,0,7);ctx.fill();ctx.beginPath();ctx.ellipse(x+11,y-10,8,11,-.5,0,7);ctx.fill();}
+function deskUnit(x,y,occ,isHire){
+  const wd=Math.min(205,innerWidth*0.185);
+  ctx.fillStyle=occ?"#fff":"#FCFAF7";ctx.strokeStyle="#E3DDD2";rr(ctx,x-wd/2,y-30,wd,30,8);ctx.fill();ctx.stroke();
+  ctx.fillStyle="#CFC8BD";ctx.fillRect(x-wd/2+14,y,8,48);ctx.fillRect(x+wd/2-22,y,8,48);
+  /* 电脑 */
+  ctx.fillStyle="#20242B";rr(ctx,x-41,y-86,82,52,7);ctx.fill();
+  ctx.fillStyle="#CFC8BD";ctx.fillRect(x-4,y-38,8,10);
+  const w2=ctx;ctx.save();rr(w2,x-37,y-82,74,44,4);w2.clip();
+  w2.fillStyle="#10141B";w2.fillRect(x-37,y-82,74,44);
+  if(occ){const pal=["#5B8CFF","#7EE1A0","#FFB454","#FF7A9E","#8CE9FF"];
+    for(let i=0;i<7;i++){w2.fillStyle=pal[i%5];w2.globalAlpha=.85;
+      const wob=Math.sin(performance.now()/240+i*1.6)*22;w2.fillRect(x-31,y-78+i*6,66-Math.abs(2-i*4)-Math.abs(wob)*0.8,3);}w2.globalAlpha=1;}
+  else{w2.fillStyle="#1d232e";w2.fillRect(x-37,y-82,74,44);}
+  w2.restore();
+  if(isHire&&!hired){ctx.fillStyle="#1E7C46";rr(ctx,x-30,y-72,60,22,11);ctx.fill();ctx.fillStyle="#fff";ctx.font="600 11px system-ui";ctx.fillText("＋ 招聘",x-16,y-57);}
+  if(occ){
+    const seat=workerSeat(x);
+    charSeat(seat.x,seat.y,t0,SCARF[seat.k],TW.calm);
+  }
+}
+let seatK=0;
+function workerSeat(x){/* 桌1=红 桌2=绿 */
+  const isD2=Math.abs(x-deskX(FRA[1]))<10;return{x:x-2,y:deskY()-34,k:isD2?1:0};}
+function charSeat(x,y,t,scarf,calm){
+  const bob=Math.sin(t*(calm?2.2:4.4))*(calm?0.8:1.8);
+  ctx.fillStyle="#2E3138";rr(ctx,x-14,y-8+bob,28,28,11);ctx.fill();
+  ctx.fillStyle="#F2C9A0";ctx.beginPath();ctx.arc(x,y-18+bob,11,0,7);ctx.fill();
+  ctx.fillStyle=scarf;ctx.fillRect(x-9,y-13+bob,18,5);
+  const a=Math.sin(t*(calm?7:12))*2.0;ctx.fillStyle="#F2C9A0";
+  ctx.beginPath();ctx.arc(x-16,y+9+a,3.2,0,7);ctx.arc(x+16,y+9-a,3.2,0,7);ctx.fill();
+}
+function namePlate(cx,cy,name,state,tokens){
+  ctx.font="600 12px system-ui";
+  const t1=name;const w=Math.max(ctx.measureText(t1).width,86)+18,h=tokens==null?34:46;
+  ctx.save();ctx.shadowColor="rgba(35,38,42,.08)";ctx.shadowBlur=6;ctx.fillStyle="#fff";rr(ctx,cx-w/2,cy-h,w,h,10);ctx.fill();ctx.restore();
+  ctx.strokeStyle="#E7E4DE";ctx.strokeRect(cx-w/2+0.5,cy-h+0.5,w-1,h-1);
+  ctx.fillStyle="#23262A";ctx.fillText(t1,cx-w/2+9,cy-24);
+  ctx.fillStyle="#8A8F98";ctx.font="11px system-ui";
+  ctx.fillText(tokens==null?state:(Math.round(tokens/100)/10).toFixed(1)+"k tok · "+state,cx-w/2+9,cy-9);
+}
+function bubble(cx,cy,txt){
+  ctx.font="12px system-ui";const w=ctx.measureText(txt).width+20,h=26;
+  ctx.save();ctx.shadowColor="rgba(35,38,42,.10)";ctx.shadowBlur=8;ctx.shadowOffsetY=2;ctx.fillStyle="#1F4FA8";rr(ctx,cx-w/2,cy-40,w,h,13);ctx.fill();ctx.restore();
+  ctx.fillStyle="#fff";ctx.fillText(txt,cx-w/2+10,cy-23);
+}
+/* 空工位点击 → 招聘弹窗 */
+cv.addEventListener("pointerdown",e=>{
+  if(hired)return;
+  const x=deskX(FRA[1]),y=deskY();
+  if(Math.abs(e.clientX-x)<Math.min(205,innerWidth*0.185)/2&&e.clientY>y-90&&e.clientY<y+10)openHire();
+});
+/* 循环 */
+let t0=0,last=performance.now(),sec=0;
+function loop(){
+  const now=performance.now();const dt=Math.min(.05,(now-last)/1000);last=now;t0+=dt;
+  ST.tokens+=dt*(ST.mode==="board"?0:1500);
+  sec+=dt;if(sec>7){sec=0;ST.bubble++;}
+  $("statTok").textContent=(Math.round(ST.tokens/100)/10).toFixed(1)+"k tok";
+  const st=$("stripTok");if(st)st.textContent=(Math.round(ST.tokens/100)/10).toFixed(1)+"k tok";
+  ctx.clearRect(0,0,innerWidth,innerHeight);
+  drawOffice(t0);
+  requestAnimationFrame(loop);
+}
+/* mount */
+setDraft(draft);
+refreshLists();
+requestAnimationFrame(loop);
+</script>
+<script>
+/* 修复：label 元素 */
+$("vLabel").textContent="稿"+draft+" "+DRAFTS[draft-1];
+/* strip 时间线填充（稿3） */
+(function(){const arr=[1,1,1,0];$("tlRow").innerHTML=arr.map(v=>`<i class="${v?"d":""}"></i>`).join("");})();
+/* 键盘 ⌘1/⌘2（稿4） */
+addEventListener("keydown",e=>{
+  if(draft===4&&!/INPUT|TEXTAREA/.test((document.activeElement||{}).tagName||"")){
+    if(e.key==="1")setMode("office");
+    if(e.key==="2")setMode("board");
+  }
+});
+</script>
+</body>
+</html>

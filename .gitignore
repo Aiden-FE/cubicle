@@ -1,0 +1,31 @@
+# 依赖
+node_modules/
+.pnpm-store/
+
+# 构建产物
+dist/
+out/
+release/
+build/
+*.tsbuildinfo
+.vite/
+coverage/
+
+# 日志与临时文件
+*.log
+npm-debug.log*
+logs/
+tmp/
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# 本地密钥（引擎 key 绝不入库）
+.env
+.env.*
+*.pem
+secrets/

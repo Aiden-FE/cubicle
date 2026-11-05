@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8"/>
+<title>Cubicle · PROTOTYPE 10 首次启动与信息架构（会丢弃，勿提交）</title>
+<!--
+  PROTOTYPE（wayfinder 10 票）。问题：第一次打开的那 30 秒长什么样？主界面各块站哪？
+  三个结构截然不同的开场，?variant= 切换 / 悬浮条 / ←→ 键：
+  A (one-card)  一张卡开场：办公室背景 + 「给公司起个名字」，30 秒直进办公室
+  B (wizard)    传统三步向导：欢迎页 → 公司信息 → 模板选择 → 办公室
+  C (zero-config) 零配置直进：一打开就是活办公室，公司名等信息用空态卡渐进补齐
+  交互点：招聘三步弹窗（05 票清单）· 引擎中心弹窗（04 票徽章）· 公司切换器（13 票语义）
+  纯 DOM 线框级原型（低保真，定结构与流程，不美容）。
+-->
+<style>
+  *{box-sizing:border-box;margin:0}
+  html,body{height:100%;font-family:system-ui,"Segoe UI","Microsoft YaHei",sans-serif;background:#F2F4F6;color:#22262B;overflow:hidden}
+  .frame{position:fixed;inset:0;display:none}
+  .frame.active{display:block}
+  /* 线框元素 */
+  .wire{background:#fff;border:1.5px solid #D9DDE1;border-radius:12px}
+  .ghost{background:#EDEFF2;border:1.5px dashed #C4CBD3;border-radius:10px;color:#866}
+  .btn{border:1.5px solid #D9DDE1;background:#fff;border-radius:10px;padding:10px 18px;font-size:14px;cursor:pointer}
+  .btn.primary{background:#2F6FED;border-color:#2F6FED;color:#fff}
+  .btn:hover{filter:brightness(.98)}
+  input[type=text]{border:1.5px solid #D9DDE1;border-radius:10px;padding:10px 12px;font-size:14px;outline:none;width:100%}
+  input[type=text]:focus{border-color:#2F6FED}
+  .tpl-pill{border:1.5px solid #D9DDE1;background:#fff;border-radius:999px;padding:8px 14px;font-size:13px;cursor:pointer}
+  .tpl-pill.sel{border-color:#2F6FED;background:#2F6FED14;color:#2F6FED;font-weight:600}
+  /* 顶栏（shell） */
+  #shellTop{position:fixed;top:10px;left:12px;right:12px;display:flex;gap:8px;align-items:center;z-index:30;flex-wrap:wrap}
+  .chip{display:flex;align-items:center;gap:6px;background:#fff;border:1.5px solid #D9DDE1;border-radius:10px;padding:8px 12px;font-size:13px;cursor:pointer;position:relative}
+  .chip.b{border-color:#2F6FED}
+  #companyMenu{position:absolute;top:44px;left:0;min-width:240px;background:#fff;border:1.5px solid #D9DDE1;border-radius:12px;padding:6px;display:none;box-shadow:0 8px 24px #0002;z-index:50}
+  .menu-item{padding:9px 10px;border-radius:8px;font-size:13px;cursor:pointer;display:flex;justify-content:space-between;gap:10px}
+  .menu-item:hover{background:#F2F4F6}
+  .menu-hint{font-size:11px;color:#8A8F98;padding:6px 10px;border-top:1px dashed #E4E7EA;margin-top:4px}
+  /* 主布局 */
+  #shellMain{position:fixed;top:64px;bottom:86px;left:12px;right:12px;display:grid;grid-template-columns:1fr 330px;gap:12px}
+  #officeBox{position:relative;overflow:auto}
+  .deskRow{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;padding:22px}
+  .desk{height:150px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;font-size:13px;color:#4A4F55}
+  .desk .mon{width:76px;height:52px;background:#28303B;border-radius:6px}
+  .desk .tbl{width:120px;height:12px;background:#fff;border:1.5px solid #D9DDE1;border-radius:6px}
+  .desk.flash{border-color:#2F6FED;cursor:pointer}
+  .desk.flash .hire{color:#2F6FED;font-weight:700}
+  .rightCol{display:flex;flex-direction:column;gap:12px}
+  .pane{padding:12px}
+  .pane h4{font-size:13px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+  .plog{font-size:12px;color:#5A616B;line-height:1.7;font-family:ui-monospace,Consolas,monospace;max-height:260px;overflow:auto}
+  #inputbar{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;width:min(720px,92vw);display:flex;gap:8px;z-index:30}
+  #taskInput{flex:1;border:1.5px solid #D9DDE1;background:#fff;border-radius:12px;padding:12px 14px;font-size:14px;outline:none}
+  /* 弹窗 */
+  .modalWrap{position:fixed;inset:0;background:#22262B55;display:none;align-items:center;justify-content:center;z-index:60}
+  .modalWrap.on{display:flex}
+  .modal{width:min(560px,94vw);max-height:80vh;overflow:auto;padding:18px}
+  .modal h3{font-size:15px;margin-bottom:12px;display:flex;justify-content:space-between}
+  .stepper{display:flex;gap:8px;margin-bottom:14px}
+  .stepper span{flex:1;height:5px;background:#E4E7EA;border-radius:4px}
+  .stepper span.on{background:#2F6FED}
+  .roleCard{border:1.5px solid #D9DDE1;border-radius:12px;padding:12px;cursor:pointer}
+  .roleCard.sel{border-color:#2F6FED;background:#2F6FED0d}
+  .kv{font-size:12.5px;color:#4A4F55;line-height:1.8}
+  .kv b{color:#22262B}
+  .badge{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid transparent}
+  .badge.g{background:#E7F5EC;color:#1E7C46;border-color:#BFE3CC}
+  .badge.y{background:#FDF3E2;color:#B46A00;border-color:#F2D9AC}
+  .badge.n{background:#F1F3F5;color:#8A8F98;border-color:#E0E3E7}
+  .eCard{display:flex;justify-content:space-between;align-items:center;border:1.5px solid #D9DDE1;border-radius:12px;padding:10px 12px;margin-bottom:8px;font-size:13px}
+  /* 悬浮条 */
+  #switcher{position:fixed;left:50%;transform:translateX(-50%);bottom:76px;display:flex;align-items:center;gap:8px;background:#1c1c1c;color:#fff;border-radius:999px;padding:7px 10px;z-index:40;box-shadow:0 6px 18px #0004}
+  #switcher button{background:none;border:none;color:#fff;font-size:15px;cursor:pointer;padding:0 6px}
+  #switcher .label{font-size:12px;color:#ffd479;white-space:nowrap}
+  #toast{position:fixed;top:52px;left:50%;transform:translateX(-50%);background:#22262B;color:#fff;padding:9px 16px;border-radius:999px;font-size:13px;z-index:90;opacity:0;transition:opacity .3s;pointer-events:none}
+  .prototag{background:#2b2b2b;color:#ffd479;font-size:11px;padding:5px 10px;border-radius:999px;letter-spacing:1px}
+  .skip{font-size:12px;color:#8A8F98;cursor:pointer;text-decoration:underline}
+</style>
+</head>
+<body>
+<span class="prototag" style="position:fixed;top:10px;right:12px;z-index:99">PROTOTYPE · 勿提交</span>
+
+<!-- A：一张卡开场 -->
+<div class="frame" id="fA">
+  <div style="position:absolute;inset:0;background:#EFECE6"></div>
+  <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+    <div class="wire" style="width:min(480px,92vw);padding:26px;text-align:center">
+      <div style="font-size:22px;font-weight:700">给你的公司起个名字</div>
+      <div style="font-size:13px;color:#8A8F98;margin:8px 0 16px">一间办公室、几个空工位，马上开工。以后可以再开别的公司。</div>
+      <input type="text" id="aName" value="星尘工作室"/>
+      <div style="display:flex;gap:8px;justify-content:center;margin:14px 0;flex-wrap:wrap" id="aTpls">
+        <span class="tpl-pill sel" data-t="软件项目组">软件项目组</span>
+        <span class="tpl-pill" data-t="办公事务组">办公事务组</span>
+        <span class="tpl-pill" data-t="研究项目组">研究项目组</span>
+      </div>
+      <button class="btn primary" style="width:100%" onclick="enterShell()">一间办公室，马上开工 ▶</button>
+      <div style="margin-top:10px"><span class="skip" onclick="enterShell(true)">先跳过，晚点再起名</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- B：三步向导 -->
+<div class="frame" id="fB">
+  <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+    <div class="wire" style="width:min(560px,94vw);padding:22px">
+      <div class="stepper"><span id="bs0" class="on"></span><span id="bs1"></span><span id="bs2"></span></div>
+      <div id="bBody"></div>
+      <div style="display:flex;justify-content:space-between;margin-top:16px">
+        <button class="btn" onclick="bw(-1)">← 上一步</button>
+        <button class="btn primary" onclick="bw(1)">下一步 →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- C：零配置直进 -->
+<div class="frame" id="fC"><div class="ghost" style="position:absolute;inset:64px 12px 86px 12px"></div></div>
+
+<!-- 共享主界面 -->
+<div class="frame" id="fShell">
+  <div id="shellTop">
+    <div class="chip" id="coChip"><span id="coName">星尘工作室</span> ▾
+      <div id="companyMenu">
+        <div class="menu-item"><b>星尘工作室</b><span>✓ 当前</span></div>
+        <div class="menu-item" onclick="toast('原型：切到第二家公司 —— 后台任务不受影响（13 票）')">未命名公司 · 软件项目组<span>2 个进行中</span></div>
+        <div class="menu-item" onclick="toast('原型：新建公司流程（对本票 = 回到开场）')">＋ 新建公司…</div>
+        <div class="menu-hint">切换公司只是换视图；进行中的工作继续跑，程序退出才中断（13 票）</div>
+      </div>
+    </div>
+    <div class="chip"><b id="grpName">软件项目组</b></div>
+    <div class="chip" id="dutyChip">● 上班中</div>
+    <div style="flex:1"></div>
+    <div class="chip" id="engineChip">引擎中心 · pi 待配 key <span class="badge g">codex 已登录</span> <span class="badge n">claude 未装</span><span style="margin-left:4px">⚙</span></div>
+  </div>
+
+  <div id="shellMain">
+    <div class="wire" id="officeBox">
+      <div class="deskRow" id="desks"></div>
+      <div class="ghost" style="margin:0 22px 22px;height:64px;display:flex;align-items:center;justify-content:center;font-size:13px">茶水间 · 咖啡机（09 票场景）</div>
+    </div>
+    <div class="rightCol">
+      <div class="wire pane"><h4>工单/任务<button class="btn" style="font-size:11px;padding:4px 10px" onclick="toast('原型：08 票 playbook 选择器')">＋ 新工单</button></h4>
+        <div class="ghost" style="padding:14px;text-align:center;font-size:12.5px" id="taskEmpty">还没有工单。<br/>对 Bot 一句话，或从 <b>playbook</b> 选一条：<br/>「加功能」「修 bug」「写文档」</div>
+        <div id="taskItems"></div>
+      </div>
+      <div class="wire pane" style="flex:1"><h4>产出预览</h4><div class="ghost" style="padding:14px;text-align:center;font-size:12.5px">验收完成后在此查看<br/>四件套（06 票）</div></div>
+    </div>
+  </div>
+  <div id="inputbar">
+    <input type="text" id="taskInput" placeholder="「给项目加一个把任务导出成 CSV 的功能，要有测试」"/>
+    <button class="btn primary" onclick="assignTask()">派活 ▶</button>
+  </div>
+</div>
+
+<!-- 招聘三步 -->
+<div class="modalWrap" id="hireModal"><div class="modal wire" id="hireBody"></div></div>
+<!-- 引擎中心 -->
+<div class="modalWrap" id="engModal"><div class="modal wire">
+  <h3>引擎中心（设置页原型）<button class="btn" style="font-size:11px;padding:4px 10px" onclick="hide('engModal')">关闭</button></h3>
+  <div class="eCard"><div><b>pi</b> · 默认引擎（应用内置依赖）<div class="kv">SDK 型 · 事件最全 · MIT（15 票）</div></div><span class="badge y">待配 key</span></div>
+  <div class="eCard"><div><b>codex</b> · 本机已装<div class="kv">外部 CLI · Apache-2.0 · 三项待复核（15 票）</div></div><span class="badge g">已登录</span></div>
+  <div class="eCard"><div><b>dsh</b> · 本机桌面版<div class="kv">专有 · headless 事件粒度待核</div></div><span class="badge g">可用</span></div>
+  <div class="eCard"><div><b>claude</b><div class="kv">专有 · 未安装</div></div><span class="badge n">未装 · 安装引导</span></div>
+  <div class="eCard"><div><b>qoder</b> / <b>gemini</b><div class="kv">未安装 · 准入已过</div></div><span class="badge n">未装</span></div>
+  <div class="kv" style="margin-top:10px">预算：单任务默认 <b>50 万 token</b> 软闸（04 票）　·　应用只调用<b>本机自装</b>引擎，不捆绑分发（14/15 票）</div>
+</div></div>
+
+<div id="switcher">
+  <button id="prevV">◀</button><span class="label" id="vLabel"></span><button id="nextV">▶</button>
+</div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+/* ---------- 变体 ---------- */
+const ORDER=["A","B","C"];
+const LABELS={A:"A (one-card 一张卡)",B:"B (wizard 三步向导)",C:"C (zero-config 直进)"};
+let variant=(new URLSearchParams(location.search).get("variant")||"A").toUpperCase();
+if(!ORDER.includes(variant))variant="A";
+const $=id=>document.getElementById(id);
+function toast(m){const t=$("toast");t.textContent=m;t.style.opacity=1;clearTimeout(t._h);t._h=setTimeout(()=>t.style.opacity=0,2000);}
+const APP={coNames:["星尘工作室","未命名公司（原型）"],coIdx:0,tpl:"软件项目组",bw:0,hired:false,hiredRole:"",roleSel:0,duty:false,zero:false};
+
+function showFrame(id){["fA","fB","fC","fShell"].forEach(f=>$(f).classList.toggle("active",f===id));}
+function setVariant(v,push){
+  variant=v;$("vLabel").textContent=LABELS[v];
+  if(push!==false){const u=new URL(location);u.searchParams.set("variant",v);history.replaceState(null,"",u);}
+  $("hireModal").classList.remove("on");$("engModal").classList.remove("on");
+  if(v==="A"){APP.bw=0;showFrame("fA");}
+  else if(v==="B"){APP.bw=0;renderB();showFrame("fB");}
+  else{APP.zero=true;enterShellCommon();}
+}
+function cycle(d){setVariant(ORDER[(ORDER.indexOf(variant)+d+3)%3]);}
+$("prevV").onclick=()=>cycle(-1);$("nextV").onclick=()=>cycle(1);
+addEventListener("keydown",e=>{
+  if(/INPUT|TEXTAREA/.test((document.activeElement||{}).tagName||""))return;
+  if(e.key==="ArrowLeft")cycle(-1);
+  if(e.key==="ArrowRight")cycle(1);
+});
+
+/* ---------- A 一张卡 ---------- */
+$("aTpls").addEventListener("click",e=>{
+  const el=e.target.closest(".tpl-pill");if(!el)return;
+  [...$("aTpls").children].forEach(c=>c.classList.remove("sel"));el.classList.add("sel");
+  APP.tpl=el.dataset.t;
+});
+function enterShell(skip){
+  APP.zero=false;
+  APP.coNames[APP.coIdx]= skip? "未命名公司（点顶栏改名）" : ($("aName").value.trim()||"我的公司");
+  enterShellCommon();
+}
+function enterShellCommon(){
+  showFrame("fShell");renderTop();renderDesks();
+}
+
+/* ---------- B 三步向导 ---------- */
+const B_STEPS=[
+ ()=>`<div style="text-align:center">
+   <div style="font-size:20px;font-weight:700;margin-bottom:12px">AI 办公室 —— 数字员工的工位</div>
+   <div class="kv" style="text-align:left">· 一间可视的办公室：员工在工位电脑上真实干活（09 票）<br/>
+   · 招聘三步配好角色：技能 / MCP / 引擎一键装配（05 票）<br/>
+   · 工单化派活：一句话或 playbook，干完验收（06 / 08 票）</div></div>`,
+ ()=>`<div class="kv">公司信息</div>
+      <div style="margin:10px 0"><div style="font-size:12.5px;color:#8A8F98;margin-bottom:6px">公司名称</div>
+      <input type="text" id="bName" value="星尘工作室"/></div>
+      <div class="kv" style="color:#8A8F98">以后可以开多家公司，随时切换（13 票）</div>`,
+ ()=>`<div class="kv" style="margin-bottom:8px">先建一个项目组（选个模板）</div>
+      <div id="bTpls" style="display:flex;flex-direction:column;gap:8px">
+      ${["软件项目组|程序员+测试+产品经理 · 4 工位 · git 工作区","办公事务组|文案+数据+整理 · 4 工位 · 文档工作区","研究项目组|研究员 · 2 工位 · 纯读工作区"]
+      .map((s,i)=>{const [n,d]=s.split("|");return `<div class="roleCard ${i===0?"sel":""}" data-t="${n}"><b>${n}</b><div class="kv">${d}</div></div>`}).join("")}</div>`,
+];
+function renderB(){
+  $("bBody").innerHTML=B_STEPS[APP.bw]();
+  for(let i=0;i<3;i++)$("bs"+i).classList.toggle("on",i<=APP.bw);
+  $("bBody").querySelectorAll(".roleCard").forEach(c=>c.onclick=()=>{
+    $("bBody").querySelectorAll(".roleCard").forEach(x=>x.classList.remove("sel"));c.classList.add("sel");APP.tpl=c.dataset.t;});
+}
+function bw(d){
+  APP.bw=Math.max(0,APP.bw+d);
+  if(APP.bw>=3){APP.coNames[APP.coIdx]=($("bName")?.value||"我的公司"); enterShellCommon();return;}
+  if(APP.bw<0){APP.bw=0;}
+  renderB();
+}
+
+/* ---------- 主界面 ---------- */
+function renderTop(){
+  $("coName").textContent=APP.coNames[APP.coIdx];
+  $("grpName").textContent=APP.tpl;
+}
+$("coChip").onclick=()=>{
+  const m=$("companyMenu");const on=m.style.display==="block";m.style.display=on?"none":"block";
+};
+document.addEventListener("click",e=>{
+  if(!e.target.closest("#coChip"))$("companyMenu").style.display="none";
+});
+$("dutyChip").onclick=()=>{
+  APP.duty=!APP.duty;
+  $("dutyChip").textContent=APP.duty?"○ 已下班（外观 · 语义 13 票）":"● 上班中";
+};
+$("engineChip").onclick=()=>$("engModal").classList.add("on");
+$("engModal").addEventListener("click",e=>{if(e.target===$("engModal"))$("engModal").classList.remove("on");});
+$("hireModal").addEventListener("click",e=>{if(e.target===$("hireModal"))$("hireModal").classList.remove("on");});
+
+function renderDesks(){
+  const d=$("desks");
+  const hireDesk=`<div class="wire desk flash" onclick="openHire()" ${APP.hired?"style=\"visibility:hidden\"":""}><div class="mon"></div><div class="tbl"></div><div class="hire">＋ 招聘工程师</div></div>`;
+  const hired=`<div class="wire desk"><div class="mon" style="background:${APP.hiredRole==="程序员"?"#E2574C22":"#28303B"}"></div><div class="tbl"></div><div>${APP.hiredRole} · 阿码</div><span class="badge g">工作中</span></div>`;
+  const empties=Array.from({length:2},(_,i)=>`<div class="wire desk"><div class="mon"></div><div class="tbl"></div><div style="color:#B9BFC7">空工位</div></div>`).join("");
+  d.innerHTML=(APP.hired?hired:hireDesk)+empties+hireDesk;
+  if(APP.zero){
+    const old=$("zeroHint");if(old)old.remove();
+    const hint=document.createElement("div");
+    hint.id="zeroHint";
+    hint.className="wire";hint.style.cssText="margin:0 22px 16px;padding:12px;font-size:13px;display:flex;justify-content:space-between;align-items:center";
+    hint.innerHTML=`🪧 零配置：直接点「＋ 招聘」开始；公司名、模板这些晚点在设置里补。<button class="btn" style="font-size:11px;padding:4px 10px" onclick="this.parentElement.remove()">知道了</button>`;
+    $("officeBox").prepend(hint);
+  }
+}
+
+/* ---------- 招聘三步 ---------- */
+const ROLES=[
+  {n:"程序员 · 阿码",c:"🟥",d:"承接「加功能 / 修 bug」playbook；git 工作流 + 测试先行"},
+  {n:"测试 · 编编",c:"🟩",d:"跑测试与验收辅助；命令以测试为优先"},
+  {n:"产品经理 · 文文",c:"🟪",d:"「写文档」playbook；规划调用的人格载体（08 票）"},
+];
+function openHire(){APP.hireStep=0;renderHire();$("hireModal").classList.add("on");savedScroll=window.scrollY;}
+let savedScroll=0;
+const H_STEPS=[
+ ()=>`<div class="kv" style="margin-bottom:10px">第 1 步 · 选预设角色（05 票）</div>`
+   +ROLES.map((r,i)=>`<div class="roleCard ${APP.roleSel===i?"sel":""}" onclick="selRole(${i})">
+      <div class="nm" style="font-weight:600">${r.c} ${r.n}</div><div class="kv">${r.d}</div></div>`).join("")
+   +`<div style="margin-top:10px"><span class="skip" onclick="toast('自定义角色 → 插件市场雾（05 票）')">没有合适的？自定义角色…（v2）</span></div>`,
+ ()=>`<div class="kv" style="margin-bottom:10px">第 2 步 · 能力清单（快照将固化进员工）</div>
+   <div class="kv">
+   <b>人格</b>：工程师语气 · 先规划后动手 · 汇报说人话<br/>
+   <b>技能</b>：git 工作流（<b>自己 commit</b> · message 规范 · 不主动 push · 回滚靠派任务——06 票）· 测试先行<br/>
+   <b>工具</b>：read / write / edit / grep · bash（工作区内；07 票策略已挂）<br/>
+   <b>MCP</b>：暂无（公司级可加，白名单）<br/>
+   <b>引擎/模型</b>：pi · <span class="badge y">待配 key</span> → <span class="skip" onclick="switchEngineCenter()">去引擎中心配置</span><br/>
+   <b>成本</b>：软闸 50 万 token / 任务（04 票）</div>`,
+ ()=>`<div class="kv" style="margin-bottom:10px">第 3 步 · 确认录用</div>
+   <div class="kv">
+   ✔ 将创建：<b>${ROLES[APP.roleSel].n}</b>（角色定义按此刻<b>快照</b>——02 票）<br/>
+   ✔ 独立会话与配置目录，不碰你本机的引擎设置（03 票）<br/>
+   ✔ 占用工位 1／4；离职会归档，历史任务保留<br/>
+   <div style="margin-top:10px"><span class="badge y">pi 引擎需要一次 key 配置，入职后引导完成</span></div></div>`,
+];
+function renderHire(){
+  $("hireBody").innerHTML=`<h3>招聘 · ${ROLES[APP.roleSel].n.split(" · ")[1]}</h3>
+   <div class="stepper">${[0,1,2].map(i=>`<span class="${i<=APP.hireStep?"on":""}"></span>`).join("")}</div>
+   ${H_STEPS[APP.hireStep]()}
+   <div style="display:flex;justify-content:space-between;margin-top:14px">
+     <button class="btn" onclick="hs(-1)">← 上一步</button>
+     ${APP.hireStep<2?`<button class="btn primary" onclick="hs(1)">下一步 →</button>`:`<button class="btn primary" onclick="finishHire()">录用 ✅</button>`}
+   </div>`;
+}
+function selRole(i){APP.roleSel=i;renderHire();}
+function hs(d){APP.hireStep=Math.max(0,APP.hireStep+d);renderHire();}
+function switchEngineCenter(){$("hireModal").classList.remove("on");$("engModal").classList.add("on");}
+function finishHire(){
+  APP.hired=true;APP.hiredRole=ROLES[APP.roleSel].n.split(" · ")[0]+"师";
+  if(APP.hiredRole==="产品经理师")APP.hiredRole="产品经理";
+  if(APP.hiredRole==="程序员师")APP.hiredRole="程序员";
+  if(APP.hiredRole==="测试师")APP.hiredRole="测试";
+  $("hireModal").classList.remove("on");
+  $("taskEmpty").innerHTML="还没有工单。<br/>对 <b>"+ROLES[APP.roleSel].n.split(" · ")[1]+"</b> 说一句话，或从 playbook 选一条。";
+  toast("录用完成 · 工位已点亮（三步 · 05 票）");
+  renderDesks();
+}
+
+/* ---------- 派活 ---------- */
+function assignTask(){
+  const v=$("taskInput").value.trim();
+  if(!APP.hired){toast("还没员工——先点工位招聘（010 票空态）");openHire();return;}
+  if(!v)return;
+  const el=document.createElement("div");
+  el.className="wire";el.style.cssText="margin-top:8px;padding:10px;font-size:12.5px";
+  el.innerHTML=`<b>工单 #1</b> · ${v}<div class="kv" style="margin-top:4px"><span class="badge y">进行中</span> · 阿码 · <span class="skip" onclick="toast('工单详情 → 侧边栏（06 票四件套）')">详情</span></div>`;
+  $("taskItems").appendChild(el);$("taskEmpty").style.display="none";$("taskInput").value="";
+  toast("已创建工单 → 派给阿码（08 票自动套 playbook）");
+}
+
+/* ---------- mount ---------- */
+setVariant(variant,false);
+renderTop();renderDesks();
+</script>
+</body>
+</html>

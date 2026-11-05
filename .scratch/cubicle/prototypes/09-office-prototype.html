@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8"/>
+<title>Cubicle · PROTOTYPE 09 办公室可视化（会丢弃，勿提交）</title>
+<!--
+  PROTOTYPE（wayfinder 09 票）—— 三个截然不同的视觉路线，?variant= 切换，底部悬浮条/左右键循环。
+  A (dollhouse)  娃娃屋斜视：无墙白房间 + 2D 扁平角色 + 悬浮名牌 + 任务抽屉（最贴近 Marvis）
+  B (isometric)  等距棋盘：菱形地板 + 点击拾取 + 走位（Tiled / SimTower 路线）
+  C (turn-off)   关掉办公室的对照组：卡片流 + 事件日志（检验"没有办公室丢什么信息"）
+  演示：打开 1.2s 后自动播放一段 33 秒任务（读/写/测试失败/被拦/请示→批准/咖啡/待验收）。
+  下班按钮 = 外观演示；真实语义在 13 票。纯 Canvas 2D + DOM，零依赖，双击即跑。
+-->
+<style>
+  *{box-sizing:border-box;margin:0}
+  html,body{height:100%;font-family:system-ui,"Segoe UI","Microsoft YaHei",sans-serif;background:#EFECE6;overflow:hidden}
+  #cv{display:block;width:100vw;height:100vh}
+  #topbar{position:fixed;top:10px;left:12px;right:12px;display:flex;gap:10px;align-items:center;z-index:30;flex-wrap:wrap}
+  .pill{background:#fff;border:1px solid #DDD6CC;border-radius:999px;padding:6px 14px;font-size:13px;box-shadow:0 1px 3px #0002;white-space:nowrap}
+  .pill b{font-weight:600}
+  #dutyBtn{cursor:pointer}
+  #dutyBtn.off{background:#3a3a3a;color:#d9d9d9;border-color:#2b2b2b}
+  .prototag{background:#2b2b2b;color:#ffd479;font-size:11px;padding:5px 10px;border-radius:999px;letter-spacing:1px}
+  #inputbar{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;width:min(720px,92vw);display:flex;gap:8px;z-index:30}
+  #taskInput{flex:1;border:2px solid #2b2b2b22;background:#fff;border-radius:14px;padding:12px 14px;font-size:14px;outline:none;box-shadow:0 4px 14px #0001}
+  #taskInput:focus{border-color:#2b2b2b}
+  #goBtn{border:none;background:#2b2b2b;color:#fff;border-radius:14px;padding:0 22px;font-size:14px;cursor:pointer}
+  #switcher{position:fixed;left:50%;transform:translateX(-50%);bottom:76px;display:flex;align-items:center;gap:8px;background:#1c1c1c;color:#fff;border-radius:999px;padding:7px 10px;z-index:40;box-shadow:0 6px 18px #0004}
+  #switcher button{background:none;border:none;color:#fff;font-size:15px;cursor:pointer;padding:0 6px}
+  #switcher .label{font-size:12px;color:#ffd479;white-space:nowrap;user-select:none}
+  #drawer{position:fixed;right:12px;top:56px;bottom:96px;width:min(340px,92vw);background:#fff;border:1px solid #DDD6CC;border-radius:16px;padding:14px;z-index:20;box-shadow:0 8px 24px #0002;display:none;overflow:auto}
+  #drawer h3{font-size:14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+  #drawer .steps{list-style:none;padding:0;margin:8px 0}
+  #drawer .steps li{font-size:12.5px;padding:5px 8px;border-radius:8px;color:#2b2b2b}
+  #drawer .steps li::before{content:"✓ ";color:#2E9E5B;font-weight:700}
+  #drawer .art{font-size:12px;background:#F7F5F1;border:1px dashed #CFC9BF;border-radius:10px;padding:8px;margin-top:8px;color:#444;white-space:pre-line;line-height:1.7}
+  #drawer .verdict{display:flex;gap:8px;margin-top:12px}
+  #drawer .verdict button{flex:1;border:1px solid #CCC5BA;background:#fff;border-radius:10px;padding:8px;cursor:pointer;font-size:13px}
+  #drawer .verdict .ok{background:#2E9E5B;border-color:#2E9E5B;color:#fff}
+  #uiC{display:none;position:fixed;inset:0;padding:64px 16px 96px;overflow:auto;background:#F6F4F0}
+  .gridc{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;max-width:1100px;margin:0 auto}
+  .card{background:#fff;border:1px solid #DDD6CC;border-radius:14px;padding:12px;box-shadow:0 2px 8px #0001}
+  .card .nm{font-weight:600;font-size:14px;display:flex;justify-content:space-between;align-items:center}
+  .card .st{font-size:12px;color:#777;margin-top:6px}
+  .card .st.live{color:#2b2b2b;font-weight:600}
+  #logc{max-height:430px;overflow:auto;font-size:11.5px;font-family:ui-monospace,Consolas,monospace;color:#444;line-height:1.7}
+  #toast{position:fixed;top:52px;left:50%;transform:translateX(-50%);background:#2b2b2b;color:#fff;padding:9px 16px;border-radius:999px;font-size:13px;z-index:60;opacity:0;transition:opacity .3s;pointer-events:none}
+  body.off{filter:saturate(.5) brightness(.88)}
+  .twocol{display:grid;grid-template-columns:2fr 1fr;gap:12px}
+  @media (max-width:760px){.twocol{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div id="topbar">
+  <span class="prototag">PROTOTYPE · 勿提交</span>
+  <span class="pill"><b>星尘工作室</b> · 软件项目组 ▾</span>
+  <span class="pill" id="dutyBtn">● 上班中</span>
+  <span class="pill">多公司切换不中断（13 票）</span>
+</div>
+
+<canvas id="cv"></canvas>
+
+<div id="drawer"></div>
+
+<div id="uiC">
+  <div class="gridc" id="empCards"></div>
+  <div class="card taskcard">
+    <div class="nm">任务 #1 · 给项目加一个把任务导出成 CSV 的功能，要有测试 <span id="tstate" class="pill" style="font-size:11px">进行中</span></div>
+    <div class="twocol" style="margin-top:8px">
+      <div>
+        <ol style="font-size:13px;line-height:2;padding-left:18px" id="stepsC"></ol>
+        <div class="card" style="border-style:dashed;background:#F7F5F1;margin-top:8px;font-size:12px;line-height:1.7;color:#444" id="artC">产出（完成后填充）</div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="ok" style="flex:1;border:none;background:#2E9E5B;color:#fff;border-radius:10px;padding:8px;font-size:13px" onclick="toast('已通过 · 任务完成（原型动效）')">通过</button>
+          <button style="flex:1;border:1px solid #CCC5BA;background:#fff;border-radius:10px;padding:8px;font-size:13px" onclick="toast('已打回 · 同任务追加迭代会话（原型）')">打回（同任务迭代）</button>
+        </div>
+      </div>
+      <div>
+        <div class="st" style="font-weight:600;color:#2b2b2b">事件流水</div>
+        <div id="logc"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="inputbar">
+  <input id="taskInput" value="给项目加一个把任务导出成 CSV 的功能，要有测试"/>
+  <button id="goBtn">派活 ▶</button>
+</div>
+<div id="switcher">
+  <button id="prevV">◀</button>
+  <span class="label" id="vLabel"></span>
+  <button id="nextV">▶</button>
+</div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+/* ================= 变体切换 ================= */
+const ORDER=["A","B","C"];
+const LABELS={A:"A (dollhouse 娃娃屋)",B:"B (isometric 等距)",C:"C (no office 对照组)"};
+let variant=(new URLSearchParams(location.search).get("variant")||"A").toUpperCase();
+if(!ORDER.includes(variant)) variant="A";
+function setVariant(v,push){ variant=v; stopSim();
+  document.getElementById("vLabel").textContent=LABELS[v];
+  if(push!==false){const u=new URL(location);u.searchParams.set("variant",v);history.replaceState(null,"",u);}
+  document.getElementById("cv").style.display=(v==="C")?"none":"block";
+  document.getElementById("uiC").style.display=(v==="C")?"block":"none";
+  document.getElementById("drawer").style.display="none";
+  if(v==="C") refreshC();
+}
+function cycle(d){setVariant(ORDER[(ORDER.indexOf(variant)+d+3)%3]);}
+document.getElementById("prevV").onclick=()=>cycle(-1);
+document.getElementById("nextV").onclick=()=>cycle(1);
+addEventListener("keydown",e=>{
+  if(/INPUT|TEXTAREA/.test((document.activeElement||{}).tagName||""))return;
+  if(e.key==="ArrowLeft")cycle(-1);
+  if(e.key==="ArrowRight")cycle(1);
+});
+
+/* ================= 基础 ================= */
+const cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function fit(){const d=devicePixelRatio||1;cv.width=innerWidth*d;cv.height=innerHeight*d;cv.style.width=innerWidth+"px";cv.style.height=innerHeight+"px";ctx.setTransform(d,0,0,d,0,0);}
+addEventListener("resize",fit);fit();
+function toast(msg){const t=document.getElementById("toast");t.textContent=msg;t.style.opacity=1;clearTimeout(t._h);t._h=setTimeout(()=>t.style.opacity=0,1800);}
+function rr(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
+function fmtTok(n){return n?(Math.round(n/100)/10).toFixed(1)+"k":"0k";}
+const LOG=[];
+function log(kind,msg){LOG.push({t:new Date().toLocaleTimeString("zh",{hour12:false}),kind,msg});if(variant==="C")renderLogC();}
+function renderLogC(){const el=document.getElementById("logc");if(!el)return;el.innerHTML=LOG.slice(-80).map(l=>`<div><b>${l.t}</b> ${l.kind} · ${l.msg}</div>`).join("");el.scrollTop=1e9;}
+
+/* ================= 劳动者 ================= */
+const SCARF="#E2574C";
+const WORKER={
+  name:"阿码",role:"程序员 · 红围巾",
+  state:"idle",            // idle|read|code|term|walk|blocked|review
+  spare:"none",            // 摸鱼标记 phone
+  bubble:null,             // {text,kind,until,ask}
+  screen:"off",            // off|code|diff|termRed|termGreen
+  shakeT:0,
+  aX:0,aY:0,               // A 走位像素坐标
+  walk:null,               // {x0,y0,x1,y1,t0,dur,map?}
+};
+
+/* ================= 场景几何 ================= */
+const A_DESKS=[0.14,0.36,0.58,0.80];
+function A_office(){return{deskY:innerHeight*0.60,deskX:f=>innerWidth*f,
+  coffee:{x:innerWidth*0.86,y:innerHeight*0.46},
+  door:{x:innerWidth*0.03,y:innerHeight*0.42}};}
+const B_TILES={desks:[[3,1],[5,1],[7,1],[9,1]],coffee:[2,4],door:[0,0]};
+function iso(x,y){const tw=104,th=52;return{x:innerWidth/2+(x-y)*tw/2,y:innerHeight*0.26+(x+y)*th/2};}
+function screenToMap(px,py){const tw=104,th=52;
+  const u=(px-innerWidth/2)/(tw/2),v=(py-innerHeight*0.26)/(th/2);
+  const x=Math.round((u+v)/2),y=Math.round((v-u)/2);
+  return(x>=0&&y>=0&&x<12&&y<8)?{x,y}:null;}
+
+/* ================= 模拟时间线 ================= */
+const S={playing:false,paused:false,tPlay:0,evIdx:0,tokens:0,askRects:[],drawerOpen:false};
+const TL=[
+ {at:0.0, f:()=>{say("接受任务：导出 CSV（工单 #1）",2.2,"info");WORKER.state="code";WORKER.screen="code";log("task_created","owner=阿码 origin=manual");}},
+ {at:1.8, f:()=>{WORKER.state="read";say("正在读 cli.ts",2.6,"info");}},
+ {at:5.0, f:()=>{WORKER.state="code";WORKER.screen="diff";say("正在写 export.ts",3.0,"info");}},
+ {at:9.0, f:()=>{WORKER.state="term";WORKER.screen="termRed";say("跑测试… 2 failed",2.4,"warn");}},
+ {at:11.6,f:()=>{WORKER.state="blocked";say("被拦：rm -rf ..（07 票策略拒绝）",2.6,"alert");WORKER.shakeT=0.7;log("policy_deny","cmd=rm -rf .. result=DENY");}},
+ {at:14.4,f:()=>{say("请示：可以装 csv 依赖吗？（点气泡按钮）",Infinity,"ask");S.paused=true;log("ask","agent 请示，等 steer 批复");}},
+ {at:15.4,f:()=>{WORKER.state="term";WORKER.screen="code";
+   say(denied? "改道：不装依赖，手写 CSV 拼接" : "pnpm add csv（已批准）",2.2, denied?"info":"ok");}},
+ {at:18.0,f:()=>{WORKER.state="code";WORKER.screen="diff";
+   say("统一 UTC 时区，再跑",2.8,"info");}},
+ {at:21.5,f:()=>{WORKER.state="term";WORKER.screen="termGreen";say("测试 5 passed ✅",2.2,"ok");}},
+ {at:24.0,f:()=>{WORKER.state="idle";say("员工已自己提交 a1b2c3（06 票）",2.2,"ok");}},
+ {at:25.0,f:()=>{walkTo("coffee");say("去茶水间 ☕",2.0,"info");}},
+ {at:27.6,f:()=>{say("☕",1.1,"info");}},
+ {at:29.2,f:()=>{walkTo("desk");}},
+ {at:32.0,f:()=>{WORKER.state="review";say("完成，待验收 ✅",Infinity,"ok");S.drawerOpen=true;log("review","产出四件套就绪");openDrawer();}},
+];
+function say(text,dur,kind){WORKER.bubble={text,kind:kind||"info",until:S.tPlay+dur};}
+const KINDCLS={info:["#fff","#2b2b2b"],ok:["#fff","#1E7C46"],warn:["#fff","#B46A00"],alert:["#E2574C","#fff"],ask:["#fff","#1F4FA8"]};
+function startPlay(){
+  if(S.paused&&WORKER.bubble&&WORKER.bubble.ask) return;
+  S.playing=true;S.paused=false;S.tPlay=0;S.evIdx=0;S.tokens=0;S.drawerOpen=false;
+  WORKER.bubble=null;WORKER.state="code";WORKER.screen="code";WORKER.walk=null;
+  WORKER.aX=0;WORKER.aY=0;WORKER._bPos=null;WORKER._aArrived=null;WORKER._walkTarget=null;
+  LOG.length=0;log("sim","▶ 播放演示任务（原型）");
+  document.getElementById("drawer").style.display="none";
+  if(variant==="C")refreshC();
+}
+function stopSim(){S.playing=false;S.paused=false;WORKER.bubble=null;WORKER.state="idle";WORKER.walk=null;
+  WORKER._bPos=null;WORKER._aArrived=null;
+  document.getElementById("drawer").style.display="none";S.drawerOpen=false;$("tstate").textContent="进行中";if(variant==="C")refreshC();}
+function walkTo(target){ // 三段通用 tween
+  const o=A_office();
+  let from,to;
+  if(variant==="B"){
+    from=WORKER._bPos||workerIsoHome();
+    const m=target==="coffee"?B_TILES.coffee:B_TILES.desks[0];
+    const p=iso(m[0],m[1]);to={x:p.x,y:p.y+6};
+  }else{
+    from=WORKER._aArrived||{x:(WORKER._seatX??o.deskX(A_DESKS[0])),y:o.deskY};
+    to= target==="coffee"? o.coffee : {x:o.deskX(A_DESKS[0])+16,y:o.deskY-6};
+  }
+  WORKER.walk={x0:from.x,y0:from.y,x1:to.x,y1:to.y,t0:S.tPlay,dur:2.2};
+  WORKER._walkTarget=target;
+  WORKER.state="walk";
+}
+let denied=false;
+const $=id=>document.getElementById(id);
+
+/* ================= 绘制工具 ================= */
+function drawBubble(cx,cy,text,kind){
+  ctx.font="12px system-ui";
+  const lines=wrapText(text,200);
+  const w=Math.max(...lines.map(t=>ctx.measureText(t).width))+22;
+  const h=lines.length*17+14;
+  const x=cx-w/2,y=cy-h-10;
+  const [bg,fg]=KINDCLS[kind]||KINDCLS.info;
+  ctx.save();ctx.shadowColor="#0003";ctx.shadowBlur=7;ctx.shadowOffsetY=2;
+  ctx.fillStyle=bg;rr(ctx,x,y,w,h,9);ctx.fill();
+  if(bg==="#fff"){ctx.strokeStyle="#D8D1C6";ctx.lineWidth=1;ctx.stroke();}
+  ctx.restore();
+  ctx.fillStyle=fg;
+  lines.forEach((t,i)=>ctx.fillText(t,x+11,y+20+i*17));
+  if(kind==="ask"){ // 内联批按钮
+    S.askRects=[
+      {x:x+10,y:y+h+6,w:74,h:26,act:"approve",txt:"批准 ✅"},
+      {x:x+92,y:y+h+6,w:52,h:26,act:"deny",txt:"先不"}];
+    btn(S.askRects[0],"#2E9E5B","#fff");btn(S.askRects[1],"#ffffff","#555");
+  }
+}
+function btn(r,bg,fg){ctx.save();ctx.font="12px system-ui";ctx.fillStyle=bg;rr(ctx,r.x,r.y,r.w,r.h,13);ctx.fill();if(bg==="#ffffff"){ctx.strokeStyle="#CCC5BA";ctx.stroke();}ctx.fillStyle=fg;ctx.fillText(r.txt,r.x+9,r.y+17);ctx.restore();}
+function wrapText(t,mx){const out=[];let line="";for(const ch of t){if(ctx.measureText(line+ch).width>mx){out.push(line);line="";}line+=ch;}if(line)out.push(line);return out;}
+function plate(cx,cy,name,role,state,tokens){
+  ctx.font="600 12px system-ui";
+  const t1=name+" · "+role;const w=Math.max(ctx.measureText(t1).width,90)+18,h=38;
+  ctx.save();ctx.shadowColor="#0002";ctx.shadowBlur=6;ctx.fillStyle="#fff";rr(ctx,cx-w/2,cy-h,w,h,10);ctx.fill();ctx.restore();
+  ctx.strokeStyle="#E3DCCF";ctx.strokeRect(cx-w/2+0.5,cy-h+0.5,w-1,h-1);
+  ctx.fillStyle="#2b2b2b";ctx.fillText(t1,cx-w/2+9,cy-19);
+  ctx.fillStyle="#8A8577";ctx.font="11px system-ui";
+  const second=(tokens==null||tokens===undefined)?state:(fmtTok(tokens)+" tok · "+state);
+  ctx.fillText(second,cx-w/2+9,cy-5);
+}
+const STATENAME={idle:"闲",read:"读文件",code:"写代码",term:"跑命令",walk:"走动",blocked:"被拦",review:"待验收"};
+
+/* ================= A 娃娃屋 ================= */
+function drawA(t){
+  const o=A_office();
+  const g=ctx.createLinearGradient(0,innerHeight*0.24,0,innerHeight);
+  g.addColorStop(0,"#F7F4EF");g.addColorStop(1,"#E9E4DC");
+  ctx.fillStyle=g;ctx.fillRect(0,0,innerWidth,innerHeight);
+  ctx.fillStyle="#DAD3C8";rr(ctx,o.door.x,o.door.y,12,innerHeight*0.55,6);ctx.fill();
+  coffeeA(o.coffee.x,o.coffee.y-34);
+  couch(idx(0.80) ,innerHeight*0.82);
+  A_DESKS.forEach((f,i)=>{
+    const occ=i===0,res=i===1;
+    deskA(o.deskX(f),o.deskY,occ,res);
+    if(occ){
+      const seatP={x:o.deskX(f)-2,y:o.deskY-34};
+      WORKER._seatX=o.deskX(f)+16;
+      if(WORKER._aArrived){ charStandA(WORKER._aArrived.x,WORKER._aArrived.y,o.deskY-6); }
+      else { drawCharA_idleOrState(seatP,t); }
+      plate(o.deskX(f),o.deskY-innerHeight*0.13,"阿码","程序员",STATENAME[WORKER.state]||"",S.tokens);
+    }else if(!occ){
+      plate(o.deskX(f),o.deskY-innerHeight*0.13,"空工位","招聘","点击开招聘三步",null);
+    }
+    if(res){A_office._hireRect={x:o.deskX(f)-40,y:o.deskY-innerHeight*0.11,w:80,h:44};}
+  });
+  drawWalk(t);
+  if(WORKER.bubble){
+    const mv=WORKER.state==="walk";
+    const ax= mv?WORKER.aX: (WORKER._aArrived?WORKER._aArrived.x:o.deskX(A_DESKS[0])-2);
+    const ay= mv?WORKER.aY-20: (WORKER._aArrived?WORKER._aArrived.y-20:o.deskY-84);
+    drawBubble(ax,ay,WORKER.bubble.text,WORKER.bubble.kind);
+  }
+}
+function charStandA(x,y,deskline){ // 站姿（在茶水间等）：轻呼吸
+  const bob=Math.sin(performance.now()/600)*1.0;
+  ctx.fillStyle="#00000012";ctx.beginPath();ctx.ellipse(x,y+4,10,4.5,0,0,7);ctx.fill();
+  ctx.fillStyle="#2E3138";rr(ctx,x-10,y-18+bob,20,20,9);ctx.fill();
+  ctx.fillStyle="#F2C9A0";ctx.beginPath();ctx.arc(x,y-28+bob,9.5,0,7);ctx.fill();
+  ctx.fillStyle=SCARF;ctx.fillRect(x-7,y-24+bob,14,4.5);
+}
+function idx(f){return innerWidth*f;}
+function deskA(x,y,occ,empty){
+  const wd=Math.min(190,innerWidth*0.2);
+  ctx.fillStyle=occ?"#fff":"#FBF9F5";ctx.strokeStyle="#E0D9CE";ctx.lineWidth=1;
+  rr(ctx,x-wd/2,y-30,wd,30,8);ctx.fill();ctx.stroke();
+  ctx.fillStyle="#C9C2B6";ctx.fillRect(x-wd/2+12,y,8,46);ctx.fillRect(x+wd/2-20,y,8,46);
+  monA(x,y-58,76,48,occ,empty);
+}
+function monA(x,y,w,h,occ,empty){
+  ctx.fillStyle="#20242B";rr(ctx,x-w/2,y,w,h,6);ctx.fill();
+  ctx.fillStyle="#C9C2B6";ctx.fillRect(x-4,y+h-2,8,10);
+  if(!occ){
+    if(empty){
+      ctx.fillStyle="#20242B";rr(ctx,x-w/2,y,w,h,6);ctx.fill();
+      ctx.fillStyle="#2E9E5B";font("600 12px system-ui");rr(ctx,x-24,y+8,50,22,11);ctx.fill();
+      ctx.fillStyle="#fff";ctx.fillText("+ 招聘",x-16,y+23);
+    }else{ // 无人但非招聘位：屏幕灭掉
+      ctx.fillStyle="#141821";rr(ctx,x+4,y+4,w-8,h-8,4);ctx.fill();
+      ctx.fillStyle="#2b3140";ctx.fillRect(x+w/2-12,y+h-16,24,3);
+    }
+    return;
+  }
+  screenA(x,y,w,h);
+}
+function screenA(x,y,w,h){
+  ctx.save();rr(ctx,x+4,y+4,w-8,h-8,4);ctx.clip();
+  ctx.fillStyle="#10141B";ctx.fillRect(x+4,y+4,w-8,h-8);
+  const pal=["#5B8CFF","#7EE1A0","#FFB454","#FF7A9E","#8CE9FF"];
+  const k=WORKER.screen;
+  if(k==="code"||k==="diff"){for(let i=0;i<7;i++){ctx.fillStyle=pal[i%5];ctx.globalAlpha=.85;
+    const wob=k==="diff"?Math.sin(performance.now()/200+i)*26:0;
+    ctx.fillRect(x+10,y+10+i*6,w-22-Math.abs(2-i*4)-Math.abs(wob),3);}ctx.globalAlpha=1;}
+  if(k==="termRed"){ctx.font="9px ui-monospace";["$ pnpm test","PASS cli.ts","FAIL export.ts","FAIL export2.ts","$"].forEach((l,i)=>{ctx.fillStyle=(i===2||i===3)?"#FF6B6B":"#9BE29B";ctx.fillText(l,x+10,y+13+i*8);});}
+  if(k==="termGreen"){ctx.font="9px ui-monospace";["$ pnpm test","PASS cli.ts","PASS export.ts","5 passed","$"].forEach((l,i)=>{ctx.fillStyle="#9BE29B";ctx.fillText(l,x+10,y+13+i*8);});}
+  ctx.restore();
+}
+function font(f){ctx.font=f;}
+function drawCharA_idleOrState(p,t){
+  const st=WORKER.state;
+  if(st==="walk")return;
+  const isPhone=(WORKER.spare==="phone");
+  const bob=Math.sin(t*(st==="code"?6:2.2))*(st==="code"?1.6:0.8);
+  ctx.fillStyle="#CFC8BD";rr(ctx,p.x+18,p.y+18,32,12,6);ctx.fill();
+  ctx.fillStyle="#2E3138";rr(ctx,p.x+2,p.y-14+bob,28,28,11);ctx.fill();
+  ctx.fillStyle="#F2C9A0";ctx.beginPath();ctx.arc(p.x+16,p.y-24+bob,11,0,7);ctx.fill();
+  ctx.fillStyle=SCARF;ctx.fillRect(p.x+6,p.y-19+bob,20,5);
+  if(["code","read","term","blocked","review"].includes(st)){
+    const a=Math.sin(t*13)*2.2;ctx.fillStyle="#F2C9A0";
+    ctx.beginPath();ctx.arc(p.x-1,p.y+7+a,3.2,0,7);ctx.arc(p.x+33,p.y+7-a,3.2,0,7);ctx.fill();
+  }
+  if(isPhone||st==="review"){
+    ctx.fillStyle="#2b2b2b";rr(ctx,p.x+24,p.y-30+bob,7,12,2);ctx.fill();
+    ctx.fillStyle="#9BE29B";ctx.fillRect(p.x+25,p.y-29+bob,5,10);
+  }
+  if(WORKER.shakeT>0){ctx.save();ctx.globalAlpha=WORKER.shakeT;ctx.strokeStyle="#E2574C";ctx.lineWidth=3;rr(ctx,p.x-8,p.y-42,48,60,10);ctx.stroke();ctx.restore();}
+}
+function drawWalk(t){ // 仅 A 变体调用；到达后记住落点，供立姿与返程使用
+  if(WORKER.state!=="walk"||!WORKER.walk)return;
+  const k=Math.min(1,(S.tPlay-WORKER.walk.t0)/WORKER.walk.dur);
+  WORKER.aX=WORKER.walk.x0+(WORKER.walk.x1-WORKER.walk.x0)*ease(k);
+  WORKER.aY=WORKER.walk.y0+(WORKER.walk.y1-WORKER.walk.y0)*ease(k)+Math.abs(Math.sin(t*9))*5;
+  charWalkA(WORKER.aX,WORKER.aY,t);
+  if(k>=1){
+    WORKER.walk=null;WORKER.state="idle";
+    WORKER._aArrived={x:WORKER.aX,y:WORKER.aY};
+    if(WORKER._walkTarget==="desk")WORKER._aArrived=null;
+  }
+}
+function charWalkA(x,y,t){
+  const s=Math.sin(t*9);
+  ctx.fillStyle="#2E3138";rr(ctx,x-11,y-20,22,22,10);ctx.fill();
+  ctx.fillStyle="#F2C9A0";ctx.beginPath();ctx.arc(x,y-30,10,0,7);ctx.fill();
+  ctx.fillStyle=SCARF;ctx.fillRect(x-9,y-25,18,5);
+  ctx.strokeStyle="#2E3138";ctx.lineWidth=4;ctx.lineCap="round";
+  const ph=s*6;ctx.beginPath();ctx.moveTo(x-5,y);ctx.lineTo(x-5+ph*0.5,y+12+(ph>0?2:0));
+  ctx.moveTo(x+5,y);ctx.lineTo(x+5-ph*0.5,y+12+(ph<0?2:0));ctx.stroke();ctx.lineWidth=1;
+}
+function ease(k){return k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;}
+function coffeeA(x,y){
+  ctx.fillStyle="#fff";ctx.strokeStyle="#E0D9CE";rr(ctx,x-26,y,52,58,10);ctx.fill();ctx.stroke();
+  ctx.fillStyle="#8a8577";font("15px serif");ctx.fillText("☕",x-8,y+30);
+  ctx.fillStyle="#EDE8DF";ctx.fillRect(x-13,y+42,26,10);
+}
+function couch(x,y){
+  ctx.fillStyle="#D8CDBB";rr(ctx,x-70,y-26,140,44,14);ctx.fill();
+  ctx.fillStyle="#CBBFAA";rr(ctx,x-78,y-36,156,16,8);ctx.fill();
+}
+
+/* ================= B 等距 ================= */
+let hoverTile=null;
+cv.addEventListener("mousemove",e=>{if(variant!=="B")return;hoverTile=screenToMap(e.clientX,e.clientY);});
+function pushB(){/* B 走位坐标即时算 */}
+function drawB(t){
+  ctx.fillStyle="#F2EFE9";ctx.fillRect(0,0,innerWidth,innerHeight);
+  for(let x=0;x<12;x++)for(let y=0;y<8;y++){
+    const p=iso(x,y);
+    ctx.fillStyle=((x+y)%2)?"#EFECE6":"#E9E5DE";diamond(p.x,p.y);ctx.fill();
+    if(hoverTile&&hoverTile.x===x&&hoverTile.y===y){ctx.fillStyle="#2b2b2b1f";diamond(p.x,p.y);ctx.fill();}
+  }
+  const d=iso(0,0);ctx.fillStyle="#DAD3C8";diamond(d.x,d.y-14);ctx.fill();
+  const c0=iso(B_TILES.coffee[0],B_TILES.coffee[1]);
+  isoBox(c0.x,c0.y-16,66,66,24,"#FDFCF9","#EAE3D8");ctx.fillStyle="#5f5646";font("16px serif");ctx.fillText("☕",c0.x-8,c0.y-24);
+  B_TILES.desks.forEach((m,i)=>{
+    const occ=i===0;
+    const p=iso(m[0],m[1]);
+    isoBox(p.x,p.y-12,78,56,20,occ?"#FDFCF9":"#FBF7F2","#E7E0D5");
+    isoBox(p.x-28,p.y-38,22,26,18,"#333A44","#2B313B");
+    const sx=occ?(WORKER.screen==="termRed"?"#FFB3B3":(WORKER.screen==="termGreen"?"#9BE29B":(WORKER.screen==="diff"?"#C9D9FF":"#5B8CFF"))):"#20242B";
+    ctx.fillStyle=sx;isoPoly(p.x-14,p.y-30,13,16,12);ctx.fill();
+    if(!occ){ctx.fillStyle="#2E9E5B";font("600 12px system-ui");ctx.fillText("+ 招聘",p.x-21,p.y-50);}
+  });
+  const pos=workerIsoPos(t);
+  const hop=WORKER.state==="walk"?Math.abs(Math.sin(t*9))*5:Math.sin(t*2.4)*1.1;
+  ctx.fillStyle="#00000018";ctx.beginPath();ctx.ellipse(pos.x,pos.y+3,12,5.5,0,0,7);ctx.fill();
+  ctx.fillStyle="#2E3138";rr(ctx,pos.x-11,pos.y-22-hop,22,20,9);ctx.fill();
+  ctx.fillStyle="#F2C9A0";ctx.beginPath();ctx.arc(pos.x,pos.y-30-hop,9.5,0,7);ctx.fill();
+  ctx.fillStyle=SCARF;ctx.fillRect(pos.x-8,pos.y-26-hop,16,4.5);
+  if(WORKER.shakeT>0){ctx.save();ctx.globalAlpha=WORKER.shakeT;ctx.strokeStyle="#E2574C";ctx.lineWidth=3;rr(ctx,pos.x-16,pos.y-46,32,52,10);ctx.stroke();ctx.restore();}
+  if(WORKER.bubble)drawBubble(pos.x,pos.y-52,WORKER.bubble.text,WORKER.bubble.kind);
+  plate(pos.x,pos.y-104,"阿码","程序员",STATENAME[WORKER.state]||"",S.tokens);
+}
+function diamond(x,y){ctx.beginPath();ctx.moveTo(x,y-26);ctx.lineTo(x+52,y);ctx.lineTo(x,y+26);ctx.lineTo(x-52,y);ctx.closePath();}
+function isoBox(cx,cy,w,d,h,top,side){
+  ctx.fillStyle=top;isoBody(cx,cy,w,d,h);ctx.fill();
+  const hw=w/2,hd=d/2;
+  ctx.fillStyle=side;ctx.beginPath();ctx.moveTo(cx-hw,cy);ctx.lineTo(cx,cy+hd/2);ctx.lineTo(cx,cy+hd/2+h);ctx.lineTo(cx-hw,cy+h);ctx.closePath();ctx.fill();
+  ctx.fillStyle="#00000022";ctx.beginPath();ctx.moveTo(cx+hw,cy);ctx.lineTo(cx,cy+hd/2);ctx.lineTo(cx,cy+hd/2+h);ctx.lineTo(cx+hw,cy+h);ctx.closePath();ctx.fill();
+}
+function isoBody(cx,cy,w,d,h){const hw=w/2,hd=d/2;ctx.beginPath();ctx.moveTo(cx,cy-h);ctx.lineTo(cx+hw,cy-h+hd/2);ctx.lineTo(cx,cy-h+hd);ctx.lineTo(cx-hw,cy-h+hd/2);ctx.closePath();}
+function workerIsoPos(t){
+  if(WORKER.state==="walk"&&WORKER.walk){
+    const k=(S.tPlay-WORKER.walk.t0)/WORKER.walk.dur;
+    if(k>=1){WORKER.walk=null;WORKER.state="idle";}
+  }
+  if(WORKER.walk){
+    const k=(S.tPlay-WORKER.walk.t0)/WORKER.walk.dur;
+    const p={x:WORKER.walk.x0+(WORKER.walk.x1-WORKER.walk.x0)*ease(k),y:WORKER.walk.y0+(WORKER.walk.y1-WORKER.walk.y0)*ease(k)};
+    WORKER._bPos=p;return p;
+  }
+  const p=WORKER._bPos||workerIsoHome();
+  WORKER._bPos=p;return p;
+}
+function workerIsoHome(){const p=iso(B_TILES.desks[0][0],B_TILES.desks[0][1]);return{x:p.x+14,y:p.y+8};}
+
+/* ================= C 对照组 ================= */
+function refreshC(){
+  if(variant!=="C")return;
+  const stName=STATENAME[WORKER.state]||"";
+  const live=(WORKER.state==="idle"?(WORKER.spare==="phone"?"摸鱼看手机中 📱（02 票闲时）":"闲 / 呼吸"):"执行中 · "+stName);
+  $("empCards").innerHTML=`
+   <div class="card"><div class="nm">🟥 阿码<span class="pill" style="font-size:11px">${fmtTok(S.tokens)} tok</span></div>
+     <div class="st">程序员 · 引擎 pi（04 票）</div><div class="st live">${live}</div>
+     <div class="st">状态：${S.drawerOpen?"待验收":"进行中"}</div></div>
+   ${[["🟪 文文","产品经理·规划调用"],["🟩 编编","测试·验收辅助"],["＋ 空工位","点击招聘"]].map(([n,r])=>`<div class="card"><div class="nm">${n}</div><div class="st">${r}</div><div class="st color:#aaa">待命</div></div>`).join("")}`;
+  const steps=[["读懂现有 CLI 结构",2],["add export 子命令",4],["写三条测试",2],["自验后 commit（≥18s 或完成后）",6]];
+  const done=S.tPlay;
+  $("stepsC").innerHTML=[["读懂现有 CLI 结构",6],["add export 子命令",18],["写三条测试",22],["自验后 commit a1b2c3",24]]
+    .map(([n,at])=>`<li>${done>=at?"✅ ":"□ "}${n}</li>`).join("");
+  $("artC").innerHTML=S.drawerOpen
+    ?"diff 3 个文件（+42 −20）<br/>测试 5 passed<br/>命令输出见流水<br/>收尾报告（agent 最后文本）<br/><b>本任务</b> "+fmtTok(S.tokens)+" tok"
+    :"产出（完成后填充）";
+  $("tstate").textContent=S.drawerOpen?"待验收":"进行中";
+}
+function openDrawer(){
+  if(variant!=="A")return;
+  const d=$("drawer");
+  d.innerHTML=`<h3>任务 #1<span class="pill" style="font-size:10px">待验收</span></h3>
+   <ul class="steps">${["读懂现有 CLI 结构","add export 子命令","写三条测试","自验后 commit"].map(s=>`<li>${s}</li>`).join("")}</ul>
+   <div class="art">员工已自己提交 a1b2c3（06 票）
+diff：3 个文件 +42 −20
+测试：5 passed
+token：${fmtTok(S.tokens)}
+四件套：diff 摘要 / 文件清单 / 命令输出 / 收尾报告</div>
+   <div class="verdict"><button class="ok" onclick="toast('已通过 · 任务完成（原型动效）')">通过</button><button onclick="toast('已打回 · 同任务迭代（原型）')">打回</button></div>`;
+  d.style.display="block";
+}
+
+/* ================= 循环 ================= */
+const TLN=TL.length;
+let last=performance.now(),idleClock=8;
+function loop(){
+  const now=performance.now();const dt=Math.min(.05,(now-last)/1000);last=now;
+  if(S.playing&&!S.paused){
+    S.tPlay+=dt;S.tokens+=dt*1500;
+    while(S.evIdx<TLN&&S.tPlay>=TL[S.evIdx].at){TL[S.evIdx].f();S.evIdx++;}
+    if(S.evIdx>=TLN)S.playing=false;
+  }
+  // 闲时空闲小动作（未播放时）：tPlay 不推进 → 气泡用 TTL
+  if(!S.playing&&!S.paused){
+    if(WORKER.bubble&&!WORKER.bubble.ask){
+      WORKER.bubble._left=(WORKER.bubble._left??3)-dt;
+      if(WORKER.bubble._left<=0){WORKER.bubble=null;WORKER.spare="none";}
+    }
+    idleClock+=dt;
+    if(idleClock>9&&!WORKER.bubble){idleClock=0;WORKER.spare="phone";say("摸鱼中…（02 票闲时）",3,"info");WORKER.bubble._left=3;}
+  }
+  if(WORKER.shakeT>0)WORKER.shakeT-=dt;
+  if(WORKER.bubble&&WORKER.bubble.until!==Infinity&&S.tPlay>WORKER.bubble.until&&!WORKER.bubble.ask)WORKER.bubble=null;
+  if(variant!=="C"){
+    ctx.clearRect(0,0,innerWidth,innerHeight);
+    S.askRects=[];
+    if(variant==="A")drawA(S.tPlay);else drawB(S.tPlay);
+  }else{
+    cClock+=dt;
+    if(cClock>.5){cClock=0;refreshC();}
+  }
+  requestAnimationFrame(loop);
+}
+let cClock=0;
+
+/* ================= 输入 / 点击 / 下班 ================= */
+$("goBtn").onclick=()=>{$("taskInput").value="";setVariant(variant,false);startPlay();};
+cv.addEventListener("pointerdown",e=>{
+  const p={x:e.clientX,y:e.clientY};
+  for(const r of S.askRects){if(p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h){
+    if(r.act==="approve"){S.paused=false;WORKER.bubble=null;say("（已批复）",0.001,"info");WORKER.bubble=null;toast("已批复 · steer 流（08 票）");log("approved","by=user");}
+    else{S.paused=false;denied=true;WORKER.bubble=null;say("已否决（原型）：改走不装依赖路线",3,"info");toast("否决 · 任务改道（原型）");}
+    return;}}
+  const o=A_office();
+  const hr=A_office._hireRect;
+  if(variant==="A"&&hr&&p.x>=hr.x&&p.x<=hr.x+hr.w&&p.y>=hr.y&&p.y<=hr.y+hr.h){toast("原型：这里将打开招聘三步（角色→能力→录用）");return;}
+  if(variant==="B"){const m=screenToMap(p.x,p.y);
+    if(m&&B_TILES.desks.some((t,i)=>i===1&&t[0]===m.x&&t[1]===m.y)){toast("原型：这里将打开招聘三步（角色→能力→录用）");return;}
+    if(m){toast("格子 "+m.x+","+m.y+"（点击拾取 ✓）");return;}}
+});
+const duty=$("dutyBtn");
+duty.onclick=()=>{
+  const off=!document.body.classList.contains("off");
+  document.body.classList.toggle("off",off);duty.classList.toggle("off",off);
+  duty.textContent=off?"○ 已下班（外观演示 · 语义在 13 票）":"● 上班中";
+  if(off){stopSim();WORKER.bubble={text:"zZ 下班：员工已优雅暂停",kind:"info",until:Infinity}}
+  else WORKER.bubble=null;
+};
+
+/* ================= 挂载 ================= */
+setVariant(variant,false);
+$("taskInput").value="给项目加一个把任务导出成 CSV 的功能，要有测试";
+setTimeout(()=>{if(!S.playing&&!document.body.classList.contains("off"))startPlay();},1200);
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
