@@ -12,9 +12,10 @@ Windows 优先的桌面应用（Electron + React + PixiJS），不绑定任何 a
 ## 先读顺序
 
 1. `README.md` —— 门面与下一步
-2. `.scratch/cubicle/map.md` —— 决策地图（15 条决策索引 + 雾区 + 范围边界）
-3. `GLOSSARY.md` —— 领域术语（公司/项目组/工位/员工/角色/任务/会话/产出）
-4. 与任务相关的那张票的 `## Answer`（在 `.scratch/cubicle/issues/`）
+2. `.scratch/v1/README.md` —— **研发票总览**（13 张、依赖表、怎么取票）
+3. `.scratch/cubicle/map.md` —— 决策地图（15 条决策索引 + 雾区 + 范围边界）
+4. `GLOSSARY.md` —— 领域术语（公司/项目组/工位/员工/角色/任务/会话/产出）
+5. 与任务相关的那张票的 `## Answer`（在 `.scratch/cubicle/issues/`）
 
 ## 票据约定（local-markdown wayfinder）
 
@@ -27,7 +28,17 @@ Windows 优先的桌面应用（Electron + React + PixiJS），不绑定任何 a
 
 启动命令：`/wayfinder .scratch/cubicle/map.md`（不带票号 = 自动取 frontier 第一张）
 
-## 开工：M0 探路（最高优先，先证伪）
+## 研发票（下一步做什么）
+
+- 位置：`.scratch/v1/issues/NN-<slug>.md`，13 张 tracer-bullet 票，每张可独立演示
+- 状态：`Status: ready-for-agent | in-progress | done`
+- **取票**：编号最小 + `Blocked by` 全部 done；动手前把 Status 改 `in-progress`
+- **完成**：逐条勾选验收项，Status 改 `done`
+- 总览与依赖表：`.scratch/v1/README.md`
+
+决策票回答「为什么这样做」，研发票回答「下一步做什么」—— 不要混用。
+
+## 开工：M0 探路（= 研发票 01，最高优先，先证伪）
 
 开工前必须验证三件事，任何一件不成立架构就要改：
 
