@@ -12,16 +12,18 @@
 
 export const ROOM = { width: 640, height: 440 };
 
-/** Desk-card half-size, so the card centers on its coordinate. */
-const ANCHOR = { x: 85, y: 80 };
+/** Workstation-card half-size, so the card centers on its coordinate. */
+const ANCHOR = { x: 85, y: 76 };
 
 /**
  * @param {{ x: number, y: number }} desk
- * @returns {{ left: string, top: string }}
+ * @returns {{ left: string, top: string, zIndex: number }}
  */
 export function deskStyle(desk) {
   return {
     left: `calc(${(desk.x / ROOM.width) * 100}% - ${ANCHOR.x}px)`,
     top: `calc(${(desk.y / ROOM.height) * 100}% - ${ANCHOR.y}px)`,
+    // Dollhouse painter's order: things nearer the viewer sit on top.
+    zIndex: desk.y,
   };
 }

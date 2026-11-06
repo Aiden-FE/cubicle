@@ -66,10 +66,13 @@ function DeskCard({ desk, onHireAt }) {
     >
       <WorkstationSvg />
       {occupant ? <SeatedPersonSvg roleKey={occupant.roleSnapshot.key} /> : null}
-      <div className="desk-label" data-testid={occupant ? "desk-occupant" : undefined}>
-        {occupant ? `${occupant.name} · ${occupant.roleSnapshot.name}` : desk.label}
-      </div>
-      <div className="desk-badge">{empty ? "空置" : "占用中"}</div>
+      {occupant ? (
+        <div className="desk-plate desk-plate-occupied" data-testid="desk-occupant" title={`${occupant.name} · ${occupant.roleSnapshot.name}`}>
+          {occupant.name} · {occupant.roleSnapshot.name}
+        </div>
+      ) : (
+        <div className="desk-plate desk-plate-empty">{desk.label} · 空闲</div>
+      )}
     </div>
   );
 }
