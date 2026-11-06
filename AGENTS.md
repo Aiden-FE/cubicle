@@ -7,7 +7,7 @@
 **Cubicle** —— 一间看得见的办公室：AI 数字员工在工位上干活，你招聘、派活、验收。
 Windows 优先的桌面应用（Electron + React + PixiJS），不绑定任何 agent 引擎（统一适配层调用本机 pi / codex / claude / dsh / qoder…）。
 
-**当前状态：M0 已通过（2026-11-05，见 `docs/spike-m0.md`）；M1 进行中 —— 研发票 02「能开机的空办公室」、03「招聘第一个员工」已通过；下一步 = 研发票 04。**
+**当前状态：M0 已通过（2026-11-05，见 `docs/spike-m0.md`）；M1 已通过（研发票 02「能开机的空办公室」、03「招聘第一个员工」）；M2 进行中 —— 04「说一句话，引擎开跑」已通过（2026-11-06）；下一步 = 研发票 05「工单与产出」。**
 
 ## 先读顺序
 
@@ -50,6 +50,13 @@ Windows 优先的桌面应用（Electron + React + PixiJS），不绑定任何 a
 - SQLite 用内嵌 Node 24 的 `node:sqlite`（主进程与 utilityProcess 均实证可用），零原生依赖。
 - **本机安全策略只放行 electron.exe 写仓库工作区**：Chromium 进程沙箱起不来（退出码 0x80000003，GUI 子系统下还静默）；工作区外（含 %APPDATA%、%LOCALAPPDATA%、dev 下其它目录）所有 electron.exe 写入被拒（0x5）。因此本机跑应用必须 `CUBICLE_DATA_DIR` 指到仓库内（如 `tmp/dev-data`）；`scripts/start.mjs` 对沙箱崩溃码自动降级 `--no-sandbox` 重试一次并打印说明。
 - Electron 是 GUI 子系统进程：console 输出不进父进程管道，探针输出一律 `process.stdout.write` 或落盘。
+
+## M2 引擎（研发票 04）环境坑
+
+- **electron.exe 不能 spawn 外部进程**（本机策略）：一切进程枚举/外部 helper 检查放编排器（普通 Node）做，别放 main/runner。
+- **`tasklist.exe` 在本机不可用**（过滤器命中也退 1 无输出）；进程计数用 PowerShell `Get-CimInstance Win32_Process -Filter "ParentProcessId=…"`，结果用数组包裹取 `.Count`。`wmic.exe` 已不存在。
+- agent 受限会话里 **esbuild / vite build 的 spawn 管道被拒（EPERM）**：build 与 e2e 需提权或全权限会话。
+- 冷启动 Electron 首个 e2e phase 渲染工位可能 >5s（安全策略/AV）；boot 脚手架等待给到 15s。票内 2s 判据从「点发送」起算，不受影响。
 
 ## 硬约束（改这些等于改蓝图，先开票）
 

@@ -12,11 +12,14 @@ async function main() {
     throw new Error("CUBICLE_DATA_DIR is required");
   }
 
-  const [{ openStore }, { createService }, { parseEnvelope, createEvent, TOPICS }] = await Promise.all([
-    import("./store.mjs"),
-    import("./service.mjs"),
-    import("../shared/envelope.mjs"),
-  ]);
+  const [{ openStore }, { createService }, { createRunManager }, { createPiAdapter }, { parseEnvelope, createEvent, TOPICS }] =
+    await Promise.all([
+      import("./store.mjs"),
+      import("./service.mjs"),
+      import("./engine/run-manager.mjs"),
+      import("./engine/pi/adapter.mjs"),
+      import("../shared/envelope.mjs"),
+    ]);
 
   const store = openStore({ dataDir });
   const hostInfo = {
@@ -25,11 +28,21 @@ async function main() {
     dataDir: store.dataDir,
     dbPath: store.dbPath,
   };
-  const service = createService({ store, hostInfo });
+
+  const piAdapter = createPiAdapter({ dataDir: store.dataDir });
 
   const port = process.parentPort;
   /** @param {unknown} envelope */
   const send = (envelope) => port.postMessage(envelope);
+
+  const runManager = createRunManager({
+    store,
+    getAdapter: (engine) => (engine === "pi" ? piAdapter : null),
+    // Engine events ride the run.event topic; the main process coalesces and
+    // the view subscribes per topic. (Payloads stay envelope-shaped.)
+    emit: (payload) => send(createEvent(TOPICS.runEvent, payload)),
+  });
+  const service = createService({ store, hostInfo, runManager });
 
   port.on("message", (event) => {
     const envelope = parseEnvelope(event.data);
@@ -43,6 +56,10 @@ async function main() {
     send(createEvent(TOPICS.hostStatus, { state: "online", ...hostInfo }));
   heartbeat();
   setInterval(heartbeat, 2000);
+
+  // Pay pi's module-import cost while the office settles in, so the first
+  // sentence an employee hears doesn't also wait for the engine's cold start.
+  piAdapter.warm();
 }
 
 main().catch((err) => {

@@ -19,6 +19,7 @@ export interface CubicleBridge {
 export const TOPICS = {
   hostStatus: "host.status",
   domainChanged: "domain.changed",
+  runEvent: "run.event",
 };
 
 declare global {

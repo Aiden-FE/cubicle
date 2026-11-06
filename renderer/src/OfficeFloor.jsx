@@ -6,16 +6,19 @@ import { appearanceFor } from "./roleAppearance.js";
  * The main canvas — always the office. Desks are drawn from database rows.
  * An empty desk is the hiring entrance (glossary: 空工位即招聘入口); an
  * occupied one shows its employee seated AT the desk, seen from behind
- * (dollhouse viewer side). Full characters/animations: ticket 07.
+ * (dollhouse viewer side) — clicking it opens the conversation drawer
+ * (ticket 04). Full characters/animations: ticket 07.
  *
  * @param {{
  *   snapshot: import("./App.jsx").OfficeSnapshotData | null,
  *   status: import("./App.jsx").HostStatusData,
  *   bridgeError: string | null,
  *   onHireAt: (desk: import("./App.jsx").DeskData) => void,
+ *   onTalkTo: (occupant: import("./App.jsx").DeskOccupantData) => void,
+ *   workingIds: Set<number>,
  * }} props
  */
-export function OfficeFloor({ snapshot, status, bridgeError, onHireAt }) {
+export function OfficeFloor({ snapshot, status, bridgeError, onHireAt, onTalkTo, workingIds }) {
   const ready = status.state === "online" && snapshot;
 
   return (
@@ -29,7 +32,13 @@ export function OfficeFloor({ snapshot, status, bridgeError, onHireAt }) {
       <div className="room">
         <div className="room-floor" />
         {snapshot?.desks.map((desk) => (
-          <DeskCard key={desk.id} desk={desk} onHireAt={onHireAt} />
+          <DeskCard
+            key={desk.id}
+            desk={desk}
+            onHireAt={onHireAt}
+            onTalkTo={onTalkTo}
+            working={desk.occupant !== null && workingIds.has(desk.occupant.id)}
+          />
         ))}
       </div>
     </div>
@@ -40,11 +49,14 @@ export function OfficeFloor({ snapshot, status, bridgeError, onHireAt }) {
  * @param {{
  *   desk: import("./App.jsx").DeskData,
  *   onHireAt: (desk: import("./App.jsx").DeskData) => void,
+ *   onTalkTo: (occupant: import("./App.jsx").DeskOccupantData) => void,
+ *   working: boolean,
  * }} props
  */
-function DeskCard({ desk, onHireAt }) {
+function DeskCard({ desk, onHireAt, onTalkTo, working }) {
   const occupant = desk.occupant;
   const empty = occupant === null;
+  const openDesk = empty ? () => onHireAt(desk) : occupant ? () => onTalkTo(occupant) : undefined;
 
   return (
     <div
@@ -52,15 +64,16 @@ function DeskCard({ desk, onHireAt }) {
       data-testid="desk"
       data-empty={empty ? "true" : "false"}
       data-desk-id={desk.id}
-      role={empty ? "button" : undefined}
-      title={empty ? `${desk.label}（空工位 · 点击招聘）` : undefined}
-      tabIndex={empty ? 0 : undefined}
+      data-working={working ? "true" : "false"}
+      role="button"
+      title={empty ? `${desk.label}（空工位 · 点击招聘）` : `${occupant?.name}（点击对话）`}
+      tabIndex={0}
       style={deskStyle(desk)}
-      onClick={empty ? () => onHireAt(desk) : undefined}
+      onClick={openDesk}
       onKeyDown={
-        empty
+        openDesk
           ? (event) => {
-              if (event.key === "Enter" || event.key === " ") onHireAt(desk);
+              if (event.key === "Enter" || event.key === " ") openDesk();
             }
           : undefined
       }
@@ -72,8 +85,12 @@ function DeskCard({ desk, onHireAt }) {
       {occupant ? <SeatedPersonSvg roleKey={occupant.roleSnapshot.key} /> : null}
       <ChairBackSvg />
       {occupant ? (
-        <div className="desk-plate desk-plate-occupied" data-testid="desk-occupant" title={`${occupant.name} · ${occupant.roleSnapshot.name}`}>
-          {occupant.name} · {occupant.roleSnapshot.name}
+        <div
+          className={`desk-plate desk-plate-occupied ${working ? "desk-plate-working" : ""}`}
+          data-testid="desk-occupant"
+          title={`${occupant.name} · ${occupant.roleSnapshot.name}`}
+        >
+          {working ? "干活中…" : `${occupant.name} · ${occupant.roleSnapshot.name}`}
         </div>
       ) : (
         <div className="desk-plate desk-plate-empty">{desk.label} · 空闲</div>

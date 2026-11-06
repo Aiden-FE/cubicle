@@ -62,6 +62,26 @@ import { appError } from "../shared/apperror.mjs";
  * @property {string} tagline
  * @property {RoleManifest} manifest
  *
+ * @typedef {object} EmployeeSessionRow
+ * @property {number} id
+ * @property {number} employeeId
+ * @property {string} engine
+ * @property {string} agentDir
+ * @property {string} sessionsDir
+ * @property {string} workspaceDir
+ * @property {string | null} sessionFile
+ * @property {string} updatedAt
+ *
+ * @typedef {object} RunRow
+ * @property {number} id
+ * @property {number} employeeSessionId
+ * @property {number} employeeId
+ * @property {string} engine
+ * @property {"running" | "completed" | "aborted" | "failed" | "interrupted"} status
+ * @property {string} prompt
+ * @property {string} startedAt
+ * @property {string | null} endedAt
+ *
  * @typedef {object} OfficeSnapshot
  * @property {CompanyRow[]} companies
  * @property {number} activeCompanyId
@@ -110,7 +130,35 @@ CREATE TABLE IF NOT EXISTS employee (
   role_snapshot TEXT NOT NULL,
   hired_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS employee_session (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id INTEGER NOT NULL UNIQUE REFERENCES employee(id),
+  engine TEXT NOT NULL,
+  agent_dir TEXT NOT NULL,
+  sessions_dir TEXT NOT NULL,
+  workspace_dir TEXT NOT NULL,
+  session_file TEXT,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS run (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_session_id INTEGER NOT NULL REFERENCES employee_session(id),
+  employee_id INTEGER NOT NULL REFERENCES employee(id),
+  engine TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'aborted', 'failed', 'interrupted')),
+  prompt TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  ended_at TEXT
+);
 `;
+
+/**
+ * Run outcomes. 'running' is set by createRun; finishRun moves a run to one
+ * of the terminal states. A run still 'running' when the store opens (host
+ * restart / crash) is marked 'interrupted' — ticket 10 builds recovery on
+ * top of that fact.
+ */
+const TERMINAL_RUN_STATUSES = new Set(["completed", "aborted", "failed", "interrupted"]);
 
 /**
  * The v1 preset roster (decision 05: 程序员 / 测试 / 产品经理, default
@@ -236,6 +284,40 @@ function toRole(row) {
 }
 
 /**
+ * @param {Record<string, unknown>} row
+ * @returns {EmployeeSessionRow}
+ */
+function toEmployeeSession(row) {
+  return {
+    id: Number(row.id),
+    employeeId: Number(row.employee_id),
+    engine: String(row.engine),
+    agentDir: String(row.agent_dir),
+    sessionsDir: String(row.sessions_dir),
+    workspaceDir: String(row.workspace_dir),
+    sessionFile: row.session_file === null || row.session_file === undefined ? null : String(row.session_file),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+/**
+ * @param {Record<string, unknown>} row
+ * @returns {RunRow}
+ */
+function toRun(row) {
+  return {
+    id: Number(row.id),
+    employeeSessionId: Number(row.employee_session_id),
+    employeeId: Number(row.employee_id),
+    engine: String(row.engine),
+    status: /** @type {RunRow["status"]} */ (String(row.status)),
+    prompt: String(row.prompt),
+    startedAt: String(row.started_at),
+    endedAt: row.ended_at === null || row.ended_at === undefined ? null : String(row.ended_at),
+  };
+}
+
+/**
  * Freeze a role row into the snapshot shape stored on every employee:
  * identity + manifest, as it is right now.
  *
@@ -259,6 +341,9 @@ export function openStore({ dataDir }) {
   const db = new DatabaseSync(dbPath);
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec(SCHEMA);
+  // A host that died (or was killed) mid-run must not leave phantom 'running'
+  // rows behind: they become 'interrupted' the moment a host opens the store.
+  markInterruptedRuns(db);
   seedIfFirstRun(db);
   seedRoles(db);
 
@@ -386,6 +471,111 @@ export function openStore({ dataDir }) {
     },
 
     /**
+     * @param {number} employeeId
+     * @returns {(EmployeeOccupant & { companyId: number }) | null}
+     */
+    employeeById(employeeId) {
+      const row = db
+        .prepare("SELECT id, company_id, name, role_id, role_snapshot, hired_at FROM employee WHERE id = ?")
+        .get(employeeId);
+      if (!row) return null;
+      return {
+        id: Number(row.id),
+        companyId: Number(row.company_id),
+        name: String(row.name),
+        roleId: Number(row.role_id),
+        roleSnapshot: /** @type {RoleSnapshot} */ (JSON.parse(String(row.role_snapshot))),
+        hiredAt: String(row.hired_at),
+      };
+    },
+
+    /**
+     * One conversation session per employee (ticket 04: 同一员工连续两次对话
+     * 复用同一会话). The row also carries the engine-owned directory layout
+     * and — once the engine has written one — the resume pointer (session
+     * file). Directories are only applied on creation; the session entity is
+     * the stable thing, not the paths.
+     *
+     * @param {{ employeeId: number, engine: string, agentDir: string, sessionsDir: string, workspaceDir: string }} input
+     * @returns {EmployeeSessionRow}
+     */
+    getOrCreateEmployeeSession({ employeeId, engine, agentDir, sessionsDir, workspaceDir }) {
+      if (!db.prepare("SELECT id FROM employee WHERE id = ?").get(employeeId)) {
+        throw appError("unknown_employee", `no employee with id ${employeeId}`);
+      }
+      const existing = db.prepare("SELECT * FROM employee_session WHERE employee_id = ?").get(employeeId);
+      if (existing) return toEmployeeSession(/** @type {Record<string, unknown>} */ (existing));
+      const now = new Date().toISOString();
+      const info = db
+        .prepare(
+          "INSERT INTO employee_session (employee_id, engine, agent_dir, sessions_dir, workspace_dir, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .run(employeeId, engine, agentDir, sessionsDir, workspaceDir, now);
+      return toEmployeeSession(
+        /** @type {Record<string, unknown>} */ (
+          db.prepare("SELECT * FROM employee_session WHERE id = ?").get(Number(info.lastInsertRowid))
+        ),
+      );
+    },
+
+    /**
+     * Record the engine adapter's resume pointer (its session file).
+     *
+     * @param {{ employeeSessionId: number, sessionFile: string }} input
+     */
+    setEmployeeSessionFile({ employeeSessionId, sessionFile }) {
+      db.prepare("UPDATE employee_session SET session_file = ?, updated_at = ? WHERE id = ?").run(
+        sessionFile,
+        new Date().toISOString(),
+        employeeSessionId,
+      );
+    },
+
+    /** @param {number} employeeSessionId @returns {EmployeeSessionRow | null} */
+    employeeSessionById(employeeSessionId) {
+      const row = db.prepare("SELECT * FROM employee_session WHERE id = ?").get(employeeSessionId);
+      return row ? toEmployeeSession(/** @type {Record<string, unknown>} */ (row)) : null;
+    },
+
+    /**
+     * @param {{ employeeId: number, employeeSessionId: number, engine: string, prompt: string }} input
+     * @returns {RunRow}
+     */
+    createRun({ employeeId, employeeSessionId, engine, prompt }) {
+      const startedAt = new Date().toISOString();
+      const info = db
+        .prepare(
+          "INSERT INTO run (employee_session_id, employee_id, engine, status, prompt, started_at) VALUES (?, ?, ?, 'running', ?, ?)",
+        )
+        .run(employeeSessionId, employeeId, engine, prompt, startedAt);
+      return toRun(/** @type {Record<string, unknown>} */ (db.prepare("SELECT * FROM run WHERE id = ?").get(Number(info.lastInsertRowid))));
+    },
+
+    /**
+     * @param {{ runId: number, status: "completed" | "aborted" | "failed" | "interrupted" }} input
+     * @returns {RunRow}
+     */
+    finishRun({ runId, status }) {
+      if (!TERMINAL_RUN_STATUSES.has(status)) {
+        throw appError("invalid_payload", `run cannot finish with status ${status}`);
+      }
+      db.prepare("UPDATE run SET status = ?, ended_at = ? WHERE id = ? AND status = 'running'").run(
+        status,
+        new Date().toISOString(),
+        runId,
+      );
+      const row = db.prepare("SELECT * FROM run WHERE id = ?").get(runId);
+      if (!row) throw appError("unknown_run", `no run with id ${runId}`);
+      return toRun(/** @type {Record<string, unknown>} */ (row));
+    },
+
+    /** @param {number} employeeId @returns {RunRow | null} */
+    latestRunForEmployee(employeeId) {
+      const row = db.prepare("SELECT * FROM run WHERE employee_id = ? ORDER BY id DESC LIMIT 1").get(employeeId);
+      return row ? toRun(/** @type {Record<string, unknown>} */ (row)) : null;
+    },
+
+    /**
      * Remember which company / project group the office view follows.
      * Partial updates are allowed: pass companyId, groupId, or both.
      *
@@ -428,6 +618,21 @@ export function openStore({ dataDir }) {
       db.close();
     },
   };
+}
+
+/**
+ * Runs left 'running' belong to a host that is no longer alive: close that
+ * chapter before any new host starts. Ticket 10 (crash recovery) builds the
+ * resume story on top of this marker.
+ *
+ * @param {DatabaseSync} db
+ */
+function markInterruptedRuns(db) {
+  const running = db.prepare("SELECT id FROM run WHERE status = 'running'").all();
+  if (running.length === 0) return;
+  const endedAt = new Date().toISOString();
+  const finish = db.prepare("UPDATE run SET status = 'interrupted', ended_at = ? WHERE id = ?");
+  for (const row of running) finish.run(endedAt, Number(/** @type {Record<string, unknown>} */ (row).id));
 }
 
 /**

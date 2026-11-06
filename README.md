@@ -4,7 +4,7 @@
 
 - **形态**：Windows 优先的桌面应用（Electron + React + PixiJS）
 - **引擎**：不绑定任何 agent 引擎 —— 统一适配层调用本机已装的 pi / codex / claude / dsh / qoder…
-- **状态**：**M1 推进中 —— 研发票 03「招聘第一个员工」已通过（2026-11-06）**；下一步 = 研发票 04（说一句话，引擎开跑）。
+- **状态**：**M2 推进中 —— 研发票 04「说一句话，引擎开跑」已通过（2026-11-06）**；下一步 = 研发票 05（工单与产出）。
 
 ## 从这里开始
 
@@ -53,11 +53,15 @@ GLOSSARY.md              领域术语
 npm start        # 数据默认落 tmp/dev-data；CUBICLE_DATA_DIR 可覆盖
 ```
 
-右上徽章显示「AgentHost 在线」即宿主就绪。**下一步 = 研发票 04「说一句话，引擎开跑」。**
+右上徽章显示「AgentHost 在线」即宿主就绪。**下一步 = 研发票 05「工单与产出」。**
 
 ## M1 招聘：票 03 已通过（2026-11-06）
 
 点空工位 → 中屏三步招聘（选预设角色 → 能力清单：人格/技能/工具/MCP/引擎/成本 → 确认录用）→ 工位被占用、2D 角色入座；角色在录用时刻**快照**进员工，之后改角色不影响已招的人；同一角色可招多人坐不同工位；重启员工与快照都在。预设三角色（程序员/测试/产品经理，默认引擎 pi）按 key 幂等种子，旧库升级自动获得。验收一条命令：`npm run build:renderer && npm run e2e:03`；票与实现说明见 [.scratch/v1/issues/03-hire-first-employee.md](.scratch/v1/issues/03-hire-first-employee.md)。
+
+## M2 引擎开跑：票 04 已通过（2026-11-06）
+
+点在岗员工 → 右缘**对话浮层**（主画布仍是办公室）说一句话 → 引擎开跑，事件按时间进面板（文本增量、工具调用可折叠、回合 tokens、结束状态）→ **中止**按钮停掉运行。pi SDK 在 AgentHost（utilityProcess）内跑，**每员工独立目录**（`engines/pi/employee-<id>/{agent,sessions,workspace}`，BYOK 走 `engines/pi/models.json`），本机 `~/.pi` 零新增；连续两次对话复用同一会话，重启后从恢复指针**续跑**；引擎无关的 run-manager + 适配协议（14 号票双宿主），11 号票 codex 按同一 seam 接入。验收一条命令：`npm run build:renderer && npm run e2e:04`；票与实现说明见 [.scratch/v1/issues/04-engine-run.md](.scratch/v1/issues/04-engine-run.md)。
 
 ## 核心约束（来自蓝图）
 

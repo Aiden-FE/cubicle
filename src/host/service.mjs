@@ -48,9 +48,15 @@ function requirePositiveId(payload, field) {
 }
 
 /**
- * @param {{ store: ReturnType<import("./store.mjs").openStore>, hostInfo: { pid: number, startedAt: string } }} deps
+ * @param {{ store: ReturnType<import("./store.mjs").openStore>, hostInfo: { pid: number, startedAt: string }, runManager?: ReturnType<import("./engine/run-manager.mjs").createRunManager> }} deps
  */
-export function createService({ store, hostInfo }) {
+export function createService({ store, hostInfo, runManager }) {
+  /** 引擎运行方法共用同一道闸门：没有 run manager 就没有 run.*。 */
+  function requireRunManager() {
+    if (!runManager) throw appError("engine_unavailable", "引擎运行时未启动");
+    return runManager;
+  }
+
   /**
    * @type {Record<string, (payload: unknown) => { payload: unknown, event?: Record<string, unknown> }>}
    */
@@ -95,6 +101,28 @@ export function createService({ store, hostInfo }) {
         payload: { employee, desk },
         event: { reason: "employee.hire", employeeId: employee.id, deskId },
       };
+    },
+
+    // — engine runs (ticket 04) — the reply only starts/answers; engine
+    //   events arrive on the run.event topic, streamed by the run manager.
+
+    "run.start"(payload) {
+      const employeeId = requirePositiveId(payload, "employeeId");
+      const text = requireName(payload, "text");
+      const { run, session } = requireRunManager().start({ employeeId, text });
+      return { payload: { run, session } };
+    },
+
+    "run.abort"(payload) {
+      const employeeId = requirePositiveId(payload, "employeeId");
+      // validation is synchronous; the engine cancel handshake settles later
+      void requireRunManager().abort({ employeeId });
+      return { payload: { ok: true, employeeId } };
+    },
+
+    "run.history"(payload) {
+      const employeeId = requirePositiveId(payload, "employeeId");
+      return { payload: requireRunManager().history({ employeeId }) };
     },
 
     "office.setActive"(payload) {

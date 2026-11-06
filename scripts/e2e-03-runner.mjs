@@ -18,22 +18,25 @@
  * Progress goes to process.stdout.write; evidence lands in <outDir>/<phase>.json.
  */
 import { mkdirSync } from "node:fs";
-import { readdir, stat, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { out, waitFor, evalIn, click, typeInto, readJson } from "./e2e-harness.mjs";
+import {
+  out,
+  waitFor,
+  evalIn,
+  readJson,
+  fingerprintHome,
+  homeDirUntouched,
+  bootAndShowOffice,
+  hireThroughWizard,
+} from "./e2e-harness.mjs";
 
 const E2E_HIRE_A = "E2E 程序员甲";
 const E2E_HIRE_B = "E2E 程序员乙";
 
-/**
- * Engine-owned config folders under the user's home. Hiring must not touch
- * any of them (acceptance: 招聘过程不写任何用户家目录下的引擎配置). The home
- * root itself is fingerprinted too, so a write anywhere else under the home
- * that adds/removes a top-level entry (or rewrites the root's mtime) shows up.
- */
-const HOME_ENGINE_DIRS = [".pi", ".codex", ".claude", ".qoder", ".agents"];
+/** Capability-manifest needles for step 2 (ticket 05 preset roster). */
+const MANIFEST_NEEDLES = ["人格", "技能", "工具", "引擎", "成本", "严谨务实", "git 工作流", "bash", "pi · default", "50 万"];
 
 /**
  * @typedef {object} E2EContext
@@ -46,182 +49,32 @@ const HOME_ENGINE_DIRS = [".pi", ".codex", ".claude", ".qoder", ".agents"];
  * @property {string} outDir
  */
 
-/**
- * Snapshot the user's home: root entry count + mtime, and per engine dir the
- * file count + newest mtime (bounded walk). Hiring must leave all of it equal.
- *
- * @returns {Promise<Record<string, { exists: boolean, files: number, newestMtimeMs: number }>>}
- */
-async function fingerprintHome() {
-  /** @type {Record<string, { exists: boolean, files: number, newestMtimeMs: number }>} */
-  const fingerprint = {};
-  /** @param {string} root @param {number} maxDepth */
-  const walkFingerprint = async (root, maxDepth) => {
-    let files = 0;
-    let newestMtimeMs = 0;
-    let exists = false;
-    /** @param {string} folder @param {number} depth */
-    const walk = async (folder, depth) => {
-      const entries = await readdir(folder, { withFileTypes: true });
-      for (const entry of entries) {
-        if (entry.isDirectory() && depth < maxDepth) {
-          await walk(path.join(folder, entry.name), depth + 1);
-          continue;
-        }
-        const info = await stat(path.join(folder, entry.name));
-        files += 1;
-        newestMtimeMs = Math.max(newestMtimeMs, info.mtimeMs);
-      }
-    };
-    try {
-      exists = true;
-      await walk(root, 0);
-    } catch {
-      exists = false;
-    }
-    return { exists, files, newestMtimeMs };
-  };
-
-  // Depth 0 at the home root: top-level entries only — cheap, and any new
-  // top-level directory (where engine config would live) changes the count.
-  fingerprint["."] = await walkFingerprint(os.homedir(), 0);
-  for (const dir of HOME_ENGINE_DIRS) {
-    fingerprint[dir] = await walkFingerprint(path.join(os.homedir(), dir), 3);
-  }
-  return fingerprint;
-}
-
-/**
- * @param {{ exists: boolean, files: number, newestMtimeMs: number }} before
- * @param {{ exists: boolean, files: number, newestMtimeMs: number }} after
- */
-function homeDirUntouched(before, after) {
-  return before.exists === after.exists && before.files === after.files && before.newestMtimeMs === after.newestMtimeMs;
-}
-
-const DESK_COUNT_JS = `document.querySelectorAll('[data-testid="desk"]').length`;
-const EMPTY_DESK_COUNT_JS = `document.querySelectorAll('[data-testid="desk"][data-empty="true"]').length`;
 const OCCUPIED_DESK_COUNT_JS = `document.querySelectorAll('[data-testid="desk"][data-empty="false"]').length`;
-const BADGE_ONLINE_JS = `document.querySelector('[data-testid="host-status"]')?.dataset.online`;
-const HIRE_STEP_JS = `document.querySelector('[data-testid="hire-step"]')?.dataset.step`;
 const OCCUPANT_TEXT_JS = `Array.from(document.querySelectorAll('[data-testid="desk-occupant"]')).map((n) => n.textContent).join("|")`;
-
-/**
- * Drive the wizard for one hire through the real UI code path (DOM clicks
- * and input events against the live React tree — not bridge shortcuts).
- *
- * @param {import("electron").WebContents} contents
- * @param {{ employeeName: string, backFrom2: boolean, backFrom3: boolean }} options
- * @returns {Promise<{ opened: boolean, roleCount: number, manifestOk: boolean, wentBack2: boolean, wentBack3: boolean, confirmed: boolean }>}
- */
-async function hireThroughWizard(contents, { employeeName, backFrom2, backFrom3 }) {
-  const outcome = {
-    opened: false,
-    roleCount: 0,
-    manifestOk: false,
-    wentBack2: false,
-    wentBack3: false,
-    confirmed: false,
-  };
-
-  await click(contents, '[data-testid="desk"][data-empty="true"]');
-  outcome.opened = await waitFor(
-    async () => (await evalIn(contents, `document.querySelectorAll('[data-testid="role-option"]').length`)) >= 1,
-    { timeoutMs: 3000 },
-  );
-  if (!outcome.opened) return outcome;
-  outcome.roleCount = Number(await evalIn(contents, `document.querySelectorAll('[data-testid="role-option"]').length`));
-
-  await click(contents, '[data-testid="role-option"][data-role-key="programmer"]');
-  await click(contents, '[data-testid="hire-next"]');
-  const onStep2 = await waitFor(async () => (await evalIn(contents, HIRE_STEP_JS)) === "2", { timeoutMs: 2000 });
-  if (!onStep2) return outcome;
-
-  const manifestText = String(
-    await evalIn(contents, `document.querySelector('[data-testid="capability-list"]')?.innerText ?? ''`),
-  );
-  outcome.manifestOk = ["人格", "技能", "工具", "引擎", "成本", "严谨务实", "git 工作流", "bash", "pi · default", "50 万"].every(
-    (needle) => manifestText.includes(needle),
-  );
-
-  /** @param {number} fromStep */
-  const goBackAndReturn = async (fromStep) => {
-    await click(contents, '[data-testid="hire-back"]');
-    const back = await waitFor(async () => (await evalIn(contents, HIRE_STEP_JS)) === String(fromStep - 1), {
-      timeoutMs: 2000,
-    });
-    if (!back) return false;
-    await click(contents, '[data-testid="hire-next"]');
-    return waitFor(async () => (await evalIn(contents, HIRE_STEP_JS)) === String(fromStep), { timeoutMs: 2000 });
-  };
-
-  if (backFrom2) outcome.wentBack2 = await goBackAndReturn(2);
-
-  await click(contents, '[data-testid="hire-next"]');
-  const onStep3 = await waitFor(async () => (await evalIn(contents, HIRE_STEP_JS)) === "3", { timeoutMs: 2000 });
-  if (!onStep3) return outcome;
-
-  if (backFrom3) outcome.wentBack3 = await goBackAndReturn(3);
-
-  await typeInto(contents, '[data-testid="employee-name-input"]', employeeName);
-  await click(contents, '[data-testid="hire-confirm"]');
-  outcome.confirmed = await waitFor(
-    async () => (await evalIn(contents, `document.querySelector('[data-testid="hire-modal"]')`)) === null,
-    { timeoutMs: 4000 },
-  );
-  return outcome;
-}
-
-/**
- * @param {E2EContext} ctx
- */
-async function bootAndShowOffice(ctx) {
-  /** @type {{ name: string, ok: boolean, detail?: string }[]} */
-  const checks = [];
-  /** @param {string} name @param {unknown} ok @param {string} [detail] */
-  const add = (name, ok, detail) => {
-    checks.push({ name, ok: Boolean(ok), detail: detail ?? "" });
-  };
-
-  await waitFor(async () => ctx.supervisor.state === "online", { timeoutMs: 5000 });
-  add("AgentHost 在 5s 内上线", ctx.supervisor.state === "online", `state=${ctx.supervisor.state}`);
-
-  const win = ctx.getMainWindow();
-  if (!win) {
-    add("主窗口存在", false);
-    return { win: null, checks };
-  }
-  add("主窗口存在", true);
-
-  const desksShown = await waitFor(
-    async () => (await evalIn(win.webContents, DESK_COUNT_JS)) === 4,
-    { timeoutMs: 5000 },
-  );
-  add("办公室显示 4 个工位（来自数据库）", desksShown, `${Date.now() - ctx.bootStartMs}ms after boot`);
-
-  const onlineBadge = await waitFor(async () => (await evalIn(win.webContents, BADGE_ONLINE_JS)) === "true", {
-    timeoutMs: 4000,
-  });
-  add("界面显示 AgentHost 在线", onlineBadge);
-
-  return { win, checks };
-}
 
 /**
  * @param {E2EContext} ctx
  * @returns {Promise<{ checks: { name: string, ok: boolean, detail?: string }[], snapshots?: any[] }>}
  */
 async function phaseHire(ctx) {
-  const { win, checks } = await bootAndShowOffice(ctx);
-  if (!win) return { checks };
+  /** @type {{ name: string, ok: boolean, detail?: string }[]} */
+  const checks = [];
   /** @param {string} name @param {unknown} ok @param {string} [detail] */
   const add = (name, ok, detail) => {
     checks.push({ name, ok: Boolean(ok), detail: detail ?? "" });
   };
+  const { win } = await bootAndShowOffice(ctx, add);
+  if (!win) return { checks };
 
   const homeBefore = await fingerprintHome();
 
-  const first = await hireThroughWizard(win.webContents, { employeeName: E2E_HIRE_A, backFrom2: true, backFrom3: false });
+  const first = await hireThroughWizard(win.webContents, {
+    roleKey: "programmer",
+    employeeName: E2E_HIRE_A,
+    backFrom2: true,
+    backFrom3: false,
+    manifestNeedles: MANIFEST_NEEDLES,
+  });
   add("点空工位打开招聘向导，角色库列出 3 个预设", first.opened && first.roleCount === 3, `roles=${first.roleCount}`);
   add("能力清单展示人格、技能、工具、引擎与成本", first.manifestOk);
   add("确认录用提交成功（向导关闭）", first.confirmed);
@@ -235,7 +88,12 @@ async function phaseHire(ctx) {
   );
   add("工位从「空」变「占用」，办公室里出现该员工", occupiedOne && labelShown);
 
-  const second = await hireThroughWizard(win.webContents, { employeeName: E2E_HIRE_B, backFrom2: false, backFrom3: true });
+  const second = await hireThroughWizard(win.webContents, {
+    roleKey: "programmer",
+    employeeName: E2E_HIRE_B,
+    backFrom2: false,
+    backFrom3: true,
+  });
   add("三步可前进/后退（2→1 与 3→2）", first.wentBack2 && second.wentBack3);
   const occupiedTwo = await waitFor(async () => (await evalIn(win.webContents, OCCUPIED_DESK_COUNT_JS)) === 2, {
     timeoutMs: 4000,
@@ -282,12 +140,14 @@ async function phaseHire(ctx) {
  * @param {E2EContext} ctx
  */
 async function phaseVerify(ctx) {
-  const { win, checks } = await bootAndShowOffice(ctx);
-  if (!win) return { checks };
+  /** @type {{ name: string, ok: boolean, detail?: string }[]} */
+  const checks = [];
   /** @param {string} name @param {unknown} ok @param {string} [detail] */
   const add = (name, ok, detail) => {
     checks.push({ name, ok: Boolean(ok), detail: detail ?? "" });
   };
+  const { win } = await bootAndShowOffice(ctx, add);
+  if (!win) return { checks };
 
   const snapshot = /** @type {any} */ (await evalIn(win.webContents, `window.cubicle.invoke('office.get')`));
   const occupants = (snapshot?.desks ?? [])

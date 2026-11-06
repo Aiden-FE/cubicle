@@ -1,17 +1,21 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { OfficeFloor } from "./OfficeFloor.jsx";
 import { HireModal } from "./HireModal.jsx";
+import { ChatOverlay } from "./ChatOverlay.jsx";
 import { Switcher } from "./Switcher.jsx";
 import { StatusChip } from "./StatusChip.jsx";
 
 // Topic names mirrored from src/shared/envelope.mjs TOPICS (process boundary).
-const TOPICS = { hostStatus: "host.status", domainChanged: "domain.changed" };
+const TOPICS = { hostStatus: "host.status", domainChanged: "domain.changed", runEvent: "run.event" };
 
 export function App() {
   const [snapshot, setSnapshot] = useState(/** @type {OfficeSnapshotData | null} */ (null));
   const [status, setStatus] = useState(/** @type {HostStatusData} */ ({ state: "starting" }));
   const [bridgeError, setBridgeError] = useState(/** @type {string | null} */ (null));
   const [hireDesk, setHireDesk] = useState(/** @type {DeskData | null} */ (null));
+  const [chatEmployee, setChatEmployee] = useState(/** @type {DeskOccupantData | null} */ (null));
+  /** employeeId → 正在干活（由 run.event 流的 session_start / agent_end 驱动） */
+  const [workingIds, setWorkingIds] = useState(/** @type {Set<number>} */ (new Set()));
   const lastHostState = useRef(/** @type {string | null} */ (null));
 
   const refresh = useCallback(async () => {
@@ -33,15 +37,29 @@ export function App() {
       // view loaded while the host was still down or restarting.
       if (payload.state === "online" && lastHostState.current !== "online") {
         void refresh();
+        setWorkingIds(new Set());
       }
       lastHostState.current = payload.state;
     });
     const unsubscribeDomain = window.cubicle.subscribe(TOPICS.domainChanged, () => {
       void refresh();
     });
+    const unsubscribeRun = window.cubicle.subscribe(TOPICS.runEvent, (envelope) => {
+      const payload = /** @type {{ employeeId: number, event: { type: string } }} */ (envelope.payload);
+      if (payload.event.type === "session_start") {
+        setWorkingIds((prev) => new Set(prev).add(payload.employeeId));
+      } else if (payload.event.type === "agent_end") {
+        setWorkingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(payload.employeeId);
+          return next;
+        });
+      }
+    });
     return () => {
       unsubscribeStatus();
       unsubscribeDomain();
+      unsubscribeRun();
     };
   }, [refresh]);
 
@@ -51,12 +69,25 @@ export function App() {
     setHireDesk(desk);
   };
 
+  /** @param {DeskOccupantData} occupant */
+  const openChat = (occupant) => {
+    setChatEmployee(occupant);
+  };
+
   return (
     <div className="office-app">
-      <OfficeFloor snapshot={snapshot} status={status} bridgeError={bridgeError} onHireAt={openHire} />
+      <OfficeFloor
+        snapshot={snapshot}
+        status={status}
+        bridgeError={bridgeError}
+        onHireAt={openHire}
+        onTalkTo={openChat}
+        workingIds={workingIds}
+      />
       <StatusChip status={status} />
       <Switcher snapshot={snapshot} onChanged={refresh} />
       {hireDesk ? <HireModal desk={hireDesk} onClose={() => setHireDesk(null)} /> : null}
+      {chatEmployee ? <ChatOverlay employee={chatEmployee} onClose={() => setChatEmployee(null)} /> : null}
     </div>
   );
 }

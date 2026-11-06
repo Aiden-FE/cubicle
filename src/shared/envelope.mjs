@@ -16,6 +16,7 @@ export const ENVELOPE_VERSION = 1;
 export const TOPICS = {
   hostStatus: "host.status",
   domainChanged: "domain.changed",
+  runEvent: "run.event",
 };
 
 /**

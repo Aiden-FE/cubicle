@@ -313,6 +313,154 @@ test("hiring rejects an occupied desk, an unknown desk, and an unknown role", as
   }
 });
 
+/**
+ * Hire the default-company programmer onto desk 1 and return the employee row.
+ * @param {ReturnType<typeof openStore>} store
+ */
+function hireProgrammer(store) {
+  const group = store.officeSnapshot().groups[0];
+  const desk = store.listDesks({ groupId: group.id })[0];
+  const programmer = /** @type {any} */ (store.listRoles().find((r) => r.key === "programmer"));
+  return store.hireEmployee({ deskId: desk.id, roleId: programmer.id, name: "小程" }).employee;
+}
+
+test("employeeById answers with the frozen role snapshot, and null for unknown ids", async () => {
+  const { dataDir, dispose } = await withTempDir("employee-by-id");
+  try {
+    const store = openStore({ dataDir });
+    const employee = hireProgrammer(store);
+    const row = /** @type {any} */ (store.employeeById(employee.id));
+    assert.equal(row.id, employee.id);
+    assert.equal(row.name, "小程");
+    assert.equal(row.roleSnapshot.manifest.engine, "pi");
+    assert.ok(row.roleSnapshot.manifest.persona.includes("严谨务实"));
+    assert.equal(store.employeeById(99999), null);
+    store.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("an employee's engine session is created once, keyed by employee, and survives a reopen", async () => {
+  const { dataDir, dispose } = await withTempDir("engine-session");
+  try {
+    const store = openStore({ dataDir });
+    const employee = hireProgrammer(store);
+    const dirs = {
+      agentDir: path.join(dataDir, "engines", "pi", "agent"),
+      sessionsDir: path.join(dataDir, "engines", "pi", "sessions"),
+      workspaceDir: path.join(dataDir, "engines", "pi", "workspace"),
+    };
+
+    const first = store.getOrCreateEmployeeSession({ employeeId: employee.id, engine: "pi", ...dirs });
+    assert.equal(first.employeeId, employee.id);
+    assert.equal(first.engine, "pi");
+    assert.equal(first.agentDir, dirs.agentDir);
+    assert.equal(first.sessionFile, null);
+
+    // Reuse: same employee → the same session entity, not a second row.
+    const again = store.getOrCreateEmployeeSession({
+      employeeId: employee.id,
+      engine: "pi",
+      ...dirs,
+      agentDir: path.join(dataDir, "elsewhere"),
+    });
+    assert.equal(again.id, first.id);
+    assert.equal(again.agentDir, dirs.agentDir);
+
+    // The resume pointer (engine-owned session file) is stored on the entity.
+    store.setEmployeeSessionFile({ employeeSessionId: first.id, sessionFile: path.join(dirs.sessionsDir, "s.jsonl") });
+
+    store.close();
+    const reopened = openStore({ dataDir });
+    const persisted = reopened.getOrCreateEmployeeSession({ employeeId: employee.id, engine: "pi", ...dirs });
+    assert.equal(persisted.id, first.id);
+    assert.equal(persisted.sessionFile, path.join(dirs.sessionsDir, "s.jsonl"));
+    reopened.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("employee sessions reject unknown employees and one employee never gets two rows", async () => {
+  const { dataDir, dispose } = await withTempDir("engine-session-errors");
+  try {
+    const store = openStore({ dataDir });
+    const dirs = { agentDir: "a", sessionsDir: "s", workspaceDir: "w" };
+    assert.throws(
+      () => store.getOrCreateEmployeeSession({ employeeId: 99999, engine: "pi", ...dirs }),
+      (err) => /** @type {{ code?: string }} */ (err).code === "unknown_employee",
+    );
+    store.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("runs are created as running, finished with an outcome, and the latest run per employee survives a reopen", async () => {
+  const { dataDir, dispose } = await withTempDir("runs");
+  try {
+    const store = openStore({ dataDir });
+    const employee = hireProgrammer(store);
+    const session = store.getOrCreateEmployeeSession({
+      employeeId: employee.id,
+      engine: "pi",
+      agentDir: "a",
+      sessionsDir: "s",
+      workspaceDir: "w",
+    });
+
+    const firstRun = store.createRun({ employeeId: employee.id, employeeSessionId: session.id, engine: "pi", prompt: "读一下 hello.txt" });
+    assert.equal(firstRun.status, "running");
+    assert.equal(firstRun.prompt, "读一下 hello.txt");
+    assert.equal(firstRun.employeeSessionId, session.id);
+    assert.equal(firstRun.endedAt, null);
+
+    const finished = store.finishRun({ runId: firstRun.id, status: "completed" });
+    assert.equal(finished.status, "completed");
+    assert.notEqual(finished.endedAt, null);
+
+    // A second run makes the first one no longer the latest.
+    const secondRun = store.createRun({ employeeId: employee.id, employeeSessionId: session.id, engine: "pi", prompt: "再读一次" });
+    store.finishRun({ runId: secondRun.id, status: "aborted" });
+
+    store.close();
+    const reopened = openStore({ dataDir });
+    const latest = /** @type {any} */ (reopened.latestRunForEmployee(employee.id));
+    assert.equal(latest.id, secondRun.id);
+    assert.equal(latest.status, "aborted");
+    assert.equal(/** @type {any} */ (reopened.employeeById(employee.id)).name, "小程");
+    reopened.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("opening the store marks runs that were still running as interrupted", async () => {
+  const { dataDir, dispose } = await withTempDir("runs-interrupted");
+  try {
+    const store = openStore({ dataDir });
+    const employee = hireProgrammer(store);
+    const session = store.getOrCreateEmployeeSession({
+      employeeId: employee.id,
+      engine: "pi",
+      agentDir: "a",
+      sessionsDir: "s",
+      workspaceDir: "w",
+    });
+    store.createRun({ employeeId: employee.id, employeeSessionId: session.id, engine: "pi", prompt: "会中断" });
+    store.close();
+
+    const reopened = openStore({ dataDir });
+    const latest = /** @type {any} */ (reopened.latestRunForEmployee(employee.id));
+    assert.equal(latest.status, "interrupted");
+    assert.notEqual(latest.endedAt, null);
+    reopened.close();
+  } finally {
+    await dispose();
+  }
+});
+
 test("database and support folders live inside the given data directory in WAL mode", async () => {
   const { dataDir, dispose } = await withTempDir("layout");
   try {
