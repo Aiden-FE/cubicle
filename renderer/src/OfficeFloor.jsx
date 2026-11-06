@@ -5,7 +5,8 @@ import { appearanceFor } from "./roleAppearance.js";
 /**
  * The main canvas — always the office. Desks are drawn from database rows.
  * An empty desk is the hiring entrance (glossary: 空工位即招聘入口); an
- * occupied one shows its employee sitting at the workstation.
+ * occupied one shows its employee seated AT the desk, seen from behind
+ * (dollhouse viewer side). Full characters/animations: ticket 07.
  *
  * @param {{
  *   snapshot: import("./App.jsx").OfficeSnapshotData | null,
@@ -64,8 +65,12 @@ function DeskCard({ desk, onHireAt }) {
           : undefined
       }
     >
-      <WorkstationSvg />
+      {/* Layer order paints the seated person INTO the chair: desk &
+          monitor → chair seat → person (back view) → chair backrest/base. */}
+      <DeskArtSvg />
+      <ChairSeatSvg />
       {occupant ? <SeatedPersonSvg roleKey={occupant.roleSnapshot.key} /> : null}
+      <ChairBackSvg />
       {occupant ? (
         <div className="desk-plate desk-plate-occupied" data-testid="desk-occupant" title={`${occupant.name} · ${occupant.roleSnapshot.name}`}>
           {occupant.name} · {occupant.roleSnapshot.name}
@@ -79,11 +84,10 @@ function DeskCard({ desk, onHireAt }) {
 
 /**
  * Stylized workstation: desk with legs + shadow, monitor on a stand,
- * keyboard and mouse on the near edge, office chair (headrest, backrest,
- * gas lift, five-star base) between the desk and the viewer. Placeholder
- * art until ticket 07 swaps the SceneRenderer adapter.
+ * keyboard and mouse on the near edge (all facing a worker seated on the
+ * viewer side). Placeholder art until ticket 07 swaps the SceneRenderer.
  */
-function WorkstationSvg() {
+function DeskArtSvg() {
   return (
     <svg className="desk-art" viewBox="0 0 170 152" aria-hidden="true">
       <defs>
@@ -124,16 +128,31 @@ function WorkstationSvg() {
         />
       </g>
 
-      {/* keyboard + mouse on the near edge */}
+      {/* keyboard + mouse on the near edge, toward the seated worker */}
       <rect x="52" y="52" width="50" height="9" rx="2.5" fill="#e4ddcd" stroke="#b9b1a0" strokeWidth="1" />
       <line x1="56" y1="55" x2="98" y2="55" stroke="#c8c0ae" strokeWidth="1" />
       <line x1="56" y1="58" x2="98" y2="58" stroke="#c8c0ae" strokeWidth="1" />
       <ellipse cx="116" cy="56" rx="7.5" ry="5.5" fill="#e4ddcd" stroke="#b9b1a0" strokeWidth="1" />
       <line x1="116" y1="51.5" x2="116" y2="56" stroke="#b9b1a0" strokeWidth="1" />
+    </svg>
+  );
+}
 
-      {/* office chair, nearest to the viewer */}
+/** Chair seat cushion — painted under the seated person. */
+function ChairSeatSvg() {
+  return (
+    <svg className="desk-art" viewBox="0 0 170 152" aria-hidden="true">
+      <rect x="68" y="64" width="34" height="12" rx="6" fill="#5d6459" />
+    </svg>
+  );
+}
+
+/** Chair backrest + gas lift + five-star base — painted OVER the person's
+ *  lower torso, so they read as sitting IN the chair, viewer-side. */
+function ChairBackSvg() {
+  return (
+    <svg className="desk-art" viewBox="0 0 170 152" aria-hidden="true">
       <g className="chair">
-        <rect x="68" y="64" width="34" height="12" rx="6" fill="#5d6459" />
         <rect x="61" y="74" width="48" height="32" rx="11" fill="#4a4f45" />
         <rect x="67" y="80" width="36" height="20" rx="8" fill="#565d50" />
         <rect x="82" y="106" width="6" height="14" fill="#2f332c" />
@@ -153,37 +172,44 @@ function WorkstationSvg() {
 }
 
 /**
- * 2D flat character seated at the workstation (Marvis-style flat people over
- * the scene; full spritesheets land with ticket 07). Head clears the desk,
- * arms rest toward the keyboard, body color comes from the shared role
- * appearance map.
+ * The seated employee, BACK view — they face the monitor, away from the
+ * dollhouse camera. Head is hair-only (no face), shoulders drop behind the
+ * chair backrest (painted after), arms reach over the desk edge to the
+ * keyboard. Role reads from clothing color + back-readable features
+ * (glasses temples, headset, scarf). Spritesheets/animation: ticket 07.
  *
  * @param {{ roleKey: string }} props
  */
 function SeatedPersonSvg({ roleKey }) {
   const color = appearanceFor(roleKey);
   return (
-    <svg className="desk-person" viewBox="0 0 170 152" aria-hidden="true" data-testid="desk-person" data-role-key={roleKey}>
-      {/* arms reaching the keyboard */}
-      <path d="M70 74 L58 62" stroke={color.top} strokeWidth="7" strokeLinecap="round" />
-      <path d="M100 74 L112 62" stroke={color.top} strokeWidth="7" strokeLinecap="round" />
-      <circle cx="57" cy="61" r="3.6" fill={color.skin} />
-      <circle cx="113" cy="61" r="3.6" fill={color.skin} />
-      {/* torso in the chair */}
-      <path d="M67 92 Q67 68 85 68 Q103 68 103 92 Z" fill={color.top} />
-      {/* head */}
-      <circle cx="85" cy="58" r="10" fill={color.skin} />
-      <path d="M75 57 Q75.5 47.5 85 47.5 Q94.5 47.5 95 57 Q90 53 85 53 Q80 53 75 57 Z" fill={color.hair} />
+    <svg className="desk-art desk-person" viewBox="0 0 170 152" aria-hidden="true" data-testid="desk-person" data-role-key={roleKey}>
+      {/* arms reaching over the near desk edge to keyboard/mouse */}
+      <path d="M72 66 L58 58" stroke={color.top} strokeWidth="8" strokeLinecap="round" />
+      <path d="M98 66 L110 58" stroke={color.top} strokeWidth="8" strokeLinecap="round" />
+      <circle cx="57" cy="57" r="3.8" fill={color.skin} />
+      <circle cx="111" cy="57" r="3.8" fill={color.skin} />
+      {/* torso: shoulders wide, body continues behind the backrest */}
+      <path d="M64 92 Q64 64 85 64 Q106 64 106 92 Z" fill={color.top} />
+      {/* scarf/collar across the shoulders (visible from behind) */}
+      {color.decor === "tie" ? <path d="M72 70 Q85 76 98 70 L98 74 Q85 80 72 74 Z" fill="#c98a2c" /> : null}
+      {/* head from behind: all hair, a hint of neck */}
+      <rect x="80" y="62" width="10" height="6" rx="2.5" fill={color.skin} />
+      <circle cx="85" cy="55" r="10.5" fill={color.hair} />
+      {/* glasses temples running to the ears */}
       {color.decor === "glasses" ? (
-        <g stroke="#2b2620" strokeWidth="1.2" fill="none">
-          <circle cx="80.6" cy="58.6" r="3.2" />
-          <circle cx="89.4" cy="58.6" r="3.2" />
-          <line x1="83.8" y1="58.6" x2="86.2" y2="58.6" />
+        <g stroke="#2b2620" strokeWidth="1.3">
+          <line x1="75" y1="55" x2="74" y2="58" />
+          <line x1="95" y1="55" x2="96" y2="58" />
         </g>
       ) : null}
-      {color.decor === "tie" ? <path d="M79.5 68 L85 73 L90.5 68 L88.5 75 L81.5 75 Z" fill="#c98a2c" /> : null}
+      {/* headset seen from behind: band + ear cups */}
       {color.decor === "headset" ? (
-        <path d="M75 52 Q75 44 85 44 Q95 44 95 52" stroke={color.hair} strokeWidth="2.4" fill="none" />
+        <g>
+          <path d="M74.5 52 Q75 43.5 85 43.5 Q95 43.5 95.5 52" stroke="#313831" strokeWidth="2.6" fill="none" />
+          <rect x="72.4" y="50" width="4.6" height="9" rx="2.3" fill="#313831" />
+          <rect x="93" y="50" width="4.6" height="9" rx="2.3" fill="#313831" />
+        </g>
       ) : null}
     </svg>
   );

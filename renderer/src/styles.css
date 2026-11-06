@@ -99,9 +99,14 @@ body {
   align-items: center;
 }
 
+/* stacked workstation layers: desk → seat → person → chair back */
 .desk-art {
+  position: absolute;
+  left: 0;
+  top: 0;
   width: 170px;
   height: 152px;
+  pointer-events: none;
 }
 
 /* Nameplate sits INSIDE the workstation art's bottom band, so desk cards
@@ -141,15 +146,6 @@ body {
 .desk-empty:focus-visible .desk-plate {
   color: var(--ink);
   border-color: var(--ink-soft);
-}
-
-.desk-person {
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 170px;
-  height: 152px;
-  pointer-events: none;
 }
 
 .desk-plate-occupied {
