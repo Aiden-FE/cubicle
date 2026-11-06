@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { OfficeFloor } from "./OfficeFloor.jsx";
+import { HireModal } from "./HireModal.jsx";
 import { Switcher } from "./Switcher.jsx";
 import { StatusChip } from "./StatusChip.jsx";
 
@@ -10,6 +11,7 @@ export function App() {
   const [snapshot, setSnapshot] = useState(/** @type {OfficeSnapshotData | null} */ (null));
   const [status, setStatus] = useState(/** @type {HostStatusData} */ ({ state: "starting" }));
   const [bridgeError, setBridgeError] = useState(/** @type {string | null} */ (null));
+  const [hireDesk, setHireDesk] = useState(/** @type {DeskData | null} */ (null));
   const lastHostState = useRef(/** @type {string | null} */ (null));
 
   const refresh = useCallback(async () => {
@@ -43,22 +45,66 @@ export function App() {
     };
   }, [refresh]);
 
+  /** @param {DeskData} desk */
+  const openHire = (desk) => {
+    if (hireDesk) return;
+    setHireDesk(desk);
+  };
+
   return (
     <div className="office-app">
-      <OfficeFloor snapshot={snapshot} status={status} bridgeError={bridgeError} />
+      <OfficeFloor snapshot={snapshot} status={status} bridgeError={bridgeError} onHireAt={openHire} />
       <StatusChip status={status} />
       <Switcher snapshot={snapshot} onChanged={refresh} />
+      {hireDesk ? <HireModal desk={hireDesk} onClose={() => setHireDesk(null)} /> : null}
     </div>
   );
 }
 
 /**
+ * @typedef {object} RoleManifestData
+ * @property {string} persona
+ * @property {string[]} skills
+ * @property {string[]} tools
+ * @property {string[]} mcpServers
+ * @property {string} engine
+ * @property {string} model
+ * @property {{ tokenBudgetPerTask: number }} cost
+ *
+ * @typedef {object} RoleData
+ * @property {number} id
+ * @property {string} key
+ * @property {string} name
+ * @property {string} tagline
+ * @property {RoleManifestData} manifest
+ *
+ * @typedef {object} RoleSnapshotData
+ * @property {string} key
+ * @property {string} name
+ * @property {string} tagline
+ * @property {RoleManifestData} manifest
+ *
+ * @typedef {object} DeskOccupantData
+ * @property {number} id
+ * @property {string} name
+ * @property {number} roleId
+ * @property {string} hiredAt
+ * @property {RoleSnapshotData} roleSnapshot
+ *
+ * @typedef {object} DeskData
+ * @property {number} id
+ * @property {number} groupId
+ * @property {string} label
+ * @property {number} x
+ * @property {number} y
+ * @property {DeskOccupantData | null} occupant
+ *
  * @typedef {object} OfficeSnapshotData
  * @property {{ id: number, name: string, createdAt: string }[]} companies
  * @property {number} activeCompanyId
  * @property {{ id: number, companyId: number, name: string }[]} groups
  * @property {number | null} activeGroupId
- * @property {{ id: number, groupId: number, label: string, x: number, y: number, occupant: null }[]} desks
+ * @property {DeskData[]} desks
  * @property {{ pid: number, startedAt: string, dataDir: string, dbPath: string }} host
  *
  * @typedef {object} HostStatusData

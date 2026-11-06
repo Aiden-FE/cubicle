@@ -120,6 +120,79 @@ test("office.setActive for an unknown company answers with an error", async () =
   }
 });
 
+test("role.list answers with the three preset roles and no events", async () => {
+  const { service, dispose } = await withService("roles");
+  try {
+    const { reply, events } = service.handle(createInvoke("h1", "role.list", {}));
+    assert.equal(reply.ok, true);
+    assert.deepEqual(events, []);
+    const roles = /** @type {any} */ (reply.payload).roles;
+    assert.deepEqual(
+      roles.map((/** @type {any} */ r) => r.key),
+      ["programmer", "tester", "pm"],
+    );
+    assert.deepEqual(roles[0].manifest.tools, ["read", "write", "edit", "bash", "grep"]);
+  } finally {
+    await dispose();
+  }
+});
+
+test("employee.hire occupies the desk, answers with employee + desk, and emits domain.changed", async () => {
+  const { service, dispose } = await withService("hire");
+  try {
+    const rolesReply = service.handle(createInvoke("h2", "role.list", {})).reply;
+    const programmer = /** @type {any} */ (rolesReply.payload).roles.find((/** @type {any} */ r) => r.key === "programmer");
+    const deskId = /** @type {any} */ (service.handle(createInvoke("h3", "office.get", {})).reply.payload)
+      .desks[0].id;
+
+    const { reply, events } = service.handle(
+      createInvoke("h4", "employee.hire", { deskId, roleId: programmer.id, name: "E2E 程序员" }),
+    );
+    assert.equal(reply.ok, true);
+    assert.equal(/** @type {any} */ (reply.payload).employee.name, "E2E 程序员");
+    assert.equal(/** @type {any} */ (reply.payload).employee.roleSnapshot.manifest.engine, "pi");
+    assert.equal(/** @type {any} */ (reply.payload).desk.occupant.name, "E2E 程序员");
+    assert.equal(events.length, 1);
+    assert.equal(events[0].topic, "domain.changed");
+    assert.equal(/** @type {any} */ (events[0].payload).reason, "employee.hire");
+
+    // the office snapshot now shows an occupied desk
+    const snapshot = /** @type {any} */ (service.handle(createInvoke("h5", "office.get", {})).reply.payload);
+    const occupied = snapshot.desks.filter((/** @type {any} */ d) => d.occupant !== null);
+    assert.equal(occupied.length, 1);
+    assert.equal(occupied[0].occupant.roleSnapshot.key, "programmer");
+  } finally {
+    await dispose();
+  }
+});
+
+test("employee.hire validates its payload and forwards domain errors", async () => {
+  const { service, dispose } = await withService("hire-bad");
+  try {
+    const programmerId = /** @type {any} */ (
+      service.handle(createInvoke("h6", "role.list", {})).reply.payload
+    ).roles[0].id;
+    const deskId = /** @type {any} */ (service.handle(createInvoke("h7", "office.get", {})).reply.payload)
+      .desks[0].id;
+    for (const payload of [{}, { deskId: 0, roleId: programmerId }, { deskId, roleId: 0 }, { deskId: "x", roleId: 1 }]) {
+      const { reply, events } = service.handle(createInvoke("h8", "employee.hire", payload));
+      assert.equal(reply.ok, false);
+      assert.equal(reply.error?.code, "invalid_payload");
+      assert.deepEqual(events, []);
+    }
+    const occupiedReply = service.handle(createInvoke("h9", "employee.hire", { deskId, roleId: programmerId })).reply;
+    assert.equal(occupiedReply.ok, true);
+    const again = service.handle(createInvoke("h10", "employee.hire", { deskId, roleId: programmerId }));
+    assert.equal(again.reply.ok, false);
+    assert.equal(again.reply.error?.code, "desk_occupied");
+    assert.deepEqual(again.events, []);
+    const unknownRole = service.handle(createInvoke("h11", "employee.hire", { deskId: deskId + 1, roleId: 99999 }));
+    assert.equal(unknownRole.reply.error?.code, "unknown_role");
+  } finally {
+    await dispose();
+  }
+});
+
 test("unknown methods answer with an unknown_method error reply", async () => {
   const { service, dispose } = await withService("unknown");
   try {

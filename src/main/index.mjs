@@ -182,7 +182,10 @@ app.whenReady().then(async () => {
   createMainWindow();
 
   if (e2eEnabled) {
-    const { runE2E } = await import(pathToFileURL(path.join(rootDir, "scripts", "e2e-02-runner.mjs")).href);
+    // The acceptance runner lives under scripts/ (main stays business-free);
+    // the orchestrator picks which ticket's runner to drive.
+    const runnerRelative = process.env.CUBICLE_E2E_RUNNER ?? path.join("scripts", "e2e-02-runner.mjs");
+    const { runE2E } = await import(pathToFileURL(path.join(rootDir, runnerRelative)).href);
     const exitCode = await runE2E({
       app,
       getMainWindow: () => mainWindow,
@@ -190,7 +193,7 @@ app.whenReady().then(async () => {
       dataDir: resolveDataDir(),
       bootStartMs,
       phase: e2ePhase,
-      outDir: path.join(rootDir, "tmp", "e2e-02"),
+      outDir: process.env.CUBICLE_E2E_OUT_DIR ?? path.join(rootDir, "tmp", "e2e-02"),
     });
     app.exit(exitCode);
   }

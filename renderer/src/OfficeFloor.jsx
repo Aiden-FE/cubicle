@@ -3,14 +3,17 @@ import { deskStyle } from "./scene/domScene.js";
 
 /**
  * The main canvas — always the office. Desks are drawn from database rows.
+ * An empty desk is the hiring entrance (glossary: 空工位即招聘入口); an
+ * occupied one shows its employee sitting at the workstation.
  *
  * @param {{
  *   snapshot: import("./App.jsx").OfficeSnapshotData | null,
  *   status: import("./App.jsx").HostStatusData,
  *   bridgeError: string | null,
+ *   onHireAt: (desk: import("./App.jsx").DeskData) => void,
  * }} props
  */
-export function OfficeFloor({ snapshot, status, bridgeError }) {
+export function OfficeFloor({ snapshot, status, bridgeError, onHireAt }) {
   const ready = status.state === "online" && snapshot;
 
   return (
@@ -24,7 +27,7 @@ export function OfficeFloor({ snapshot, status, bridgeError }) {
       <div className="room">
         <div className="room-floor" />
         {snapshot?.desks.map((desk) => (
-          <DeskCard key={desk.id} desk={desk} />
+          <DeskCard key={desk.id} desk={desk} onHireAt={onHireAt} />
         ))}
       </div>
     </div>
@@ -32,14 +35,40 @@ export function OfficeFloor({ snapshot, status, bridgeError }) {
 }
 
 /**
- * @param {{ desk: import("./App.jsx").OfficeSnapshotData["desks"][number] }} props
+ * @param {{
+ *   desk: import("./App.jsx").DeskData,
+ *   onHireAt: (desk: import("./App.jsx").DeskData) => void,
+ * }} props
  */
-function DeskCard({ desk }) {
+function DeskCard({ desk, onHireAt }) {
+  const occupant = desk.occupant;
+  const empty = occupant === null;
+
   return (
-    <div className="desk" data-testid="desk" data-empty="true" style={deskStyle(desk)}>
+    <div
+      className={`desk ${empty ? "desk-empty" : "desk-occupied"}`}
+      data-testid="desk"
+      data-empty={empty ? "true" : "false"}
+      data-desk-id={desk.id}
+      role={empty ? "button" : undefined}
+      title={empty ? `${desk.label}（空工位 · 点击招聘）` : undefined}
+      tabIndex={empty ? 0 : undefined}
+      style={deskStyle(desk)}
+      onClick={empty ? () => onHireAt(desk) : undefined}
+      onKeyDown={
+        empty
+          ? (event) => {
+              if (event.key === "Enter" || event.key === " ") onHireAt(desk);
+            }
+          : undefined
+      }
+    >
       <WorkstationSvg />
-      <div className="desk-label">{desk.label}</div>
-      <div className="desk-badge">空置</div>
+      {occupant ? <SeatedPersonSvg roleKey={occupant.roleSnapshot.key} /> : null}
+      <div className="desk-label" data-testid={occupant ? "desk-occupant" : undefined}>
+        {occupant ? `${occupant.name} · ${occupant.roleSnapshot.name}` : desk.label}
+      </div>
+      <div className="desk-badge">{empty ? "空置" : "占用中"}</div>
     </div>
   );
 }
@@ -115,6 +144,48 @@ function WorkstationSvg() {
         <circle cx="74" cy="135" r="3" fill="#2f332c" />
         <circle cx="96" cy="135" r="3" fill="#2f332c" />
       </g>
+    </svg>
+  );
+}
+
+/**
+ * 2D flat character seated at the workstation (Marvis-style flat people over
+ * the scene; full spritesheets land with ticket 07). Head clears the desk,
+ * arms rest toward the keyboard, body color comes from the role palette.
+ *
+ * @param {{ roleKey: string }} props
+ */
+function SeatedPersonSvg({ roleKey }) {
+  /** @type {Record<string, { skin: string, hair: string, top: string }>} */
+  const palette = {
+    programmer: { skin: "#e8b28c", hair: "#31404f", top: "#3c4d5c" },
+    tester: { skin: "#d9a06b", hair: "#4f3140", top: "#4f6b52" },
+    pm: { skin: "#eec39a", hair: "#2b2620", top: "#a5642f" },
+  };
+  const color = palette[roleKey] ?? palette.programmer;
+  return (
+    <svg className="desk-person" viewBox="0 0 170 152" aria-hidden="true" data-testid="desk-person" data-role-key={roleKey}>
+      {/* arms reaching the keyboard */}
+      <path d="M70 74 L58 62" stroke={color.top} strokeWidth="7" strokeLinecap="round" />
+      <path d="M100 74 L112 62" stroke={color.top} strokeWidth="7" strokeLinecap="round" />
+      <circle cx="57" cy="61" r="3.6" fill={color.skin} />
+      <circle cx="113" cy="61" r="3.6" fill={color.skin} />
+      {/* torso in the chair */}
+      <path d="M67 92 Q67 68 85 68 Q103 68 103 92 Z" fill={color.top} />
+      {/* head */}
+      <circle cx="85" cy="58" r="10" fill={color.skin} />
+      <path d="M75 57 Q75.5 47.5 85 47.5 Q94.5 47.5 95 57 Q90 53 85 53 Q80 53 75 57 Z" fill={color.hair} />
+      {roleKey === "programmer" ? (
+        <g stroke="#2b2620" strokeWidth="1.2" fill="none">
+          <circle cx="80.6" cy="58.6" r="3.2" />
+          <circle cx="89.4" cy="58.6" r="3.2" />
+          <line x1="83.8" y1="58.6" x2="86.2" y2="58.6" />
+        </g>
+      ) : null}
+      {roleKey === "pm" ? <path d="M79.5 68 L85 73 L90.5 68 L88.5 75 L81.5 75 Z" fill="#c98a2c" /> : null}
+      {roleKey === "tester" ? (
+        <path d="M75 52 Q75 44 85 44 Q95 44 95 52" stroke="#4f3140" strokeWidth="2.4" fill="none" />
+      ) : null}
     </svg>
   );
 }

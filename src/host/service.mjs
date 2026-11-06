@@ -31,6 +31,20 @@ function requireName(payload, field) {
 }
 
 /**
+ * @param {unknown} payload
+ * @param {string} field
+ * @returns {number}
+ */
+function requirePositiveId(payload, field) {
+  const record = /** @type {Record<string, unknown>} */ (payload ?? {});
+  const value = Number(record[field]);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw appError("invalid_payload", `${field} must be a positive integer`);
+  }
+  return value;
+}
+
+/**
  * @param {{ store: ReturnType<import("./store.mjs").openStore>, hostInfo: { pid: number, startedAt: string } }} deps
  */
 export function createService({ store, hostInfo }) {
@@ -62,6 +76,24 @@ export function createService({ store, hostInfo }) {
       return {
         payload: { group, desks },
         event: { reason: "projectGroup.create", groupId: group.id },
+      };
+    },
+
+    "role.list"() {
+      return { payload: { roles: store.listRoles() } };
+    },
+
+    "employee.hire"(payload) {
+      const deskId = requirePositiveId(payload, "deskId");
+      const roleId = requirePositiveId(payload, "roleId");
+      const rawName = /** @type {Record<string, unknown>} */ (payload ?? {}).name;
+      if (rawName !== undefined && rawName !== null && typeof rawName !== "string") {
+        throw appError("invalid_payload", "name must be a string");
+      }
+      const { employee, desk } = store.hireEmployee({ deskId, roleId, name: /** @type {string | undefined} */ (rawName ?? undefined) });
+      return {
+        payload: { employee, desk },
+        event: { reason: "employee.hire", employeeId: employee.id, deskId },
       };
     },
 
