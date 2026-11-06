@@ -175,18 +175,40 @@ export function openStore({ dataDir }) {
     },
 
     /**
+     * Remember which company / project group the office view follows.
+     * Partial updates are allowed: pass companyId, groupId, or both.
+     *
+     * @param {{ companyId?: number, groupId?: number }} selection
+     */
+    setActive({ companyId, groupId }) {
+      const current = readActive(db);
+      const next = {
+        companyId: companyId ?? current.companyId,
+        groups: { ...current.groups },
+      };
+      if (groupId !== undefined) {
+        if (companyId === undefined) throw appError("invalid_payload", "groupId requires companyId");
+        next.groups[companyId] = groupId;
+      }
+      writeActive(db, next);
+    },
+
+    /**
      * @returns {OfficeSnapshot}
      */
     officeSnapshot() {
       const companies = db.prepare("SELECT * FROM company ORDER BY id").all().map((row) =>
         toCompany(/** @type {Record<string, unknown>} */ (row)),
       );
-      // M1 has no switcher: the office shows the first company and its most
-      // recently created group, so a freshly built group's desks reach the
-      // canvas (and the DB→view path stays provable).
-      const activeCompanyId = companies[0]?.id ?? 0;
+      const active = readActive(db);
+      let activeCompanyId = companies.some((c) => c.id === active.companyId)
+        ? active.companyId
+        : (companies[0]?.id ?? 0);
       const groups = this.listGroups({ companyId: activeCompanyId });
-      const activeGroupId = groups.at(-1)?.id ?? null;
+      const chosen = active.groups[activeCompanyId];
+      const activeGroupId = groups.some((g) => g.id === chosen)
+        ? chosen
+        : (groups.at(-1)?.id ?? null);
       const desks = activeGroupId === null ? [] : this.listDesks({ groupId: activeGroupId });
       return { companies, activeCompanyId, groups, activeGroupId, desks };
     },
@@ -206,6 +228,39 @@ function insertProjectGroupDesks(db, groupId) {
   DESK_SLOTS.forEach((slot, index) => {
     insert.run(groupId, `工位 ${index + 1}`, slot.x, slot.y);
   });
+}
+
+/**
+ * The office view's current selection, persisted in meta as one JSON value:
+ * { companyId, groups: { [companyId]: groupId } }. Unknown ids fall back at
+ * read time, so a deleted row never wedges the snapshot.
+ *
+ * @param {DatabaseSync} db
+ * @returns {{ companyId: number, groups: Record<number, number> }}
+ */
+function readActive(db) {
+  const row = db.prepare("SELECT value FROM meta WHERE key = 'active'").get();
+  try {
+    const parsed = JSON.parse(String(row?.value ?? "null"));
+    return {
+      companyId: Number(parsed?.companyId) || 0,
+      groups: Object.fromEntries(
+        Object.entries(parsed?.groups ?? {}).map(([k, v]) => [Number(k), Number(v)]),
+      ),
+    };
+  } catch {
+    return { companyId: 0, groups: {} };
+  }
+}
+
+/**
+ * @param {DatabaseSync} db
+ * @param {{ companyId: number, groups: Record<number, number> }} active
+ */
+function writeActive(db, active) {
+  db.prepare(
+    "INSERT INTO meta (key, value) VALUES ('active', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+  ).run(JSON.stringify(active));
 }
 
 /**

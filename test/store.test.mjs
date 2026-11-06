@@ -125,6 +125,51 @@ test("officeSnapshot points at the first company and its most recent project gro
   }
 });
 
+test("a chosen company and project group drive the snapshot and survive reopen", async () => {
+  const { dataDir, dispose } = await withTempDir("active");
+  try {
+    const store = openStore({ dataDir });
+    const snapshot0 = store.officeSnapshot();
+    const defaultCompany = snapshot0.companies[0];
+
+    const other = store.createCompany({ name: "第三公司" });
+    const otherGroup = store.createProjectGroup({ companyId: other.id, name: "第三组" });
+
+    store.setActive({ companyId: other.id, groupId: otherGroup.id });
+    const switched = store.officeSnapshot();
+    assert.equal(switched.activeCompanyId, other.id);
+    assert.equal(switched.activeGroupId, otherGroup.id);
+    assert.ok(switched.desks.every((desk) => desk.groupId === otherGroup.id));
+
+    // the default company keeps its own most-recent group as active
+    store.setActive({ companyId: defaultCompany.id });
+    const back = store.officeSnapshot();
+    assert.equal(back.activeCompanyId, defaultCompany.id);
+
+    store.close();
+    const reopened = openStore({ dataDir });
+    const persisted = reopened.officeSnapshot();
+    assert.equal(persisted.activeCompanyId, defaultCompany.id);
+    reopened.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("an active selection pointing at a deleted row falls back safely", async () => {
+  const { dataDir, dispose } = await withTempDir("active-fallback");
+  try {
+    const store = openStore({ dataDir });
+    store.setActive({ companyId: 99999, groupId: 99999 });
+    const snapshot = store.officeSnapshot();
+    assert.equal(snapshot.activeCompanyId, snapshot.companies[0].id);
+    assert.equal(snapshot.activeGroupId, snapshot.groups.at(-1)?.id);
+    store.close();
+  } finally {
+    await dispose();
+  }
+});
+
 test("createProjectGroup rejects an unknown company", async () => {
   const { dataDir, dispose } = await withTempDir("bad-company");
   try {

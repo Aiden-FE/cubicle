@@ -11,23 +11,15 @@ import { deskStyle } from "./scene/domScene.js";
  * }} props
  */
 export function OfficeFloor({ snapshot, status, bridgeError }) {
-  const activeCompany = snapshot?.companies.find((c) => c.id === snapshot.activeCompanyId);
-  const activeGroup = snapshot?.groups.find((g) => g.id === snapshot.activeGroupId);
   const ready = status.state === "online" && snapshot;
 
   return (
     <div className="office-floor">
-      <div className="scene-caption" data-testid="scene-caption">
-        {ready ? (
-          <>
-            <span data-testid="company-name">{activeCompany?.name ?? "—"}</span>
-            <span className="dot-sep">·</span>
-            <span data-testid="group-name">{activeGroup?.name ?? "暂无项目组"}</span>
-          </>
-        ) : (
+      {!ready ? (
+        <div className="scene-caption" data-testid="scene-caption">
           <span>{bridgeError ? "后台服务未连接，正在自动重试…" : "正在准备办公室…"}</span>
-        )}
-      </div>
+        </div>
+      ) : null}
 
       <div className="room">
         <div className="room-floor" />

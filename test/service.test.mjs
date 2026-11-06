@@ -78,6 +78,48 @@ test("projectGroup.create answers with group and its four desks, and emits domai
   }
 });
 
+test("creating a company or group activates it for the office view", async () => {
+  const { service, dispose } = await withService("activate");
+  try {
+    const before = service.handle(createInvoke("r8", "office.get", {}));
+    const defaultCompanyId = /** @type {any} */ (before.reply.payload).activeCompanyId;
+
+    const company = service.handle(createInvoke("r9", "company.create", { name: "灯塔软件" }));
+    const newCompanyId = /** @type {any} */ (company.reply.payload).id;
+    const afterCompany = /** @type {any} */ (service.handle(createInvoke("r10", "office.get", {})).reply.payload);
+    assert.equal(afterCompany.activeCompanyId, newCompanyId);
+
+    const group = service.handle(
+      createInvoke("r11", "projectGroup.create", { companyId: newCompanyId, name: "编辑器" }),
+    );
+    const newGroupId = /** @type {any} */ (group.reply.payload).group.id;
+    const afterGroup = /** @type {any} */ (service.handle(createInvoke("r12", "office.get", {})).reply.payload);
+    assert.equal(afterGroup.activeCompanyId, newCompanyId);
+    assert.equal(afterGroup.activeGroupId, newGroupId);
+
+    const switched = service.handle(
+      createInvoke("r13", "office.setActive", { companyId: defaultCompanyId }),
+    );
+    assert.equal(switched.reply.ok, true);
+    const afterSwitch = /** @type {any} */ (service.handle(createInvoke("r14", "office.get", {})).reply.payload);
+    assert.equal(afterSwitch.activeCompanyId, defaultCompanyId);
+    assert.equal(afterSwitch.groups.some((/** @type {{ id: number }} */ g) => g.id !== newGroupId), true);
+  } finally {
+    await dispose();
+  }
+});
+
+test("office.setActive for an unknown company answers with an error", async () => {
+  const { service, dispose } = await withService("badactive");
+  try {
+    const { reply } = service.handle(createInvoke("r15", "office.setActive", { companyId: 99999 }));
+    assert.equal(reply.ok, false);
+    assert.equal(reply.error?.code, "unknown_company");
+  } finally {
+    await dispose();
+  }
+});
+
 test("unknown methods answer with an unknown_method error reply", async () => {
   const { service, dispose } = await withService("unknown");
   try {

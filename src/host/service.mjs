@@ -45,6 +45,8 @@ export function createService({ store, hostInfo }) {
     "company.create"(payload) {
       const name = requireName(payload, "name");
       const company = store.createCompany({ name });
+      // Creating is intending: the office follows what the user just made.
+      store.setActive({ companyId: company.id });
       return { payload: company, event: { reason: "company.create", companyId: company.id } };
     },
 
@@ -55,11 +57,37 @@ export function createService({ store, hostInfo }) {
       }
       const name = requireName(payload, "name");
       const group = store.createProjectGroup({ companyId, name });
+      store.setActive({ companyId, groupId: group.id });
       const desks = store.listDesks({ groupId: group.id });
       return {
         payload: { group, desks },
         event: { reason: "projectGroup.create", groupId: group.id },
       };
+    },
+
+    "office.setActive"(payload) {
+      const record = /** @type {Record<string, unknown>} */ (payload ?? {});
+      const companyId = Number(record.companyId);
+      const rawGroup = record.groupId;
+      if (!Number.isInteger(companyId) || companyId <= 0) {
+        throw appError("invalid_payload", "companyId must be a positive integer");
+      }
+      // Validate against real rows so the UI can't wedge the selection.
+      const companyExists = store
+        .officeSnapshot()
+        .companies.some((/** @type {{ id: number }} */ c) => c.id === companyId);
+      if (!companyExists) throw appError("unknown_company", `no company with id ${companyId}`);
+      if (rawGroup !== undefined && rawGroup !== null) {
+        const groupId = Number(rawGroup);
+        const groupExists = store
+          .listGroups({ companyId })
+          .some((/** @type {{ id: number }} */ g) => g.id === groupId);
+        if (!groupExists) throw appError("unknown_group", `no group ${groupId} in company ${companyId}`);
+        store.setActive({ companyId, groupId });
+      } else {
+        store.setActive({ companyId });
+      }
+      return { payload: { ok: true }, event: { reason: "office.setActive", companyId } };
     },
   };
 

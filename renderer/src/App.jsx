@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { OfficeFloor } from "./OfficeFloor.jsx";
-import { RailPanel } from "./RailPanel.jsx";
+import { Switcher } from "./Switcher.jsx";
 import { StatusChip } from "./StatusChip.jsx";
 
 // Topic names mirrored from src/shared/envelope.mjs TOPICS (process boundary).
@@ -47,7 +47,7 @@ export function App() {
     <div className="office-app">
       <OfficeFloor snapshot={snapshot} status={status} bridgeError={bridgeError} />
       <StatusChip status={status} />
-      <RailPanel snapshot={snapshot} onChanged={refresh} />
+      <Switcher snapshot={snapshot} onChanged={refresh} />
     </div>
   );
 }

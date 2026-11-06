@@ -67,15 +67,19 @@ async function waitFor(predicate, { timeoutMs, intervalMs = 100 }) {
 const evalIn = (contents, code) => contents.executeJavaScript(code, true);
 
 /**
- * Type into a controlled React input and submit through its button, so the
- * acceptance run exercises the real form path, not just the bridge.
+ * Open a dropdown switcher panel, type into a controlled React input and
+ * submit through its button, so the acceptance run exercises the real UI
+ * path, not just the bridge.
  *
  * @param {import("electron").WebContents} contents
+ * @param {string} triggerSelector
  * @param {string} inputSelector
  * @param {string} value
  * @param {string} buttonSelector
  */
-async function fillForm(contents, inputSelector, value, buttonSelector) {
+async function fillForm(contents, triggerSelector, inputSelector, value, buttonSelector) {
+  await evalIn(contents, `document.querySelector(${JSON.stringify(triggerSelector)})?.click()`);
+  await sleep(150);
   await evalIn(
     contents,
     `(() => {
@@ -161,9 +165,15 @@ async function phaseCreate(ctx) {
     (/** @type {{ name: string }} */ g) => g.name === E2E_GROUP,
   );
 
-  // Create through the actual left-rail form — the same path a human clicks.
+  // Create through the actual dropdown switcher — the same path a human clicks.
   if (!companyExists) {
-    await fillForm(win.webContents, '[data-testid="company-name-input"]', E2E_COMPANY, '[data-testid="company-create"]');
+    await fillForm(
+      win.webContents,
+      '[data-testid="company-switcher"]',
+      '[data-testid="company-name-input"]',
+      E2E_COMPANY,
+      '[data-testid="company-create"]',
+    );
   }
   const companyShown = await waitFor(async () => {
     const fresh = /** @type {any} */ (await evalIn(win.webContents, `window.cubicle.invoke('office.get')`));
@@ -172,7 +182,13 @@ async function phaseCreate(ctx) {
   add("通过表单创建公司成功", companyShown || companyExists);
 
   if (!groupExists) {
-    await fillForm(win.webContents, '[data-testid="group-name-input"]', E2E_GROUP, '[data-testid="group-create"]');
+    await fillForm(
+      win.webContents,
+      '[data-testid="group-switcher"]',
+      '[data-testid="group-name-input"]',
+      E2E_GROUP,
+      '[data-testid="group-create"]',
+    );
   }
   // The canvas must follow the database: the new group's four desks appear.
   const canvasFollowsDb = await waitFor(async () => {
@@ -182,11 +198,19 @@ async function phaseCreate(ctx) {
   }, { timeoutMs: 4000 });
   add("画布切到新项目组的 4 个工位（数据库变更直达视图）", canvasFollowsDb);
 
-  const railShowsBoth = await waitFor(async () => {
-    const text = await evalIn(win.webContents, `document.querySelector('.rail-panel')?.innerText ?? ''`);
-    return text.includes(E2E_COMPANY) && text.includes(E2E_GROUP);
-  }, { timeoutMs: 3000 });
-  add("浮层列表显示新建的公司与项目组", railShowsBoth);
+  const listsShowBoth = await waitFor(async () => {
+    await evalIn(win.webContents, `document.querySelector('[data-testid="company-switcher"]')?.click()`);
+    await evalIn(win.webContents, `document.querySelector('[data-testid="group-switcher"]')?.click()`);
+    const companyText =
+      (await evalIn(win.webContents, `document.querySelector('[data-testid="company-panel"]')?.innerText ?? ''`)) +
+      (await evalIn(win.webContents, `document.querySelector('[data-testid="company-switcher"]')?.innerText ?? ''`));
+    const groupText =
+      (await evalIn(win.webContents, `document.querySelector('[data-testid="group-panel"]')?.innerText ?? ''`)) +
+      (await evalIn(win.webContents, `document.querySelector('[data-testid="group-switcher"]')?.innerText ?? ''`));
+    return companyText.includes(E2E_COMPANY) && groupText.includes(E2E_GROUP);
+  }, { timeoutMs: 4000 });
+  add("切换器列表显示新建的公司与项目组", listsShowBoth);
+  await evalIn(win.webContents, `document.body.click()`);
 
   const pidBefore = ctx.supervisor.pid;
   win.webContents.reload();
