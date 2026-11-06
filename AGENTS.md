@@ -48,7 +48,7 @@ Windows 优先的桌面应用（Electron + React + PixiJS），不绑定任何 a
 
 - **`app.setName()` 在模块顶层调用会原生崩溃（0xC0000005）** —— Electron 45.2.1 实证；用 `app.setPath("userData", …)` 替代。
 - SQLite 用内嵌 Node 24 的 `node:sqlite`（主进程与 utilityProcess 均实证可用），零原生依赖。
-- agent 会话里 Electron 对 `%APPDATA%` 的新建写入被系统策略拒绝（EPERM/0x5）；`CUBICLE_DATA_DIR` 会连同 userData 一起重定向，e2e/测试用它把工作区当数据目录。
+- **本机安全策略只放行 electron.exe 写仓库工作区**：Chromium 进程沙箱起不来（退出码 0x80000003，GUI 子系统下还静默）；工作区外（含 %APPDATA%、%LOCALAPPDATA%、dev 下其它目录）所有 electron.exe 写入被拒（0x5）。因此本机跑应用必须 `CUBICLE_DATA_DIR` 指到仓库内（如 `tmp/dev-data`）；`scripts/start.mjs` 对沙箱崩溃码自动降级 `--no-sandbox` 重试一次并打印说明。
 - Electron 是 GUI 子系统进程：console 输出不进父进程管道，探针输出一律 `process.stdout.write` 或落盘。
 
 ## 硬约束（改这些等于改蓝图，先开票）

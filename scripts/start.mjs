@@ -3,6 +3,12 @@
  *
  * Spawns the Electron binary directly with ELECTRON_RUN_AS_NODE removed —
  * without that, some shells degrade electron.exe into plain Node (M0 lesson).
+ *
+ * This machine's security stack refuses to start Electron's Chromium process
+ * sandbox (exit 0x80000003 breakpoint before any JS runs; see AGENTS.md
+ * 「M1 骨架环境坑」). A dev launch that dies with that signature is retried
+ * once with --no-sandbox, loudly. CUBICLE_ELECTRON_ARGS passes extra flags
+ * explicitly (then no auto-retry happens).
  */
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
@@ -23,15 +29,55 @@ if (!existsSync(rendererIndex)) {
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 
-// CUBICLE_ELECTRON_ARGS passes extra Chromium flags (e.g. "--no-sandbox") for
-// sessions where the Chromium process sandbox cannot start.
 const extraArgs = (process.env.CUBICLE_ELECTRON_ARGS ?? "").split(" ").filter(Boolean);
+const mainArgs = [path.join(root, "src", "main", "index.mjs")];
 
-const child = spawn(electronBinary, [...extraArgs, path.join(root, "src", "main", "index.mjs")], {
-  cwd: root,
-  env,
-  stdio: "inherit",
-});
-child.on("exit", (code, signal) => {
-  process.exit(signal ? 1 : (code ?? 1));
-});
+/**
+ * @param {string[]} args
+ * @returns {Promise<number>} exit code (never rejects)
+ */
+function launch(args) {
+  return new Promise((resolve) => {
+    const child = spawn(electronBinary, [...args, ...mainArgs], {
+      cwd: root,
+      env,
+      stdio: "inherit",
+    });
+    child.on("error", (err) => {
+      console.error(`failed to start ${electronBinary}: ${err.message}`);
+      resolve(-1);
+    });
+    child.on("exit", (code, signal) => resolve(signal ? -1 : (code ?? -1)));
+  });
+}
+
+// Breakpoint before JS runs: the Chromium process sandbox cannot come up
+// under this machine's policy. (STATUS_BREAKPOINT / STATUS_ACCESS_VIOLATION;
+// Node may report these as signed or unsigned 32-bit, so normalize.)
+/** @param {number} code */
+const isSandboxCrash = (code) => {
+  const normalized = code < 0 ? code >>> 0 : code;
+  return normalized === 0x80000003 || normalized === 0xc0000005;
+};
+
+let code = await launch(extraArgs);
+
+if (code !== 0 && extraArgs.length === 0 && isSandboxCrash(code)) {
+  console.warn(
+    [
+      "",
+      `electron exited with ${code} (0x${(code >>> 0).toString(16)}) before the app started:`,
+      "this machine's policy blocks the Chromium process sandbox.",
+      "retrying once with --no-sandbox (dev launch; the app itself still runs",
+      "its renderer with contextIsolation + sandbox:true webPreferences)...",
+      "",
+    ].join("\n"),
+  );
+  code = await launch(["--no-sandbox"]);
+}
+
+if (code !== 0) {
+  console.error(`cubicle exited with code ${code}`);
+  console.error("hints: CUBICLE_ELECTRON_ARGS adds flags; CUBICLE_DATA_DIR redirects the data dir");
+}
+process.exit(code === 0 ? 0 : 1);
