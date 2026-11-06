@@ -2,19 +2,21 @@ import React from "react";
 
 /** @type {Record<string, string>} */
 const STATE_LABEL = {
-  starting: "启动中",
-  online: "在线",
-  offline: "离线",
+  starting: "正在准备…",
+  online: "运行正常",
+  offline: "后台异常，正在自动恢复…",
   stopped: "已停止",
   idle: "未启动",
 };
 
 /**
- * AgentHost presence chip: the host's state must always be visible.
+ * Presence indicator: a dot that only speaks when something is wrong.
+ * Internal diagnostics (pid, uptime, data dir) hide behind a click.
  *
  * @param {{ status: import("./App.jsx").HostStatusData }} props
  */
 export function StatusChip({ status }) {
+  const [open, setOpen] = React.useState(false);
   const [, tick] = React.useReducer((n) => n + 1, 0);
   React.useEffect(() => {
     const timer = setInterval(tick, 1000);
@@ -22,32 +24,58 @@ export function StatusChip({ status }) {
   }, []);
 
   const online = status.state === "online";
+  const problem = status.state === "offline" || status.state === "starting" || status.state === "stopped";
   const uptime = status.startedAt
     ? Math.max(0, Math.round((Date.now() - new Date(status.startedAt).getTime()) / 1000))
     : null;
 
   return (
-    <div
-      className="status-chip"
-      data-testid="host-status"
-      data-online={online ? "true" : "false"}
-      data-state={status.state}
-      title="业务宿主（后台服务）：办公室与数据都由它管"
-    >
-      <span className={`status-dot ${status.state}`} />
-      <div className="status-body">
-        <div className="status-line">
-          后台服务 <b>{STATE_LABEL[status.state] ?? status.state}</b>
-          {status.state === "offline" ? <span className="status-uptime">正在自动重启…</span> : null}
-          {online && status.pid ? <span className="status-pid">pid {status.pid}</span> : null}
-          {online && uptime !== null ? (
-            <span className="status-uptime">已运行 {formatDuration(uptime)}</span>
+    <div className="status-zone">
+      <button
+        type="button"
+        className="status-dot-button"
+        data-testid="host-status"
+        data-online={online ? "true" : "false"}
+        data-state={status.state}
+        title={STATE_LABEL[status.state] ?? status.state}
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className={`status-dot ${status.state}`} />
+        {problem ? <span className="status-note">{STATE_LABEL[status.state] ?? status.state}</span> : null}
+      </button>
+
+      {open ? (
+        <div className="status-popover">
+          <div className="status-popover-title">应用状态</div>
+          <div className="status-popover-row">
+            <span>后台服务</span>
+            <b>{STATE_LABEL[status.state] ?? status.state}</b>
+          </div>
+          {online ? (
+            <>
+              <div className="status-popover-row">
+                <span>进程号</span>
+                <span>{status.pid ?? "—"}</span>
+              </div>
+              <div className="status-popover-row">
+                <span>已运行</span>
+                <span>{uptime !== null ? formatDuration(uptime) : "—"}</span>
+              </div>
+              <div className="status-popover-row" data-testid="data-dir">
+                <span>数据目录</span>
+                <code>{status.dataDir ?? "—"}</code>
+              </div>
+              {status.dbPath ? (
+                <div className="status-popover-row">
+                  <span>数据库</span>
+                  <code>{status.dbPath}</code>
+                </div>
+              ) : null}
+            </>
           ) : null}
         </div>
-        {online && status.dataDir ? (
-          <div className="status-dir" data-testid="data-dir">数据目录：{status.dataDir}</div>
-        ) : null}
-      </div>
+      ) : null}
     </div>
   );
 }

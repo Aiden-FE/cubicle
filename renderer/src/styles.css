@@ -143,29 +143,37 @@ body {
   padding: 1px 10px;
 }
 
-/* ── host status chip ──────────────────────────────────────────── */
+/* ── presence dot (+ diagnostics popover on demand) ────────────── */
 
-.status-chip {
+.status-zone {
   position: absolute;
   top: 18px;
   right: 22px;
   display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  background: var(--paper-raised);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  box-shadow: var(--shadow);
-  padding: 10px 14px;
-  min-width: 240px;
-  max-width: 420px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.status-dot-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  padding: 6px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.status-dot-button:hover {
+  background: rgba(43, 38, 32, 0.05);
 }
 
 .status-dot {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  margin-top: 4px;
   background: var(--warn);
 }
 
@@ -178,23 +186,57 @@ body {
   background: var(--bad);
 }
 
-.status-line {
-  font-size: 13px;
-}
-
-.status-pid,
-.status-uptime {
-  margin-left: 8px;
-  color: var(--ink-soft);
+.status-note {
   font-size: 12px;
+  color: var(--ink-soft);
 }
 
-.status-dir {
-  margin-top: 4px;
+.status-popover {
+  background: var(--paper-raised);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 12px 14px;
+  min-width: 260px;
+  max-width: 430px;
+}
+
+.status-popover-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+  margin-bottom: 8px;
+}
+
+.status-popover-row {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 10px;
+  font-size: 12px;
+  padding: 3px 0;
+}
+
+.status-popover-row > span:first-child {
+  color: var(--ink-soft);
+}
+
+.status-popover-row > :nth-child(2) {
+  text-align: right;
+}
+
+.status-popover-row code {
+  grid-column: 1 / -1;
+  margin-top: 2px;
   font-family: "Cascadia Mono", Consolas, monospace;
   font-size: 11px;
-  color: var(--ink-soft);
+  color: var(--ink);
   word-break: break-all;
+  text-align: left;
+}
+
+.status-popover-row:has(code) {
+  grid-template-columns: 1fr;
 }
 
 /* ── left rail floating panel ──────────────────────────────────── */
