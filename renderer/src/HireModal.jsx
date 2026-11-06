@@ -85,7 +85,6 @@ export function HireModal({ desk, onClose }) {
               </span>
             </React.Fragment>
           ))}
-          <span className="hire-step-count">第 {step} / 3 步</span>
         </div>
 
         {error ? <div className="hire-error" data-testid="hire-error">{error}</div> : null}
