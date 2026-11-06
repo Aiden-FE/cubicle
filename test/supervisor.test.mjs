@@ -42,7 +42,10 @@ function fakeTimers() {
       pending.push({ id, ms, fn });
       return id;
     },
-    clearTimeoutFn(/** @type {unknown} */ _id) {},
+    clearTimeoutFn(/** @type {unknown} */ id) {
+      const index = pending.findIndex((entry) => entry.id === id);
+      if (index >= 0) pending.splice(index, 1);
+    },
     /** Runs every timer callback scheduled since the last run. */
     runDue() {
       const due = pending.splice(0, pending.length);
@@ -131,3 +134,62 @@ test("a healthy restart cycle reports starting then online again", () => {
     ["starting", "online", "offline", "starting", "online"],
   );
 });
+
+test("a silent host is killed after the startup window and restarted", () => {
+  const timers = fakeTimers();
+  /** @type {ReturnType<typeof fakeChild>[]} */
+  const children = [];
+  /** @type {ReturnType<typeof fakeChild>[]} */
+  const forks = [];
+  const supervisor = createHostSupervisor({
+    fork: () => {
+      const child = fakeChild(1000 + forks.length + 1);
+      forks.push(child);
+      children.push(child);
+      return child;
+    },
+    restartDelayMs: 1000,
+    startupTimeoutMs: 6000,
+    setTimeoutFn: timers.setTimeoutFn,
+    clearTimeoutFn: () => {},
+  });
+  supervisor.start();
+  assert.equal(supervisor.state, "starting");
+  assert.equal(forks.length, 1);
+
+  // Nothing arrives from the host; the watchdog must act.
+  timers.runDue();
+  assert.equal(forks[0].killed, true, "silent host should be killed after the startup window");
+
+  // Its exit flows through the normal offline → restart path.
+  forks[0].emit("exit", 1);
+  assert.equal(supervisor.state, "offline");
+  timers.runDue();
+  assert.equal(forks.length, 2);
+  assert.equal(supervisor.state, "starting");
+});
+
+test("a host that answers in time never gets killed", () => {
+  const timers = fakeTimers();
+  /** @type {ReturnType<typeof fakeChild>[]} */
+  const children = [];
+  /** @type {ReturnType<typeof fakeChild>[]} */
+  const forks = [];
+  const supervisor = createHostSupervisor({
+    fork: () => {
+      const child = fakeChild(1000 + forks.length + 1);
+      forks.push(child);
+      children.push(child);
+      return child;
+    },
+    startupTimeoutMs: 6000,
+    setTimeoutFn: timers.setTimeoutFn,
+    clearTimeoutFn: timers.clearTimeoutFn,
+  });
+  supervisor.start();
+  forks[0].emit("message", {});
+  timers.runDue();
+  assert.equal(supervisor.state, "online");
+  assert.equal(forks[0].killed, false);
+});
+

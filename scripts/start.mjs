@@ -29,6 +29,15 @@ if (!existsSync(rendererIndex)) {
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 
+// On this machine the security policy lets electron.exe write only inside the
+// repo workspace, so a plain launch would strand the AgentHost outside it.
+// Default the data dir into the repo (git-ignored); set CUBICLE_DATA_DIR to
+// a real path (e.g. %APPDATA%\cubicle) to override.
+if (!env.CUBICLE_DATA_DIR) {
+  env.CUBICLE_DATA_DIR = path.join(root, "tmp", "dev-data");
+  console.log(`data dir: ${env.CUBICLE_DATA_DIR} (set CUBICLE_DATA_DIR to override)`);
+}
+
 const extraArgs = (process.env.CUBICLE_ELECTRON_ARGS ?? "").split(" ").filter(Boolean);
 const mainArgs = [path.join(root, "src", "main", "index.mjs")];
 

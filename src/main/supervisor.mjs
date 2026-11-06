@@ -29,6 +29,7 @@ const hostEntry = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", 
  * @param {(entryPath: string, options: Record<string, unknown>) => ForkedChild} options.fork
  * @param {string} [options.entryPath]
  * @param {number} [options.restartDelayMs]
+ * @param {number} [options.startupTimeoutMs] kill a host that never sends anything
  * @param {(fn: () => void, ms: number) => unknown} [options.setTimeoutFn]
  * @param {(id: unknown) => void} [options.clearTimeoutFn]
  * @param {(message: unknown) => void} [options.onMessage] passthrough for host traffic
@@ -37,6 +38,7 @@ export function createHostSupervisor({
   fork,
   entryPath = hostEntry,
   restartDelayMs = 1000,
+  startupTimeoutMs = 6000,
   setTimeoutFn = (fn, ms) => setTimeout(fn, ms),
   clearTimeoutFn = (id) => clearTimeout(/** @type {NodeJS.Timeout} */ (id)),
   onMessage,
@@ -47,6 +49,8 @@ export function createHostSupervisor({
   let child = null;
   /** @type {unknown} */
   let restartTimer = null;
+  /** @type {unknown} */
+  let startupTimer = null;
   /** @type {Set<(status: HostStatus) => void>} */
   const listeners = new Set();
 
@@ -58,7 +62,18 @@ export function createHostSupervisor({
   function spawn() {
     state = "starting";
     child = fork(entryPath, { serviceName: "cubicle-agent-host" });
+    const born = child;
+    if (startupTimeoutMs > 0) {
+      startupTimer = setTimeoutFn(() => {
+        startupTimer = null;
+        if (state === "starting" && child === born) born.kill();
+      }, startupTimeoutMs);
+    }
     child.on("message", (message) => {
+      if (startupTimer !== null) {
+        clearTimeoutFn(startupTimer);
+        startupTimer = null;
+      }
       if (state !== "online") {
         state = "online";
         notify();
@@ -67,6 +82,10 @@ export function createHostSupervisor({
     });
     child.on("exit", () => {
       child = null;
+      if (startupTimer !== null) {
+        clearTimeoutFn(startupTimer);
+        startupTimer = null;
+      }
       if (state === "stopped") return;
       state = "offline";
       notify();
@@ -99,6 +118,10 @@ export function createHostSupervisor({
       if (restartTimer !== null) {
         clearTimeoutFn(restartTimer);
         restartTimer = null;
+      }
+      if (startupTimer !== null) {
+        clearTimeoutFn(startupTimer);
+        startupTimer = null;
       }
       if (child) {
         const dying = child;

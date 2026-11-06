@@ -27,15 +27,26 @@ export function StatusChip({ status }) {
     : null;
 
   return (
-    <div className="status-chip" data-testid="host-status" data-online={online ? "true" : "false"} data-state={status.state}>
+    <div
+      className="status-chip"
+      data-testid="host-status"
+      data-online={online ? "true" : "false"}
+      data-state={status.state}
+      title="业务宿主（后台服务）：办公室与数据都由它管"
+    >
       <span className={`status-dot ${status.state}`} />
       <div className="status-body">
         <div className="status-line">
-          AgentHost <b>{STATE_LABEL[status.state] ?? status.state}</b>
-          {status.pid ? <span className="status-pid">pid {status.pid}</span> : null}
-          {uptime !== null ? <span className="status-uptime">已运行 {formatDuration(uptime)}</span> : null}
+          后台服务 <b>{STATE_LABEL[status.state] ?? status.state}</b>
+          {status.state === "offline" ? <span className="status-uptime">正在自动重启…</span> : null}
+          {online && status.pid ? <span className="status-pid">pid {status.pid}</span> : null}
+          {online && uptime !== null ? (
+            <span className="status-uptime">已运行 {formatDuration(uptime)}</span>
+          ) : null}
         </div>
-        {status.dataDir ? <div className="status-dir" data-testid="data-dir">{status.dataDir}</div> : null}
+        {online && status.dataDir ? (
+          <div className="status-dir" data-testid="data-dir">数据目录：{status.dataDir}</div>
+        ) : null}
       </div>
     </div>
   );

@@ -53,7 +53,7 @@ contextBridge.exposeInMainWorld("cubicle", {
       const id = `r${seq}-${Date.now().toString(36)}`;
       const timer = setTimeout(() => {
         pending.delete(id);
-        const err = new Error(`AgentHost did not answer ${method} within ${INVOKE_TIMEOUT_MS}ms`);
+        const err = new Error(`后台服务未在 ${INVOKE_TIMEOUT_MS / 1000} 秒内响应（${method}）`);
         // @ts-ignore — code rides along for callers that care.
         err.code = "host_timeout";
         reject(err);

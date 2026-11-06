@@ -47,12 +47,10 @@ GLOSSARY.md              领域术语
 三层进程就位 —— main（窗口/宿主监管/16ms 合帧）· AgentHost（utilityProcess，DB 单写者）· renderer（React 18 纯视图）。
 验收一条命令：`npm run build:renderer && npm run e2e:02`；票与实现说明见 [.scratch/v1/issues/02-empty-office.md](.scratch/v1/issues/02-empty-office.md)。
 
-手动启动（本机策略注意）：桌面正常机器直接 `npm start`（数据落 `%APPDATA%\cubicle`）。
-**这台开发机**的安全策略只放行应用写仓库工作区（Chromium 沙箱也起不来，启动器会自动降级重试并打印说明），所以要指一个仓库内的数据目录：
+手动启动：**这台开发机**的安全策略只放行 electron.exe 写仓库工作区（Chromium 沙箱也起不来；启动器已自动处理这两点），直接：
 
 ```bash
-# Git Bash / UCRT64
-CUBICLE_DATA_DIR="$PWD/tmp/dev-data" npm start
+npm start        # 数据默认落 tmp/dev-data；CUBICLE_DATA_DIR 可覆盖
 ```
 
 右上徽章显示「AgentHost 在线」即宿主就绪。**下一步 = 研发票 03「招聘第一个员工」。**

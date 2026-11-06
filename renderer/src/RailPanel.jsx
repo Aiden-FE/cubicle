@@ -72,7 +72,7 @@ export function RailPanel({ snapshot, onChanged }) {
       </section>
 
       <section className="rail-section">
-        <div className="rail-section-title">项目组（自动配 4 个工位）</div>
+        <div className="rail-section-title">项目组（挂在一家公司下 · 自动配 4 个工位）</div>
         <ul className="rail-list">
           {groups.map((group) => (
             <li key={group.id} data-testid="group-item" className={group.id === snapshot?.activeGroupId ? "active" : ""}>
@@ -108,6 +108,7 @@ export function RailPanel({ snapshot, onChanged }) {
           <button data-testid="group-create" type="submit" disabled={busy}>
             建项目组
           </button>
+          <div className="rail-hint">先在上边建（或选中）一家公司，项目组会建进这家公司的下拉里。</div>
         </form>
       </section>
 

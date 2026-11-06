@@ -9,7 +9,7 @@
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { appendFileSync, mkdirSync } from "node:fs";
-import { app, BrowserWindow, ipcMain, utilityProcess } from "electron";
+import { app, BrowserWindow, Menu, ipcMain, utilityProcess } from "electron";
 
 import { createHostSupervisor } from "./supervisor.mjs";
 import { createEventCoalescer } from "./coalescer.mjs";
@@ -95,6 +95,7 @@ const supervisor = createHostSupervisor({
     const dataDir = resolveDataDir();
     const child = utilityProcess.fork(entryPath, [], {
       ...options,
+      stdio: "pipe",
       env: { ...process.env, CUBICLE_DATA_DIR: dataDir },
     });
     // Host stderr → <dataDir>/agenthost.log, so a silent crash leaves evidence.
@@ -150,6 +151,15 @@ function createMainWindow() {
       sandbox: true,
     },
   });
+  // No File/Edit/View chrome — this is a product window. Ctrl+R still reloads
+  // the view (the host keeps running), which the ticket's acceptance relies on.
+  Menu.setApplicationMenu(null);
+  mainWindow.webContents.on("before-input-event", (event, input) => {
+    if (input.type === "keyDown" && input.control && !input.alt && input.code === "KeyR") {
+      event.preventDefault();
+      mainWindow?.webContents.reload();
+    }
+  });
   mainWindow.loadFile(path.join(rootDir, "dist", "renderer", "index.html"));
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -162,7 +172,7 @@ ipcMain.on("cubicle:invoke", (_event, raw) => {
   if (supervisor.state === "offline" || supervisor.state === "stopped" || !supervisor.send(envelope)) {
     sendToRenderer(
       "cubicle:reply",
-      createErrorReply(envelope, { code: "host_offline", message: "AgentHost is not running" }),
+      createErrorReply(envelope, { code: "host_offline", message: "后台服务未运行，正在自动重启" }),
     );
   }
 });

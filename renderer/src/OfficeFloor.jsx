@@ -25,7 +25,7 @@ export function OfficeFloor({ snapshot, status, bridgeError }) {
             <span data-testid="group-name">{activeGroup?.name ?? "暂无项目组"}</span>
           </>
         ) : (
-          <span>{bridgeError ? `视图待接入（${bridgeError}）` : "正在点亮办公室…"}</span>
+          <span>{bridgeError ? "后台服务未连接，正在自动重试…" : "正在准备办公室…"}</span>
         )}
       </div>
 
@@ -35,8 +35,6 @@ export function OfficeFloor({ snapshot, status, bridgeError }) {
           <DeskCard key={desk.id} desk={desk} />
         ))}
       </div>
-
-      <div className="scene-hint">主画布永远是办公室 · 重载视图（Ctrl+R）不打扰宿主</div>
     </div>
   );
 }

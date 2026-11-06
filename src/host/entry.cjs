@@ -46,7 +46,11 @@ async function main() {
 }
 
 main().catch((err) => {
-  // A GUI-subsystem process may have no console: stderr handles are enough.
-  process.stderr.write(`AgentHost failed to start: ${err && err.stack ? err.stack : err}\n`);
-  process.exitCode = 1;
+  // A GUI-subsystem process may have no console: stderr handles are enough,
+  // and main tees them into <dataDir>/agenthost.log. Exit loudly so the
+  // supervisor can restart — a silent half-start would hang the UI forever.
+  process.stderr.write(
+    `AgentHost failed to start: ${err && err.stack ? err.stack : err}\n`,
+  );
+  process.exit(1);
 });

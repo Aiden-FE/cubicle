@@ -64,4 +64,4 @@ scripts/         start / e2e-02（orchestrator）/ e2e-02-runner（验收装置�
 - 「大对象走指针」未实现（M1 无大对象），信封 payload 已留槽位。
 - SceneRenderer 当前是 DOM 适配层；3D 分层 + 2D 角色在 07 票。
 - 公司/项目组切换器在 08 票；occupant/employee_id 列在 03 票启用。
-- 本机默认 `npm start` 会因 AppData 写策略在 openStore 处失败——属机器策略，非应用缺陷；正常桌面会话可用，e2e/演示用 `CUBICLE_DATA_DIR` 重定向。
+- 本机默认 `npm start`：策略只放行 electron.exe 写仓库工作区（主进程建得了 %APPDATA% 目录，宿主子进程写不了 cubicle.db）。`scripts/start.mjs` 已默认把 CUBICLE_DATA_DIR 指到 `tmp/dev-data` 并打印；对 Chromium 沙箱崩溃（0x80000003）自动降级 `--no-sandbox` 重试一次。supervisor 有 6s 启动看门狗：宿主无响应即杀掉重启，UI 不再无限「启动中」。
