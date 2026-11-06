@@ -174,7 +174,15 @@ test("employee.hire validates its payload and forwards domain errors", async () 
     ).roles[0].id;
     const deskId = /** @type {any} */ (service.handle(createInvoke("h7", "office.get", {})).reply.payload)
       .desks[0].id;
-    for (const payload of [{}, { deskId: 0, roleId: programmerId }, { deskId, roleId: 0 }, { deskId: "x", roleId: 1 }]) {
+    for (const payload of [
+      {},
+      { deskId: 0, roleId: programmerId },
+      { deskId, roleId: 0 },
+      { deskId: "x", roleId: 1 },
+      { deskId: true, roleId: programmerId },
+      { deskId: String(deskId), roleId: programmerId },
+      { deskId, roleId: 1.5 },
+    ]) {
       const { reply, events } = service.handle(createInvoke("h8", "employee.hire", payload));
       assert.equal(reply.ok, false);
       assert.equal(reply.error?.code, "invalid_payload");

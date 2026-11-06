@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { appearanceFor } from "./roleAppearance.js";
 
 /**
  * Three-step hiring wizard, opened by clicking an empty desk (decision 10:
@@ -209,27 +210,24 @@ function Chips({ items, emptyLabel = "无" }) {
  * @param {{ roleKey: string }} props
  */
 export function RoleGlyph({ roleKey }) {
-  /** @type {Record<string, { skin: string, hair: string, top: string }>} */
-  const palette = {
-    programmer: { skin: "#e8b28c", hair: "#31404f", top: "#31404f" },
-    tester: { skin: "#d9a06b", hair: "#4f3140", top: "#4f6b52" },
-    pm: { skin: "#eec39a", hair: "#2b2620", top: "#a5642f" },
-  };
-  const color = palette[roleKey] ?? palette.programmer;
+  const color = appearanceFor(roleKey);
   return (
     <svg className="role-glyph" viewBox="0 0 40 40" aria-hidden="true">
       <circle cx="20" cy="20" r="19" fill="rgba(43,38,32,0.06)" />
       <circle cx="20" cy="15" r="7.5" fill={color.skin} />
       <path d="M12.5 14.5 Q13 7.5 20 7.5 Q27 7.5 27.5 14.5 Q24 11.5 20 11.5 Q16 11.5 12.5 14.5 Z" fill={color.hair} />
       <path d="M8 32 Q8 23.5 20 23.5 Q32 23.5 32 32 L32 34 L8 34 Z" fill={color.top} />
-      {roleKey === "programmer" ? (
+      {color.decor === "glasses" ? (
         <g stroke="#2b2620" strokeWidth="1.1" fill="none">
           <circle cx="16.8" cy="15.4" r="2.6" />
           <circle cx="23.2" cy="15.4" r="2.6" />
           <line x1="19.4" y1="15.4" x2="20.6" y2="15.4" />
         </g>
       ) : null}
-      {roleKey === "pm" ? <path d="M14.5 24.5 L20 28.5 L25.5 24.5 L23.5 30 L16.5 30 Z" fill="#c98a2c" /> : null}
+      {color.decor === "tie" ? <path d="M14.5 24.5 L20 28.5 L25.5 24.5 L23.5 30 L16.5 30 Z" fill="#c98a2c" /> : null}
+      {color.decor === "headset" ? (
+        <path d="M12.8 12 Q13 6.5 20 6.5 Q27 6.5 27.2 12" stroke={color.hair} strokeWidth="1.6" fill="none" />
+      ) : null}
     </svg>
   );
 }

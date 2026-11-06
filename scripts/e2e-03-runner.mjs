@@ -3,14 +3,17 @@
  * Electron main process but parked under scripts/ (main stays business-free).
  *
  * Phase "hire" (see also scripts/e2e-03.mjs orchestrator):
- *   boot → office with 4 empty desks → fingerprint engine config dirs under
- *   the user's home → click an empty desk → three-step wizard (forward AND
- *   back navigation) → capability manifest lists persona / skills / tools /
- *   engine / cost → confirm → desk flips from 空置 to 占用中 with the person
- *   seated → hire the SAME role onto a second desk → office snapshot shows
- *   both with identical role snapshots → reload the view, occupancy intact.
- * Phase "verify": fresh process proves both employees and their role
- *   snapshots survived the restart, byte-for-byte equal to the hires.
+ *   boot → office with 4 empty desks → fingerprint the user's home directory
+ *   (root entries + engine config dirs) → click an empty desk → three-step
+ *   wizard (forward, 2→1 back, and 3→2 back) → capability manifest lists
+ *   persona / skills / tools / engine / cost → confirm → desk flips from
+ *   空置 to 占用中 with the person seated → hire the SAME role onto a second
+ *   desk → office snapshot shows both with identical role snapshots (recorded
+ *   into hire.json for the restart phase) → home fingerprint unchanged →
+ *   reload the view, occupancy intact.
+ * Phase "verify": fresh process proves both employees — and their role
+ *   snapshots, compared byte-for-byte against the snapshots recorded at hire
+ *   time — survived the restart.
  *
  * Progress goes to process.stdout.write; evidence lands in <outDir>/<phase>.json.
  */
@@ -19,12 +22,16 @@ import { readdir, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { out, waitFor, evalIn, click, typeInto, readJson } from "./e2e-harness.mjs";
+
 const E2E_HIRE_A = "E2E 程序员甲";
 const E2E_HIRE_B = "E2E 程序员乙";
 
 /**
  * Engine-owned config folders under the user's home. Hiring must not touch
- * any of them (acceptance: 招聘过程不写任何用户家目录下的引擎配置).
+ * any of them (acceptance: 招聘过程不写任何用户家目录下的引擎配置). The home
+ * root itself is fingerprinted too, so a write anywhere else under the home
+ * that adds/removes a top-level entry (or rewrites the root's mtime) shows up.
  */
 const HOME_ENGINE_DIRS = [".pi", ".codex", ".claude", ".qoder", ".agents"];
 
@@ -39,74 +46,17 @@ const HOME_ENGINE_DIRS = [".pi", ".codex", ".claude", ".qoder", ".agents"];
  * @property {string} outDir
  */
 
-/** @param {string} line */
-function out(line) {
-  process.stdout.write(line + "\n");
-}
-
-/** @param {number} ms */
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
 /**
- * @param {() => Promise<boolean>} predicate
- * @param {{ timeoutMs: number, intervalMs?: number }} options
- */
-async function waitFor(predicate, { timeoutMs, intervalMs = 100 }) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      if (await predicate()) return true;
-    } catch {
-      // view not ready yet — keep polling
-    }
-    await sleep(intervalMs);
-  }
-  return false;
-}
-
-/**
- * @param {import("electron").WebContents} contents
- * @param {string} code
- */
-const evalIn = (contents, code) => contents.executeJavaScript(code, true);
-
-/**
- * @param {import("electron").WebContents} contents
- * @param {string} selector
- */
-const click = (contents, selector) =>
-  evalIn(contents, `document.querySelector(${JSON.stringify(selector)})?.click() ?? null`);
-
-/**
- * Type into a controlled React input without a form trigger.
- *
- * @param {import("electron").WebContents} contents
- * @param {string} selector
- * @param {string} value
- */
-async function typeInto(contents, selector, value) {
-  await evalIn(
-    contents,
-    `(() => {
-      const input = document.querySelector(${JSON.stringify(selector)});
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-      setter.call(input, ${JSON.stringify(value)});
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    })()`,
-  );
-}
-
-/**
- * Snapshot every home-directory engine config dir: does it exist, how many
- * files inside, and the newest mtime. Hiring must leave this unchanged.
+ * Snapshot the user's home: root entry count + mtime, and per engine dir the
+ * file count + newest mtime (bounded walk). Hiring must leave all of it equal.
  *
  * @returns {Promise<Record<string, { exists: boolean, files: number, newestMtimeMs: number }>>}
  */
-async function fingerprintHomeEngineDirs() {
+async function fingerprintHome() {
   /** @type {Record<string, { exists: boolean, files: number, newestMtimeMs: number }>} */
   const fingerprint = {};
-  for (const dir of HOME_ENGINE_DIRS) {
-    const root = path.join(os.homedir(), dir);
+  /** @param {string} root @param {number} maxDepth */
+  const walkFingerprint = async (root, maxDepth) => {
     let files = 0;
     let newestMtimeMs = 0;
     let exists = false;
@@ -114,7 +64,7 @@ async function fingerprintHomeEngineDirs() {
     const walk = async (folder, depth) => {
       const entries = await readdir(folder, { withFileTypes: true });
       for (const entry of entries) {
-        if (entry.isDirectory() && depth < 3) {
+        if (entry.isDirectory() && depth < maxDepth) {
           await walk(path.join(folder, entry.name), depth + 1);
           continue;
         }
@@ -129,7 +79,14 @@ async function fingerprintHomeEngineDirs() {
     } catch {
       exists = false;
     }
-    fingerprint[dir] = { exists, files, newestMtimeMs };
+    return { exists, files, newestMtimeMs };
+  };
+
+  // Depth 0 at the home root: top-level entries only — cheap, and any new
+  // top-level directory (where engine config would live) changes the count.
+  fingerprint["."] = await walkFingerprint(os.homedir(), 0);
+  for (const dir of HOME_ENGINE_DIRS) {
+    fingerprint[dir] = await walkFingerprint(path.join(os.homedir(), dir), 3);
   }
   return fingerprint;
 }
@@ -150,14 +107,22 @@ const HIRE_STEP_JS = `document.querySelector('[data-testid="hire-step"]')?.datas
 const OCCUPANT_TEXT_JS = `Array.from(document.querySelectorAll('[data-testid="desk-occupant"]')).map((n) => n.textContent).join("|")`;
 
 /**
- * Drive the wizard for one hire through real clicks.
+ * Drive the wizard for one hire through the real UI code path (DOM clicks
+ * and input events against the live React tree — not bridge shortcuts).
  *
  * @param {import("electron").WebContents} contents
- * @param {{ employeeName: string, exerciseBack: boolean }} options
- * @returns {Promise<{ opened: boolean, roleCount: number, manifestOk: boolean, wentBack: boolean, confirmed: boolean }>}
+ * @param {{ employeeName: string, backFrom2: boolean, backFrom3: boolean }} options
+ * @returns {Promise<{ opened: boolean, roleCount: number, manifestOk: boolean, wentBack2: boolean, wentBack3: boolean, confirmed: boolean }>}
  */
-async function hireThroughWizard(contents, { employeeName, exerciseBack }) {
-  const outcome = { opened: false, roleCount: 0, manifestOk: false, wentBack: false, confirmed: false };
+async function hireThroughWizard(contents, { employeeName, backFrom2, backFrom3 }) {
+  const outcome = {
+    opened: false,
+    roleCount: 0,
+    manifestOk: false,
+    wentBack2: false,
+    wentBack3: false,
+    confirmed: false,
+  };
 
   await click(contents, '[data-testid="desk"][data-empty="true"]');
   outcome.opened = await waitFor(
@@ -179,18 +144,24 @@ async function hireThroughWizard(contents, { employeeName, exerciseBack }) {
     (needle) => manifestText.includes(needle),
   );
 
-  if (exerciseBack) {
+  /** @param {number} fromStep */
+  const goBackAndReturn = async (fromStep) => {
     await click(contents, '[data-testid="hire-back"]');
-    const backTo1 = await waitFor(async () => (await evalIn(contents, HIRE_STEP_JS)) === "1", { timeoutMs: 2000 });
-    if (backTo1) {
-      await click(contents, '[data-testid="hire-next"]');
-      outcome.wentBack = await waitFor(async () => (await evalIn(contents, HIRE_STEP_JS)) === "2", { timeoutMs: 2000 });
-    }
-  }
+    const back = await waitFor(async () => (await evalIn(contents, HIRE_STEP_JS)) === String(fromStep - 1), {
+      timeoutMs: 2000,
+    });
+    if (!back) return false;
+    await click(contents, '[data-testid="hire-next"]');
+    return waitFor(async () => (await evalIn(contents, HIRE_STEP_JS)) === String(fromStep), { timeoutMs: 2000 });
+  };
+
+  if (backFrom2) outcome.wentBack2 = await goBackAndReturn(2);
 
   await click(contents, '[data-testid="hire-next"]');
   const onStep3 = await waitFor(async () => (await evalIn(contents, HIRE_STEP_JS)) === "3", { timeoutMs: 2000 });
   if (!onStep3) return outcome;
+
+  if (backFrom3) outcome.wentBack3 = await goBackAndReturn(3);
 
   await typeInto(contents, '[data-testid="employee-name-input"]', employeeName);
   await click(contents, '[data-testid="hire-confirm"]');
@@ -238,6 +209,7 @@ async function bootAndShowOffice(ctx) {
 
 /**
  * @param {E2EContext} ctx
+ * @returns {Promise<{ checks: { name: string, ok: boolean, detail?: string }[], snapshots?: any[] }>}
  */
 async function phaseHire(ctx) {
   const { win, checks } = await bootAndShowOffice(ctx);
@@ -247,12 +219,11 @@ async function phaseHire(ctx) {
     checks.push({ name, ok: Boolean(ok), detail: detail ?? "" });
   };
 
-  const homeBefore = await fingerprintHomeEngineDirs();
+  const homeBefore = await fingerprintHome();
 
-  const first = await hireThroughWizard(win.webContents, { employeeName: E2E_HIRE_A, exerciseBack: true });
+  const first = await hireThroughWizard(win.webContents, { employeeName: E2E_HIRE_A, backFrom2: true, backFrom3: false });
   add("点空工位打开招聘向导，角色库列出 3 个预设", first.opened && first.roleCount === 3, `roles=${first.roleCount}`);
   add("能力清单展示人格、技能、工具、引擎与成本", first.manifestOk);
-  add("三步可前进/后退", first.wentBack);
   add("确认录用提交成功（向导关闭）", first.confirmed);
 
   const occupiedOne = await waitFor(async () => (await evalIn(win.webContents, OCCUPIED_DESK_COUNT_JS)) === 1, {
@@ -264,14 +235,16 @@ async function phaseHire(ctx) {
   );
   add("工位从「空」变「占用」，办公室里出现该员工", occupiedOne && labelShown);
 
-  const second = await hireThroughWizard(win.webContents, { employeeName: E2E_HIRE_B, exerciseBack: false });
+  const second = await hireThroughWizard(win.webContents, { employeeName: E2E_HIRE_B, backFrom2: false, backFrom3: true });
+  add("三步可前进/后退（2→1 与 3→2）", first.wentBack2 && second.wentBack3);
   const occupiedTwo = await waitFor(async () => (await evalIn(win.webContents, OCCUPIED_DESK_COUNT_JS)) === 2, {
     timeoutMs: 4000,
   });
   add("同一角色可再招一人，坐不同工位", second.confirmed && occupiedTwo);
 
   // The host's view of the office: both occupants share one role id with
-  // identical frozen snapshots.
+  // identical frozen snapshots. Record the snapshots into hire.json so the
+  // restart phase compares against the HIRE-time bytes, not current presets.
   const snapshot = /** @type {any} */ (await evalIn(win.webContents, `window.cubicle.invoke('office.get')`));
   const occupants = (snapshot?.desks ?? [])
     .map((/** @type {any} */ d) => d.occupant)
@@ -283,9 +256,9 @@ async function phaseHire(ctx) {
     JSON.stringify(occupants[0].roleSnapshot) === JSON.stringify(occupants[1].roleSnapshot);
   add("两名员工快照同一角色、同一份冻结清单", snapshotsMatch, JSON.stringify(occupants.map((/** @type {any} */ o) => o?.name)));
 
-  const homeAfter = await fingerprintHomeEngineDirs();
+  const homeAfter = await fingerprintHome();
   const untouched = Object.keys(homeBefore).every((dir) => homeDirUntouched(homeBefore[dir], homeAfter[dir]));
-  add("招聘未写入家目录下的引擎配置", untouched, JSON.stringify(homeAfter));
+  add("招聘未写入用户家目录（根条目 + 引擎配置目录指纹不变）", untouched, JSON.stringify(homeAfter));
 
   const pidBefore = ctx.supervisor.pid;
   win.webContents.reload();
@@ -299,7 +272,10 @@ async function phaseHire(ctx) {
     `pid ${pidBefore} → ${ctx.supervisor.pid}`,
   );
 
-  return { checks };
+  return {
+    checks,
+    snapshots: occupants.map((/** @type {any} */ o) => ({ name: o?.name, roleSnapshot: o?.roleSnapshot })),
+  };
 }
 
 /**
@@ -324,17 +300,18 @@ async function phaseVerify(ctx) {
     names.join(","),
   );
 
-  // The snapshot must equal the role definition as it was at hire time.
-  const rolesReply = /** @type {any} */ (await evalIn(win.webContents, `window.cubicle.invoke('role.list')`));
-  const programmer = (rolesReply?.roles ?? []).find((/** @type {any} */ r) => r.key === "programmer");
-  const snapshotMatches =
-    occupants.length === 2 &&
-    occupants.every(
-      (/** @type {any} */ o) =>
-        JSON.stringify(o.roleSnapshot) ===
-        JSON.stringify({ key: programmer.key, name: programmer.name, tagline: programmer.tagline, manifest: programmer.manifest }),
-    );
-  add("重启后：角色快照与录用时（当前预设未被改动时）逐字节一致", snapshotMatches);
+  // Snapshot equality against the bytes recorded AT HIRE TIME (different
+  // process, different boot), not the current preset rows.
+  const hireEvidence = await readJson(path.join(ctx.outDir, "hire.json"));
+  /** @type {any[]} */
+  const recorded = hireEvidence?.snapshots ?? [];
+  const snapshotMatchesHire =
+    recorded.length === 2 &&
+    occupants.every((/** @type {any} */ o) => {
+      const match = recorded.find((r) => r.name === o?.name);
+      return match && JSON.stringify(match.roleSnapshot) === JSON.stringify(o?.roleSnapshot);
+    });
+  add("重启后：角色快照与 hire 阶段录制的录用时刻快照逐字节一致", snapshotMatchesHire, `recorded=${recorded.length}`);
 
   const canvasShowsBoth = await waitFor(
     async () => (await evalIn(win.webContents, OCCUPIED_DESK_COUNT_JS)) === 2,
@@ -354,7 +331,7 @@ async function phaseVerify(ctx) {
  * @returns {Promise<number>} exit code
  */
 export async function runE2E(ctx) {
-  /** @type {{ checks: { name: string, ok: boolean, detail?: string }[] }} */
+  /** @type {{ checks: { name: string, ok: boolean, detail?: string }[], snapshots?: any[] }} */
   let outcome = { checks: [] };
   try {
     outcome = ctx.phase === "verify" ? await phaseVerify(ctx) : await phaseHire(ctx);

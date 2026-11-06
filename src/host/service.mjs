@@ -31,14 +31,17 @@ function requireName(payload, field) {
 }
 
 /**
+ * Strict positive-integer extraction: booleans, strings and floats are all
+ * invalid — the bridge carries JSON numbers, so anything else is a bug.
+ *
  * @param {unknown} payload
  * @param {string} field
  * @returns {number}
  */
 function requirePositiveId(payload, field) {
   const record = /** @type {Record<string, unknown>} */ (payload ?? {});
-  const value = Number(record[field]);
-  if (!Number.isInteger(value) || value <= 0) {
+  const value = record[field];
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
     throw appError("invalid_payload", `${field} must be a positive integer`);
   }
   return value;
@@ -65,10 +68,7 @@ export function createService({ store, hostInfo }) {
     },
 
     "projectGroup.create"(payload) {
-      const companyId = Number(/** @type {Record<string, unknown>} */ (payload ?? {}).companyId);
-      if (!Number.isInteger(companyId) || companyId <= 0) {
-        throw appError("invalid_payload", "companyId must be a positive integer");
-      }
+      const companyId = requirePositiveId(payload, "companyId");
       const name = requireName(payload, "name");
       const group = store.createProjectGroup({ companyId, name });
       store.setActive({ companyId, groupId: group.id });
@@ -98,19 +98,16 @@ export function createService({ store, hostInfo }) {
     },
 
     "office.setActive"(payload) {
+      const companyId = requirePositiveId(payload, "companyId");
       const record = /** @type {Record<string, unknown>} */ (payload ?? {});
-      const companyId = Number(record.companyId);
       const rawGroup = record.groupId;
-      if (!Number.isInteger(companyId) || companyId <= 0) {
-        throw appError("invalid_payload", "companyId must be a positive integer");
-      }
       // Validate against real rows so the UI can't wedge the selection.
       const companyExists = store
         .officeSnapshot()
         .companies.some((/** @type {{ id: number }} */ c) => c.id === companyId);
       if (!companyExists) throw appError("unknown_company", `no company with id ${companyId}`);
       if (rawGroup !== undefined && rawGroup !== null) {
-        const groupId = Number(rawGroup);
+        const groupId = requirePositiveId(payload, "groupId");
         const groupExists = store
           .listGroups({ companyId })
           .some((/** @type {{ id: number }} */ g) => g.id === groupId);

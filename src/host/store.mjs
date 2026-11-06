@@ -191,6 +191,11 @@ function toGroup(row) {
   };
 }
 
+/** Shared columns for reading a desk row joined with its occupant's employee row. */
+const DESK_JOIN = `d.*,
+  e.id AS e_id, e.name AS e_name, e.role_id AS e_role_id,
+  e.role_snapshot AS e_role_snapshot, e.hired_at AS e_hired_at`;
+
 /**
  * @param {Record<string, unknown>} row desk row joined with its occupant
  * @returns {DeskRow}
@@ -214,6 +219,31 @@ function toDesk(row) {
             roleSnapshot: /** @type {RoleSnapshot} */ (JSON.parse(String(row.e_role_snapshot))),
           },
   };
+}
+
+/**
+ * @param {Record<string, unknown>} row
+ * @returns {RoleRow}
+ */
+function toRole(row) {
+  return {
+    id: Number(row.id),
+    key: String(row.key),
+    name: String(row.name),
+    tagline: String(row.tagline),
+    manifest: /** @type {RoleManifest} */ (JSON.parse(String(row.manifest))),
+  };
+}
+
+/**
+ * Freeze a role row into the snapshot shape stored on every employee:
+ * identity + manifest, as it is right now.
+ *
+ * @param {RoleRow} role
+ * @returns {RoleSnapshot}
+ */
+function toRoleSnapshot(role) {
+  return { key: role.key, name: role.name, tagline: role.tagline, manifest: role.manifest };
 }
 
 /**
@@ -277,15 +307,7 @@ export function openStore({ dataDir }) {
     /** @param {{ groupId: number }} input @returns {DeskRow[]} */
     listDesks({ groupId }) {
       const rows = db
-        .prepare(
-          `SELECT d.*,
-                  e.id AS e_id, e.name AS e_name, e.role_id AS e_role_id,
-                  e.role_snapshot AS e_role_snapshot, e.hired_at AS e_hired_at
-           FROM desk d
-           LEFT JOIN employee e ON e.id = d.employee_id
-           WHERE d.group_id = ?
-           ORDER BY d.id`,
-        )
+        .prepare(`SELECT ${DESK_JOIN} FROM desk d LEFT JOIN employee e ON e.id = d.employee_id WHERE d.group_id = ? ORDER BY d.id`)
         .all(groupId);
       return rows.map((row) => toDesk(/** @type {Record<string, unknown>} */ (row)));
     },
@@ -298,16 +320,7 @@ export function openStore({ dataDir }) {
      */
     listRoles() {
       const rows = db.prepare("SELECT * FROM role ORDER BY id").all();
-      return rows.map((row) => {
-        const r = /** @type {Record<string, unknown>} */ (row);
-        return {
-          id: Number(r.id),
-          key: String(r.key),
-          name: String(r.name),
-          tagline: String(r.tagline),
-          manifest: /** @type {RoleManifest} */ (JSON.parse(String(r.manifest))),
-        };
-      });
+      return rows.map((row) => toRole(/** @type {Record<string, unknown>} */ (row)));
     },
 
     /**
@@ -322,9 +335,7 @@ export function openStore({ dataDir }) {
     hireEmployee({ deskId, roleId, name }) {
       const deskRow = db
         .prepare(
-          `SELECT d.*, g.company_id AS g_company_id,
-                  e.id AS e_id, e.name AS e_name, e.role_id AS e_role_id,
-                  e.role_snapshot AS e_role_snapshot, e.hired_at AS e_hired_at
+          `SELECT ${DESK_JOIN}, g.company_id AS g_company_id
            FROM desk d
            JOIN project_group g ON g.id = d.group_id
            LEFT JOIN employee e ON e.id = d.employee_id
@@ -338,15 +349,9 @@ export function openStore({ dataDir }) {
       const roleRow = db.prepare("SELECT * FROM role WHERE id = ?").get(roleId);
       if (!roleRow) throw appError("unknown_role", `no role with id ${roleId}`);
 
-      const role = /** @type {Record<string, unknown>} */ (roleRow);
-      /** @type {RoleSnapshot} */
-      const roleSnapshot = {
-        key: String(role.key),
-        name: String(role.name),
-        tagline: String(role.tagline),
-        manifest: /** @type {RoleManifest} */ (JSON.parse(String(role.manifest))),
-      };
-      const employeeName = name !== undefined && name.trim().length > 0 ? name.trim() : roleSnapshot.name;
+      const role = toRole(/** @type {Record<string, unknown>} */ (roleRow));
+      const roleSnapshot = toRoleSnapshot(role);
+      const employeeName = name !== undefined && name.trim().length > 0 ? name.trim() : role.name;
       const hiredAt = new Date().toISOString();
       let employeeId = 0;
 
@@ -354,7 +359,7 @@ export function openStore({ dataDir }) {
       try {
         const info = db
           .prepare("INSERT INTO employee (company_id, name, role_id, role_snapshot, hired_at) VALUES (?, ?, ?, ?, ?)")
-          .run(Number(deskRow.g_company_id), employeeName, Number(role.id), JSON.stringify(roleSnapshot), hiredAt);
+          .run(Number(deskRow.g_company_id), employeeName, role.id, JSON.stringify(roleSnapshot), hiredAt);
         employeeId = Number(info.lastInsertRowid);
         // Guard against a racing occupy inside this transaction.
         const occupied = db
@@ -372,7 +377,7 @@ export function openStore({ dataDir }) {
           id: employeeId,
           companyId: Number(deskRow.g_company_id),
           name: employeeName,
-          roleId: Number(role.id),
+          roleId: role.id,
           roleSnapshot,
           hiredAt,
         },

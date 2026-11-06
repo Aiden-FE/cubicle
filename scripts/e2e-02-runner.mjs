@@ -18,6 +18,8 @@ import { mkdirSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { out, sleep, waitFor, evalIn, click, typeInto } from "./e2e-harness.mjs";
+
 const E2E_COMPANY = "E2E 公司 02";
 const E2E_GROUP = "E2E 项目组 02";
 
@@ -32,40 +34,6 @@ const E2E_GROUP = "E2E 项目组 02";
  * @property {string} outDir
  */
 
-/** @param {string} line */
-function out(line) {
-  process.stdout.write(line + "\n");
-}
-
-/** @param {number} ms */
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/**
- * Poll an async predicate until it is true or the budget runs out.
- *
- * @param {() => Promise<boolean>} predicate
- * @param {{ timeoutMs: number, intervalMs?: number }} options
- * @returns {Promise<boolean>}
- */
-async function waitFor(predicate, { timeoutMs, intervalMs = 100 }) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      if (await predicate()) return true;
-    } catch {
-      // view not ready yet — keep polling
-    }
-    await sleep(intervalMs);
-  }
-  return false;
-}
-
-/**
- * @param {import("electron").WebContents} contents
- * @param {string} code
- */
-const evalIn = (contents, code) => contents.executeJavaScript(code, true);
-
 /**
  * Open a dropdown switcher panel, type into a controlled React input and
  * submit through its button, so the acceptance run exercises the real UI
@@ -78,18 +46,10 @@ const evalIn = (contents, code) => contents.executeJavaScript(code, true);
  * @param {string} buttonSelector
  */
 async function fillForm(contents, triggerSelector, inputSelector, value, buttonSelector) {
-  await evalIn(contents, `document.querySelector(${JSON.stringify(triggerSelector)})?.click()`);
+  await click(contents, triggerSelector);
   await sleep(150);
-  await evalIn(
-    contents,
-    `(() => {
-      const input = document.querySelector(${JSON.stringify(inputSelector)});
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-      setter.call(input, ${JSON.stringify(value)});
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    })()`,
-  );
-  await evalIn(contents, `document.querySelector(${JSON.stringify(buttonSelector)}).click()`);
+  await typeInto(contents, inputSelector, value);
+  await click(contents, buttonSelector);
 }
 
 /**

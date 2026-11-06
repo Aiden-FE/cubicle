@@ -19,10 +19,12 @@
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
-import { mkdir, rm, readFile } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { readJson, printChecks } from "./e2e-harness.mjs";
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -69,33 +71,6 @@ function launch(options) {
     });
     child.on("exit", (code) => resolve(code ?? 1));
   });
-}
-
-/** @param {string} file */
-async function readJson(file) {
-  try {
-    return /** @type {Record<string, any> | null} */ (JSON.parse(await readFile(file, "utf8")));
-  } catch {
-    return null;
-  }
-}
-
-/**
- * @param {string} label
- * @param {{ checks?: { name: string, ok: boolean, detail?: string }[] } | null} result
- * @returns {boolean}
- */
-function printChecks(label, result) {
-  if (!result) {
-    console.log(`${label}: NO RESULT FILE`);
-    return false;
-  }
-  let allOk = true;
-  for (const check of result.checks ?? []) {
-    allOk &&= Boolean(check.ok);
-    console.log(`  ${check.ok ? "ok  " : "FAIL"}  ${check.name}${check.detail ? ` — ${check.detail}` : ""}`);
-  }
-  return allOk;
 }
 
 await rm(outDir, { recursive: true, force: true });
