@@ -72,12 +72,20 @@ export function HireModal({ desk, onClose }) {
           </button>
         </header>
 
-        <div className="hire-steps" data-testid="hire-step" data-step={step}>
+        <div className="hire-steps" data-testid="hire-step" data-step={step} aria-label={`第 ${step} 步，共 3 步`}>
           {[1, 2, 3].map((n) => (
-            <span key={n} className={n === step ? "active" : n < step ? "done" : ""}>
-              {n === 1 ? "选角色" : n === 2 ? "看能力清单" : "确认录用"}
-            </span>
+            <React.Fragment key={n}>
+              {n > 1 ? <span className="hire-step-arrow" aria-hidden="true">→</span> : null}
+              <span
+                className={`hire-step-chip ${n === step ? "active" : n < step ? "done" : "upcoming"}`}
+                aria-current={n === step ? "step" : undefined}
+              >
+                <span className="hire-step-no">{n < step ? "✓" : n}</span>
+                <span className="hire-step-name">{n === 1 ? "选角色" : n === 2 ? "看能力清单" : "确认录用"}</span>
+              </span>
+            </React.Fragment>
           ))}
+          <span className="hire-step-count">第 {step} / 3 步</span>
         </div>
 
         {error ? <div className="hire-error" data-testid="hire-error">{error}</div> : null}
