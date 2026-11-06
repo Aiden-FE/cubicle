@@ -62,6 +62,10 @@ function WorkstationSvg() {
           <stop offset="0" stopColor="#566054" />
           <stop offset="1" stopColor="#3d453c" />
         </linearGradient>
+        <linearGradient id="imac-shell" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#dcded8" />
+          <stop offset="1" stopColor="#b7bab2" />
+        </linearGradient>
       </defs>
 
       {/* floor shadow */}
@@ -72,11 +76,20 @@ function WorkstationSvg() {
       <rect x="137" y="60" width="7" height="30" rx="2" fill="#b39d78" />
       <rect x="14" y="48" width="142" height="13" rx="4" fill="url(#desk-top)" />
 
-      {/* monitor */}
-      <rect x="75" y="40" width="20" height="8" rx="2" fill="#2f332c" />
-      <rect x="81" y="34" width="8" height="14" fill="#2f332c" />
-      <rect x="44" y="6" width="82" height="36" rx="6" fill="#33372f" />
-      <rect x="48" y="10" width="74" height="28" rx="3" fill="url(#desk-screen)" />
+      {/* iMac: aluminum base plate + L stand, silver body, dark screen, chin */}
+      <g className="imac">
+        <rect x="66" y="49" width="38" height="5" rx="2.5" fill="#c7cac3" />
+        <path d="M77 50 L93 50 L90 30 L80 30 Z" fill="#cfd2cb" />
+        <path d="M77 50 L93 50 L91.5 41 L78.5 41 Z" fill="#c1c4bd" />
+        <rect x="37" y="1" width="96" height="48" rx="6" fill="url(#imac-shell)" />
+        <rect x="41" y="5" width="88" height="36" rx="3" fill="url(#desk-screen)" />
+        <rect x="41" y="5" width="88" height="36" rx="3" fill="none" stroke="#1f231e" strokeWidth="1.2" />
+        <path d="M41 36 Q85 44 129 36 L129 41 Q85 41 41 41 Z" fill="rgba(255,255,255,0.05)" />
+        <path
+          d="M85.5 43.6 c-1.7 0 -2.9 -1.2 -2.9 -2.9 0 -1.8 1.4 -3 3 -3 .6 0 1.1 .2 1.5 .5 -.4 .3 -.7 .8 -.7 1.4 0 1 .7 1.6 1.6 1.6 .5 0 .9 -.2 1.2 -.5 .2 .4 .3 .9 .3 1.4 -.5 .9 -1.6 1.5 -2.9 1.5 z"
+          fill="#9a9d96"
+        />
+      </g>
 
       {/* keyboard + mouse on the near edge */}
       <rect x="52" y="52" width="50" height="9" rx="2.5" fill="#e4ddcd" stroke="#b9b1a0" strokeWidth="1" />
