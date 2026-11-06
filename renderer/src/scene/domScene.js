@@ -13,7 +13,7 @@
 export const ROOM = { width: 640, height: 440 };
 
 /** Desk-card half-size, so the card centers on its coordinate. */
-const ANCHOR = { x: 78, y: 52 };
+const ANCHOR = { x: 85, y: 80 };
 
 /**
  * @param {{ x: number, y: number }} desk
