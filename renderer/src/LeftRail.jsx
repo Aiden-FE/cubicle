@@ -20,9 +20,11 @@ import { Switcher } from "./Switcher.jsx";
  *   onToggleEngine: () => void,
  *   dutyOpen: boolean,
  *   onToggleDuty: () => void,
+ *   aboutOpen: boolean,
+ *   onToggleAbout: () => void,
  * }} props
  */
-export function LeftRail({ snapshot, onChanged, benchOpen, onToggleBench, rosterOpen, onToggleRoster, engineOpen, onToggleEngine, dutyOpen, onToggleDuty }) {
+export function LeftRail({ snapshot, onChanged, benchOpen, onToggleBench, rosterOpen, onToggleRoster, engineOpen, onToggleEngine, dutyOpen, onToggleDuty, aboutOpen, onToggleAbout }) {
   return (
     <nav className="left-rail" data-testid="left-rail" aria-label="主界面左轨">
       <div className="rail-switcher">
@@ -64,6 +66,16 @@ export function LeftRail({ snapshot, onChanged, benchOpen, onToggleBench, roster
         onClick={onToggleDuty}
       >
         上下班
+      </button>
+      {/* 票 13: 关于页 — 版本号（安装包 metadata）浮层，入口排左轨末尾。 */}
+      <button
+        type="button"
+        className="rail-button"
+        data-testid="rail-about"
+        aria-expanded={aboutOpen ? "true" : "false"}
+        onClick={onToggleAbout}
+      >
+        关于
       </button>
     </nav>
   );

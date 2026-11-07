@@ -19,6 +19,20 @@ export interface CubicleBridge {
   /** Resolves with the reply payload; rejects with a plain {@link BridgeError} (Error subclasses do not survive contextBridge). */
   invoke(method: string, payload?: unknown): Promise<unknown>;
   subscribe(topic: string, handler: (event: EventEnvelope) => void): () => void;
+  /** 票 13: 关于页 metadata（main 的业务，不走 AgentHost 信封总线）。 */
+  appInfo(): Promise<AppInfo>;
+}
+
+/** Main-process app metadata for the About overlay (ticket 13). */
+export interface AppInfo {
+  productName: string;
+  version: string;
+  versionSource: "app" | "package" | "fallback";
+  mismatch: boolean;
+  packageVersion: string | null;
+  electron: string | null;
+  packaged: boolean;
+  dataDir: string;
 }
 
 /** Topic names mirrored from src/shared/envelope.mjs TOPICS (realm boundary). */

@@ -8,12 +8,14 @@
  */
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { app, BrowserWindow, Menu, ipcMain, utilityProcess, dialog } from "electron";
 
 import { createHostSupervisor } from "./supervisor.mjs";
 import { createEventCoalescer } from "./coalescer.mjs";
 import { createExitCoordinator } from "./exit-coordinator.mjs";
+import { createSingleInstanceGuard, focusMainWindow } from "./single-instance.mjs";
+import { readPackageVersion, resolveAboutVersion } from "./app-version.mjs";
 import { createInvoke, createEvent, createErrorReply, parseEnvelope, TOPICS } from "../shared/envelope.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -41,6 +43,25 @@ if (process.env.CUBICLE_PROBE_USERDATA) {
   app.exit(0);
 }
 
+// 票 13 验收 2：单实例锁。拿不到锁 = 已经有一个 Cubicle 在跑：把既有窗口
+// 带到前台的活儿归那个进程，这个副本立即退出（不开第二个窗口、不建数据
+// 目录）。锁以 userData 为键，所以上面的路径解析必须先跑。
+const instanceGuard = createSingleInstanceGuard({
+  requestSingleInstanceLock: () => app.requestSingleInstanceLock(),
+});
+if (instanceGuard.role === "secondary") {
+  app.exit(0);
+}
+app.on("second-instance", () => {
+  focusMainWindow(mainWindow);
+  if (e2eOutDirForEvidence) {
+    appendFileSyncProbe(path.join(e2eOutDirForEvidence, "second-instance.json"), {
+      at: Date.now(),
+      windows: BrowserWindow.getAllWindows().length,
+    });
+  }
+});
+
 /**
  * @param {string} file
  * @param {Record<string, unknown>} payload
@@ -55,6 +76,9 @@ mkdirSync(app.getPath("userData"), { recursive: true });
 
 const e2eEnabled = process.argv.includes("--cubicle-e2e");
 const e2ePhase = /** @type {"create" | "verify"} */ (process.env.CUBICLE_E2E_PHASE ?? "create");
+/** Where the acceptance runner writes evidence; also where the
+ *  second-instance hand-off drops its proof (ticket 13). */
+const e2eOutDirForEvidence = e2eEnabled ? (process.env.CUBICLE_E2E_OUT_DIR ?? null) : null;
 
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
@@ -192,6 +216,23 @@ ipcMain.on("cubicle:invoke", (_event, raw) => {
       createErrorReply(envelope, { code: "host_offline", message: "后台服务未运行，正在自动重启" }),
     );
   }
+});
+
+// 票 13 验收 5：关于页的版本号。app.getVersion() 是权威（打包后 = exe 的
+// metadata），主进程顺手对表 asar/仓库里的 package.json —— 漂移要诚实上报
+// （这是 main 的业务：窗口与偏好，不经过 AgentHost 信封总线）。
+ipcMain.handle("cubicle:app-info", () => {
+  const pkgFile = path.join(rootDir, "package.json");
+  const packageVersion = existsSync(pkgFile) ? readPackageVersion(readFileSync(pkgFile, "utf8")) : null;
+  const about = resolveAboutVersion({ appVersion: app.getVersion(), packageVersion });
+  return {
+    productName: "Cubicle",
+    ...about,
+    packageVersion,
+    electron: process.versions.electron ?? null,
+    packaged: app.isPackaged,
+    dataDir: resolveDataDir(),
+  };
 });
 
 // — 退出三选 (ticket 09) — 主进程自己也要敲 AgentHost 的门（下班落盘 /

@@ -86,4 +86,13 @@ contextBridge.exposeInMainWorld("cubicle", {
       if (current.size === 0) topicHandlers.delete(topic);
     };
   },
+
+  /**
+   * 票 13: 关于页 — app metadata comes from main (window/preferences
+   * business), not through the AgentHost envelope bus.
+   * @returns {Promise<unknown>}
+   */
+  appInfo() {
+    return ipcRenderer.invoke("cubicle:app-info");
+  },
 });

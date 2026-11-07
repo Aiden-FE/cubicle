@@ -1286,6 +1286,50 @@ body {
   gap: 8px;
 }
 
+/* 关于页（票 13：产品名 + 版本号，安装包 metadata 经 main 对表 package.json） */
+.about-body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.about-product {
+  font-size: 22px;
+  font-weight: 700;
+}
+.about-version-line {
+  font-size: 14px;
+}
+.about-version-line [data-testid="about-version"] {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.about-warn {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #b42318;
+  color: #fff;
+  font-size: 12px;
+}
+.about-meta {
+  font-size: 12px;
+  color: var(--ink-soft, #6b6355);
+}
+.about-datadir {
+  word-break: break-all;
+}
+.about-error {
+  font-size: 13px;
+  color: #b42318;
+}
+.about-tagline {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--ink-soft, #6b6355);
+}
+
 .roster-row {
   display: flex;
   align-items: baseline;
