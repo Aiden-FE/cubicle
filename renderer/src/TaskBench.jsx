@@ -2,9 +2,12 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 
 // Topic names mirrored from src/shared/envelope.mjs TOPICS (process boundary).
 const RUN_TOPIC = "run.event";
+const DOMAIN_TOPIC = "domain.changed";
 
 const PLAYBOOK_LABELS = /** @type {Record<string, string>} */ ({ feature: "加功能", bugfix: "修 bug", docs: "写文档", free: "自由" });
-const STATUS_LABELS = /** @type {Record<string, string>} */ ({ open: "待派单", running: "工作中", finished: "已交产出" });
+// 票 06：五个状态全部可见；转移合法性在 host，浮层只展示 + 触发合法转移。
+const STATUS_LABELS = /** @type {Record<string, string>} */ ({ open: "待办", running: "进行中", review: "待验收", done: "完成", failed: "失败" });
+const SESSION_LABELS = /** @type {Record<string, string>} */ ({ running: "进行中", completed: "已完成", aborted: "已取消", failed: "失败", interrupted: "中断" });
 
 /**
  * 工单台 — the work-order desk, a left-rail drawer (hard constraint: the
@@ -15,6 +18,12 @@ const STATUS_LABELS = /** @type {Record<string, string>} */ ({ open: "待派单"
  * 标准). 派单 creates the task (git start HEAD recorded or the host says
  * 工作区不是 git 仓库) and dispatches it. Finished tasks show the 四件套:
  * diff 摘要 / 变更文件清单 / 命令输出 / 收尾报告.
+ *
+ * 票 06（验收与打回）: every run settles at 待验收 — 完成 only comes from
+ * 通过; 打回 continues the SAME task (one more iteration on the same
+ * history); 取消 stops a running task and marks it 失败. The five states
+ * (待办/进行中/待验收/完成/失败) are visible on every row, and the detail
+ * buttons only ever offer transitions the host accepts anyway.
  *
  * @param {{ snapshot: import("./App.jsx").OfficeSnapshotData | null, onClose: () => void }} props
  */
@@ -28,6 +37,7 @@ export function TaskBench({ snapshot, onClose }) {
   const [note, setNote] = useState(/** @type {string | null} */ (null));
   const [openTaskId, setOpenTaskId] = useState(/** @type {number | null} */ (null));
   const [detail, setDetail] = useState(/** @type {TaskDetailData | null} */ (null));
+  const [rejectReason, setRejectReason] = useState("");
   const editedContract = useRef(false);
   const draftTimer = useRef(/** @type {ReturnType<typeof setTimeout> | null} */ (null));
 
@@ -90,16 +100,31 @@ export function TaskBench({ snapshot, onClose }) {
   useEffect(() => {
     if (openTaskId === null) {
       setDetail(null);
+      setRejectReason("");
       return;
     }
     void loadDetail(openTaskId);
   }, [openTaskId, loadDetail]);
 
-  // A run settling: re-pull the list and the open task's artifacts.
+  // A run settling: re-pull the list and the open task's artifacts. The
+  // host's agent_end rides out before the artifact hook finishes writing,
+  // so the detail reload is deliberately late.
   useEffect(() => {
     const unsubscribe = window.cubicle.subscribe(RUN_TOPIC, (envelope) => {
       const payload = /** @type {{ event: { type: string } }} */ (envelope.payload);
       if (payload.event.type !== "agent_end") return;
+      void loadTasks();
+      if (openTaskId !== null) void loadDetail(openTaskId);
+    });
+    return unsubscribe;
+  }, [loadTasks, loadDetail, openTaskId]);
+
+  // 派单/通过/打回/取消 change the domain — keep list and detail honest
+  // without polling (ticket 06: the five states stay visible as they move).
+  useEffect(() => {
+    const unsubscribe = window.cubicle.subscribe(DOMAIN_TOPIC, (envelope) => {
+      const reason = /** @type {{ reason?: string }} */ (envelope.payload ?? {}).reason ?? "";
+      if (!reason.startsWith("task.")) return;
       void loadTasks();
       if (openTaskId !== null) void loadDetail(openTaskId);
     });
@@ -147,6 +172,33 @@ export function TaskBench({ snapshot, onClose }) {
   };
 
   const detailTask = detail?.task ?? null;
+
+  /**
+   * 验收动作（票 06：浮层只触发合法转移——合法性由 host 强制；host 拒绝时
+   * 错误消息就是诚实的状态说明）.
+   *
+   * @param {"task.accept" | "task.reject" | "task.cancel" | "task.dispatch"} method
+   * @param {Record<string, unknown>} payload
+   */
+  const act = async (method, payload) => {
+    if (openTaskId === null) return;
+    setNote(null);
+    try {
+      await window.cubicle.invoke(method, payload);
+      if (method === "task.reject") setRejectReason("");
+      await loadTasks();
+      await loadDetail(openTaskId);
+    } catch (err) {
+      const failure = /** @type {{ code?: string, message?: string }} */ (err);
+      setNote(
+        failure.code === "invalid_transition"
+          ? failure.message ?? "这张工单的当前状态不允许这个操作。"
+          : failure.code === "no_active_run"
+            ? "这张工单没有正在执行的运行——它可能已经自己收尾了。"
+            : `操作失败：${failure.code ?? "unknown"}`,
+      );
+    }
+  };
 
   return (
     <aside className="task-drawer" data-testid="task-bench">
@@ -278,10 +330,80 @@ export function TaskBench({ snapshot, onClose }) {
             起点 HEAD <code>{detailTask.baseHead.slice(0, 7)}…</code>（所有 diff 相对它）
           </div>
 
-          {detailTask.status === "finished" ? (
+          <div className="task-tokens" data-testid="task-tokens">
+            本任务 token <code>{detail?.tokens?.total ?? 0}</code>
+            <span className="task-tokens-detail">
+              （输入 {detail?.tokens?.input ?? 0} · 输出 {detail?.tokens?.output ?? 0}）
+            </span>
+          </div>
+
+          {detail && detail.sessions.length > 0 ? (
+            <div className="task-sessions" data-testid="task-sessions">
+              <span className="task-iterations" data-testid="task-iterations">
+                迭代 {detail.iterations ?? detail.sessions.length} 轮
+              </span>
+              {detail.sessions.map((session) => (
+                <span key={session.id} className="task-session" data-testid={`task-session-${session.iteration}`}>
+                  第 {session.iteration} 轮 · {SESSION_LABELS[session.status] ?? session.status}
+                </span>
+              ))}
+            </div>
+          ) : null}
+
+          {detailTask.status === "review" ? (
+            <div className="task-review" data-testid="task-review">
+              <textarea
+                className="task-reject-reason"
+                data-testid="task-reject-reason"
+                rows={2}
+                placeholder="打回意见（可留空）：产出哪里没过验收？"
+                value={rejectReason}
+                onChange={(event) => setRejectReason(event.target.value)}
+              />
+              <div className="task-review-actions">
+                <button
+                  type="button"
+                  className="task-accept"
+                  data-testid="task-accept"
+                  onClick={() => void act("task.accept", { taskId: detailTask.id })}
+                >
+                  通过
+                </button>
+                <button
+                  type="button"
+                  className="task-reject"
+                  data-testid="task-reject"
+                  onClick={() => void act("task.reject", { taskId: detailTask.id, reason: rejectReason })}
+                >
+                  打回
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {detailTask.status === "running" ? (
+            <button
+              type="button"
+              className="task-cancel"
+              data-testid="task-cancel"
+              onClick={() => void act("task.cancel", { taskId: detailTask.id })}
+            >
+              取消
+            </button>
+          ) : null}
+          {detailTask.status === "failed" ? (
+            <button
+              type="button"
+              className="task-retry"
+              data-testid="task-retry"
+              onClick={() => void act("task.dispatch", { taskId: detailTask.id })}
+            >
+              重试（再来一轮）
+            </button>
+          ) : null}
+
+          {detail && detail.artifacts.length > 0 ? (
             <div className="task-artifacts">
-              {detail?.artifacts.length === 0 ? <div className="task-empty">产出还没落盘，稍后刷新。</div> : null}
-              {detail?.artifacts.map((artifact) => (
+              {detail.artifacts.map((artifact) => (
                 <details key={artifact.id} className="task-artifact" data-testid={`artifact-${artifact.kind}`} open={artifact.kind === "diff_summary"}>
                   <summary>{ARTIFACT_TITLES[artifact.kind] ?? artifact.kind}</summary>
                   <pre>{artifact.content}</pre>
@@ -290,7 +412,11 @@ export function TaskBench({ snapshot, onClose }) {
             </div>
           ) : (
             <div className="task-empty" data-testid="task-detail-hint">
-              {detailTask.status === "running" ? "员工正在干活，跑完这里会出现四件套。" : "这张工单还没开工，点派单或回列表派单。"}
+              {detailTask.status === "running"
+                ? "员工正在干活，跑完这里会出现四件套；要中途停下点「取消」。"
+                : detailTask.status === "open"
+                  ? "这张工单还没开工：在上方表单派单。"
+                  : "产出还没落盘，稍后刷新。"}
             </div>
           )}
         </section>
@@ -330,5 +456,7 @@ const ARTIFACT_TITLES = /** @type {Record<string, string>} */ ({
  * Renderer-side mirrors of host payload shapes (process boundary).
  * @typedef {{ playbook: string, label: string, goal: string, acceptance: string[] }} TaskDraftData
  * @typedef {{ id: number, groupId: number, employeeId: number, title: string, goal: string, playbook: string, acceptance: string[], baseHead: string, status: string, createdAt: string, employeeName: string }} TaskRowData
- * @typedef {{ task: TaskRowData, sessions: Record<string, unknown>[], artifacts: { id: number, kind: string, content: string }[] }} TaskDetailData
+ * @typedef {{ id: number, taskId: number, employeeSessionId: number, engine: string, status: string, startedAt: string, endedAt: string | null, sessionFile: string | null, iteration: number }} TaskSessionData
+ * @typedef {{ input: number, cachedInput: number, cacheWrite: number, output: number, reasoning: number, total: number }} TaskTokenData
+ * @typedef {{ task: TaskRowData, sessions: TaskSessionData[], artifacts: { id: number, kind: string, content: string }[], tokens?: TaskTokenData, iterations?: number }} TaskDetailData
  */

@@ -1444,8 +1444,16 @@ body {
   color: var(--warn);
 }
 
-.task-row[data-status="finished"] .task-row-meta {
+.task-row[data-status="review"] .task-row-meta {
+  color: #7a5cc4;
+}
+
+.task-row[data-status="done"] .task-row-meta {
   color: var(--ok);
+}
+
+.task-row[data-status="failed"] .task-row-meta {
+  color: var(--bad);
 }
 
 .task-detail {
@@ -1482,9 +1490,123 @@ body {
   border-color: rgba(201, 138, 44, 0.45);
 }
 
-.task-state[data-status="finished"] {
+.task-state[data-status="review"] {
+  color: #7a5cc4;
+  border-color: rgba(122, 92, 196, 0.45);
+}
+
+.task-state[data-status="done"] {
   color: var(--ok);
   border-color: rgba(61, 138, 95, 0.4);
+}
+
+.task-state[data-status="failed"] {
+  color: var(--bad);
+  border-color: rgba(180, 72, 47, 0.4);
+}
+
+/* — 票 06: token 账单 + 迭代历史 + 验收动作 — */
+
+.task-tokens {
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.task-tokens code {
+  background: var(--wood);
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: var(--ink);
+}
+
+.task-tokens-detail {
+  margin-left: 4px;
+  color: var(--ink-soft);
+}
+
+.task-sessions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.task-iterations {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.task-session {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 9px;
+  background: var(--paper);
+}
+
+.task-review {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper-raised);
+  padding: 10px 12px;
+}
+
+.task-reject-reason {
+  font: inherit;
+  font-size: 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: var(--paper);
+  color: var(--ink);
+  resize: vertical;
+}
+
+.task-review-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.task-accept,
+.task-reject,
+.task-cancel,
+.task-retry {
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  border: none;
+  border-radius: 9px;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+.task-accept {
+  background: var(--ok);
+  color: #fff;
+  flex: 1;
+}
+
+.task-reject {
+  background: var(--warn);
+  color: #fff;
+  flex: 1;
+}
+
+.task-cancel {
+  align-self: flex-start;
+  background: transparent;
+  color: var(--bad);
+  border: 1px solid rgba(180, 72, 47, 0.4);
+}
+
+.task-retry {
+  align-self: flex-start;
+  background: var(--accent);
+  color: #fff;
 }
 
 .task-back {
