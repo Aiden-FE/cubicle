@@ -273,8 +273,10 @@ export async function sweepPidLedger({
   const ledger = createPidLedger({ file });
   const entries = ledger.read();
   const outcome = { checked: 0, killed: 0, orphanChildren: 0, stale: 0 };
+  const sweptPids = /** @type {number[]} */ ([]);
   for (const entry of entries) {
     outcome.checked += 1;
+    sweptPids.push(entry.pid);
     let probed = null;
     try {
       probed = await probeProcess(entry.pid);
@@ -320,7 +322,11 @@ export async function sweepPidLedger({
       log?.(`ledger child list failed pid=${entry.pid}: ${err instanceof Error ? err.message : err}`);
     }
   }
-  ledger.clear();
+  // Forget only the entries this sweep processed: the snapshot was taken at
+  // sweep start, and a host boot-sweep can overlap a FRESH spawn (recorded
+  // mid-sweep) — a whole-file clear() would erase that live entry and hand
+  // its orphan back to nobody. Per-pid forget keeps the fresh line intact.
+  for (const pid of sweptPids) ledger.forget(pid);
   return outcome;
 }
 

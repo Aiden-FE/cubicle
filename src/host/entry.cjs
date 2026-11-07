@@ -23,6 +23,7 @@ async function main() {
     { createTaskRunHook },
     { createDutyRuntime },
     { taskPrompt },
+    { engineLedgerFile, sweepPidLedger },
     { existsSync },
     path,
     { parseEnvelope, createEvent, TOPICS },
@@ -37,12 +38,22 @@ async function main() {
     import("./task/artifacts.mjs"),
     import("./duty/runtime.mjs"),
     import("./task/playbook.mjs"),
+    import("./engine/child-ledger.mjs"),
     import("node:fs"),
     import("node:path"),
     import("../shared/envelope.mjs"),
   ]);
 
   const store = openStore({ dataDir });
+  // 票 10 「宿主启动时清扫」: main's launch sweep covers the app restart; this
+  // covers the SUPERVISOR restart path (host crashed → new host boots in the
+  // same app session) — orphan engine children of the dead host get swept here,
+  // not only at next app start. Fire-and-forget: an empty ledger costs one
+  // file read; a full sweep never blocks the office coming up.
+  void sweepPidLedger({
+    file: engineLedgerFile(store.dataDir, "codex"),
+    log: (message) => process.stderr.write(`host boot sweep: ${message}\n`),
+  }).catch(() => {});
   const hostInfo = {
     pid: process.pid,
     startedAt: new Date().toISOString(),

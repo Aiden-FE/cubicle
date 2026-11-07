@@ -274,15 +274,23 @@ proof("强杀前：账本里的 codex pid 活着；宿主名下有真子进程�
 
 // 真·强杀：taskkill /F AgentHost（utilityProcess，不带 /T）——它的
 // process.on("exit")/killChildrenSync 不会跑：codex/工具进程当场成孤儿、
-// 账本条目不会被 forget。这就是账本要收的崩溃现场。
+// exit 钩子没人 forget。这就是账本要收的崩溃现场。
 spawn("taskkill", ["/pid", String(hostPid), "/F"], { windowsHide: true, stdio: "ignore" });
+// 账本立刻采一次（supervisor ~1s 后会重启宿主，新宿主开机扫账可能比 main 死还早
+// 把条目吃掉 —— 那是「不用重启 app 也自愈」的更强证据，允许两种结局都成立）。
+let ledgerJustAfterKill = /** @type {any[]} */ ([]);
+try {
+  ledgerJustAfterKill = JSON.parse(await readFile(ledgerPath, "utf8"));
+} catch {
+  ledgerJustAfterKill = [];
+}
 await sleep(1200);
 
 const hostAliveAfterKill = await processAlive(hostPid);
 const orphanKids = await cimChildren(hostPid); // 死宿主名下任何活孩子都是孤儿
 const codexOrphanKids = codexPid > 0 ? await cimChildren(codexPid) : [];
 const codexAliveAfter = codexPid > 0 && (await processAlive(codexPid));
-let ledger = ledgerBefore;
+let ledger = ledgerJustAfterKill;
 try {
   ledger = JSON.parse(await readFile(ledgerPath, "utf8"));
 } catch {
@@ -294,7 +302,11 @@ proof(
   orphanTotal >= 1,
   `host kids=${JSON.stringify(orphanKids)}; codex alive=${codexAliveAfter} codex kids=${JSON.stringify(codexOrphanKids)}; host alive=${hostAliveAfterKill}`,
 );
-proof("强杀后账本仍写着孤儿代 pid（exit 钩子没跑、没人 forget；这就是下次启动的清扫依据）", Array.isArray(ledger) && ledger.length >= 1, `ledger=${JSON.stringify(ledger.map((e) => e?.pid))}`);
+proof(
+  "强杀后现场没人 forget（exit 钩子没跑）：账本要么还写着孤儿代 pid，要么已被新一代宿主的开机扫账吃掉（log 实证）",
+  (Array.isArray(ledgerJustAfterKill) && ledgerJustAfterKill.length >= 1) || (Array.isArray(ledger) && ledger.length === 0),
+  `ledger right after kill=${JSON.stringify(ledgerJustAfterKill.map((e) => e?.pid))}; later=${JSON.stringify(ledger.map((e) => e?.pid))}`,
+);
 
 // 宿主死了，supervisor 会自己把 AgentHost 拉起来（宿主重启路径）——
 // 中断三选的故事等应用重启再演；这里先把 main 也强杀掉。
