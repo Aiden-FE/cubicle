@@ -2,6 +2,8 @@
 
 13 张 tracer-bullet 票，每张切一条贯穿 schema → 业务宿主 → IPC → UI 的完整路径，可独立演示。
 
+**全部 13 张已 done（2026-11-08）。** 逐票验收：`npm run e2e:NN`（02–13；01 = `npm run spike`）。
+
 ## 顺序与依赖
 
 | # | 票 | Blocked by | 对应里程碑 |
