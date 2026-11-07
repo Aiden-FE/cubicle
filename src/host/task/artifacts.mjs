@@ -104,11 +104,11 @@ export function finalReport(events) {
  * artifacts first (so the UI never opens a finished task with empty slots),
  * then the task session's outcome, then the task itself.
  *
- * @param {{ store: import("../store.mjs").ReturnType<(typeof import("../store.mjs").openStore)>, git: { diffInfo(workspaceDir: string, baseSha: string): unknown } }} deps
+ * @param {{ store: ReturnType<import("../store.mjs").openStore>, git: Pick<import("../git/reader.mjs").GitReader, "diffInfo"> }} deps
  * @returns {(finished: TaskRunFinished) => void}
  */
 export function createTaskRunHook({ store, git }) {
-  return ({ run, status, events }) => {
+  return ({ run, events }) => {
     if (run.taskId === null) return;
     const task = store.taskById(run.taskId);
 
@@ -117,7 +117,7 @@ export function createTaskRunHook({ store, git }) {
     /** @type {string[]} */
     let fileLines = ["无法列出变更：缺少任务记录。"];
     if (task) {
-      const info = /** @type {any} */ (git.diffInfo(task.workspaceDir, task.baseHead));
+      const info = git.diffInfo(task.workspaceDir, task.baseHead);
       if (info.ok) {
         diffLines = [
           `起点 ${short(task.baseHead)} → 当前 ${short(info.headNow)}`,
@@ -145,9 +145,8 @@ export function createTaskRunHook({ store, git }) {
       content: cap(report.length > 0 ? report : "（引擎没有留下收尾报告）"),
     });
 
-    if (run.taskSessionId !== null) {
-      store.finishTaskSession({ taskSessionId: run.taskSessionId, status });
-    }
+    // The task session row is closed by the run manager (single owner of the
+    // run lifecycle); this hook writes the deliverables and marks the task.
     if (task) {
       store.setTaskStatus(task.id, "finished");
     }

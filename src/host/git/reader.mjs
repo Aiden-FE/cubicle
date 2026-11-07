@@ -159,3 +159,5 @@ export function createGitReader({ runCommand } = {}) {
     },
   };
 }
+
+/** @typedef {ReturnType<typeof createGitReader>} GitReader */

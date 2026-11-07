@@ -12,12 +12,14 @@ async function main() {
     throw new Error("CUBICLE_DATA_DIR is required");
   }
 
-  const [{ openStore }, { createService }, { createRunManager }, { createPiAdapter }, { parseEnvelope, createEvent, TOPICS }] =
+  const [{ openStore }, { createService }, { createRunManager }, { createPiAdapter }, { createGitReader }, { createTaskRunHook }, { parseEnvelope, createEvent, TOPICS }] =
     await Promise.all([
       import("./store.mjs"),
       import("./service.mjs"),
       import("./engine/run-manager.mjs"),
       import("./engine/pi/adapter.mjs"),
+      import("./git/reader.mjs"),
+      import("./task/artifacts.mjs"),
       import("../shared/envelope.mjs"),
     ]);
 
@@ -30,6 +32,8 @@ async function main() {
   };
 
   const piAdapter = createPiAdapter({ dataDir: store.dataDir });
+  // The app's git door: read-only commands only, everything audited.
+  const git = createGitReader();
 
   const port = process.parentPort;
   /** @param {unknown} envelope */
@@ -41,8 +45,10 @@ async function main() {
     // Engine events ride the run.event topic; the main process coalesces and
     // the view subscribes per topic. (Payloads stay envelope-shaped.)
     emit: (payload) => send(createEvent(TOPICS.runEvent, payload)),
+    // Work-order runs collect their 四件套 (ticket 05).
+    onTaskRunFinished: createTaskRunHook({ store, git }),
   });
-  const service = createService({ store, hostInfo, runManager });
+  const service = createService({ store, hostInfo, runManager, git });
 
   port.on("message", (event) => {
     const envelope = parseEnvelope(event.data);

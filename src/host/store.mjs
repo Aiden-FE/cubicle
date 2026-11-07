@@ -717,6 +717,19 @@ export function openStore({ dataDir }) {
       return row ? toRun(/** @type {Record<string, unknown>} */ (row)) : null;
     },
 
+    /**
+     * The project group an employee sits in (their tasks live there).
+     *
+     * @param {number} employeeId
+     * @returns {number | null}
+     */
+    groupOfEmployee(employeeId) {
+      const row = db
+        .prepare("SELECT d.group_id AS g FROM employee e JOIN desk d ON d.employee_id = e.id WHERE e.id = ?")
+        .get(employeeId);
+      return row ? Number(/** @type {Record<string, unknown>} */ (row).g) : null;
+    },
+
     // — tasks (ticket 05: 工单与产出) —
 
     /**

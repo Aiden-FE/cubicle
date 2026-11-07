@@ -22,12 +22,12 @@ async function withCollector(name, gitScript) {
   const dataDir = await mkdtemp(path.join(tmpdir(), `cubicle-artifacts-${name}-`));
   const store = openStore({ dataDir });
   let diffCalls = /** @type {{ workspaceDir: string, baseSha: string }[]} */ ([]);
-  const git = {
+  const git = /** @type {any} */ ({
     diffInfo(/** @type {string} */ workspaceDir, /** @type {string} */ baseSha) {
       diffCalls.push({ workspaceDir, baseSha });
       return { ...gitScript };
     },
-  };
+  });
   const group = store.officeSnapshot().groups[0];
   const programmer = /** @type {any} */ (store.listRoles().find((r) => r.key === "programmer"));
   const desk = store.listDesks({ groupId: group.id })[0];
@@ -79,7 +79,7 @@ async function withCollector(name, gitScript) {
   };
 }
 
-/** @param {any[]} types @returns {{ at: number, event: any }[]} */
+/** @param {any[]} spec @returns {{ at: number, event: any }[]} */
 function eventsOf(spec) {
   return spec.map((event, index) => ({ at: 1000 + index, event }));
 }
@@ -130,13 +130,13 @@ test("a finished task run leaves exactly the four artifacts, in order", async ()
   }
 });
 
-test("finishing the run also closes the task: status finished and its task session holds the outcome", async () => {
+test("finishing the run marks the task finished (the run manager owns the task session)", async () => {
   const ctx = await withCollector("close", { ok: true, headNow: "c".repeat(40), stat: "", nameStatus: [], porcelain: "" });
   try {
     ctx.hook({ run: ctx.run, status: "aborted", events: eventsOf([{ type: "agent_end", status: "failed" }]) });
     assert.equal(/** @type {any} */ (ctx.store.taskById(ctx.task.id)).status, "finished");
-    const session = /** @type {any} */ (ctx.store.latestTaskSessionForTask(ctx.task.id));
-    assert.equal(session.status, "aborted");
+    // four honest slots even for an aborted run with nothing in them
+    assert.equal(ctx.store.listArtifacts({ taskId: ctx.task.id }).length, 4);
   } finally {
     await ctx.dispose();
   }
