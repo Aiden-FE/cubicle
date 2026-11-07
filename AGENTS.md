@@ -53,10 +53,11 @@ Windows 优先的桌面应用（Electron + React + PixiJS），不绑定任何 a
 
 ## M2 引擎（研发票 04）环境坑
 
-- **electron.exe 不能 spawn 外部进程**（本机策略）：一切进程枚举/外部 helper 检查放编排器（普通 Node）做，别放 main/runner。
-- **`tasklist.exe` 在本机不可用**（过滤器命中也退 1 无输出）；进程计数用 PowerShell `Get-CimInstance Win32_Process -Filter "ParentProcessId=…"`，结果用数组包裹取 `.Count`。`wmic.exe` 已不存在。
+- **electron.exe 能 spawn 普通外部进程**（05 票 spike 更正：main 与 utilityProcess 内 `git.exe` / `cmd.exe` / `powershell.exe` / `whoami` 实测 exit 0）。**但 Git Bash（msys2）在 electron.exe 里起不来**：`NtCreateDirectoryObject(\BaseNamedObjects\msys-2.0…) 0xC0000022` —— 所以 **pi 的 bash 工具在本机应用内不可用**；员工跑命令要配 **powershell** 工具（pi 自带，程序员的 tools 已含）。04 票当时把 tasklist 的失败外推成了「不能 spawn」，注意区分。
+- **`tasklist.exe` 在本机不可靠**；进程计数用 PowerShell `Get-CimInstance Win32_Process -Filter "ParentProcessId=…"`，结果用数组包裹取 `.Count`。`wmic.exe` 已不存在。
 - agent 受限会话里 **esbuild / vite build 的 spawn 管道被拒（EPERM）**：build 与 e2e 需提权或全权限会话。
 - 冷启动 Electron 首个 e2e phase 渲染工位可能 >5s（安全策略/AV）；boot 脚手架等待给到 15s。票内 2s 判据从「点发送」起算，不受影响。
+- **contextBridge 吞掉 Error 自定义属性**：preload 用 `new Error(); err.code=…` reject，渲染进程拿不到 `.code`（序列化只留标准字段）。桥约定：reject **纯对象** `{ code, message }`（05 票已改，renderer 都按此读）。
 
 ## 硬约束（改这些等于改蓝图，先开票）
 
