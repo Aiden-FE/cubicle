@@ -66,12 +66,18 @@ const HISTORY_CAP = 400;
 export function createRunManager({ store, getAdapter, emit, onTaskRunFinished }) {
   /** @type {Map<number, ActiveRun>} */
   const active = new Map();
+  /** live engine sessions keyed by employeeSessionId — ticket 11 widened
+   *  sessions to one-per-engine, so the handle cache follows the session
+   *  entity, not just the employee. */
   /** @type {Map<number, LiveSession>} */
   const liveSessions = new Map();
   /** @type {Map<number, { runId: number, events: { at: number, event: NormalizedEvent }[] }>} */
   const lastRunEvents = new Map();
   /** @type {Array<(value?: unknown) => void>} */
   let quietWaiters = [];
+  /** wire listeners (the admission probe rides the same topic the UI does) */
+  /** @type {Set<(payload: { runId: number, employeeId: number, sessionId: number, at: number, event: NormalizedEvent }) => void>} */
+  const listeners = new Set();
 
   /** Resolves when no run is active — the seam's determinism handle. */
   function whenQuiet() {
@@ -127,6 +133,7 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
       if (buffer.events.length > HISTORY_CAP) buffer.events.splice(0, 1);
     }
     emit(payload);
+    for (const listener of listeners) listener(payload);
   }
 
   /**
@@ -192,10 +199,10 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
   }
 
   /**
-   * @param {{ employeeId: number, text: string, task?: { id: number } | null, resume?: boolean }} input
+   * @param {{ employeeId: number, text: string, task?: { id: number } | null, resume?: boolean, probe?: boolean }} input
    * @returns {{ run: RunRow, session: EmployeeSessionRow }}
    */
-  function start({ employeeId, text, task, resume }) {
+  function start({ employeeId, text, task, resume, probe = false }) {
     if (typeof employeeId !== "number" || !Number.isInteger(employeeId) || employeeId <= 0) {
       throw appError("invalid_payload", "employeeId must be a positive integer");
     }
@@ -219,6 +226,18 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
     }
 
     const engine = employee.roleSnapshot.manifest.engine || "pi";
+
+    // Ticket 11 admission gate: an engine must be enabled (probe passed, or
+    // hand-enabled with the risk flag) before it may take REAL work. The
+    // probe itself is the admission test, so its runs bypass the gate. Only
+    // enforced when the store tracks the engine (legacy stores stay permissive).
+    if (!probe && typeof store.engineState === "function") {
+      const state = store.engineState(engine);
+      if (state && !state.enabled) {
+        throw appError("engine_not_admitted", `engine ${engine} 尚未准入（未通过探针且未手动启用）`);
+      }
+    }
+
     const adapter = getAdapter(engine);
     if (!adapter) throw appError("engine_unavailable", `engine ${engine} has no adapter in this build`);
 
@@ -254,7 +273,7 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
       aborted: false,
       paused: false,
       finished: false,
-      live: liveSessions.get(employeeId) ?? null,
+      live: liveSessions.get(session.id) ?? null,
       opening: null,
       usage: zeroUsage(),
     };
@@ -275,7 +294,7 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
    */
   async function runFlow(runRef, employee, session, adapter) {
     try {
-      let handle = liveSessions.get(session.employeeId);
+      let handle = liveSessions.get(session.id);
       if (!handle) {
         const opening = adapter.open({
           employee,
@@ -293,7 +312,7 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
         } finally {
           runRef.opening = null;
         }
-        liveSessions.set(session.employeeId, handle);
+        liveSessions.set(session.id, handle);
       }
       runRef.live = handle;
       if (runRef.finished) return;
@@ -386,5 +405,18 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
     return Array.from(active.values(), (runRef) => runRef.run);
   }
 
-  return { start, abort, pause, history, whenQuiet, activeRuns };
+  /**
+   * Ride every run event (the same payload the transport emits) from inside
+   * the host — used by the admission probe to observe its own runs without
+   * touching the UI topic.
+   *
+   * @param {(payload: { runId: number, employeeId: number, sessionId: number, at: number, event: NormalizedEvent }) => void} listener
+   * @returns {() => void} unsubscribe
+   */
+  function subscribe(listener) {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  }
+
+  return { start, abort, pause, history, whenQuiet, activeRuns, subscribe };
 }

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { EngineCard } from "./EngineCard.jsx";
 
 // Topic name mirrored from src/shared/envelope.mjs TOPICS (process boundary).
 const RUN_TOPIC = "run.event";
@@ -127,6 +128,8 @@ export function ChatOverlay({ employee, onClose }) {
           ✕
         </button>
       </header>
+
+      <EngineCard employee={employee} />
 
       <div className="chat-events" data-testid="chat-events" ref={listRef}>
         {items.length === 0 ? (

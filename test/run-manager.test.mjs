@@ -111,6 +111,59 @@ function makeStub({ events = [], pending = false, openThrows = null, sessionFile
 
 const AGENT_END = { type: "agent_end", status: "ok" };
 
+test("ticket 11 admission gate: a not-enabled engine cannot take work, enabling lets it through", async () => {
+  const stub = makeStub({ events: [AGENT_END] });
+  const h = await withManager("admission", { adapter: stub });
+  try {
+    h.store.setEmployeeEngine({ employeeId: h.employeeId, engine: "codex" });
+    assert.throws(() => h.manager.start({ employeeId: h.employeeId, text: "干活" }), (err) => /** @type {any} */ (err).code === "engine_not_admitted");
+
+    h.store.setEngineEnabled({ engine: "codex", enabled: true, manualOverride: true });
+    const { run } = h.manager.start({ employeeId: h.employeeId, text: "干活" });
+    await h.manager.whenQuiet();
+    assert.equal(run.engine, "codex");
+    assert.equal(h.store.latestRunForEmployee(h.employeeId)?.status, "completed");
+  } finally {
+    await h.dispose();
+  }
+});
+
+test("the admission probe bypasses the gate for a not-yet-enabled engine", async () => {
+  const stub = makeStub({ events: [AGENT_END] });
+  const h = await withManager("probe-gate", { adapter: stub });
+  try {
+    h.store.setEmployeeEngine({ employeeId: h.employeeId, engine: "codex" });
+    assert.throws(() => h.manager.start({ employeeId: h.employeeId, text: "干活" }), (err) => /** @type {any} */ (err).code === "engine_not_admitted");
+    // probe:true runs the engine to TEST admission
+    const { run } = h.manager.start({ employeeId: h.employeeId, text: "探针", probe: true });
+    await h.manager.whenQuiet();
+    assert.equal(run.engine, "codex");
+    assert.equal(h.store.latestRunForEmployee(h.employeeId)?.status, "completed");
+    assert.equal(h.store.engineState("codex")?.enabled, false); // a probe run does not admit by itself
+  } finally {
+    await h.dispose();
+  }
+});
+
+test("subscribe rides every run event with the run id (probe observation)", async () => {  const stub = makeStub({ events: [{ type: "text_delta", text: "hi" }, AGENT_END] });
+  const h = await withManager("subscribe", { adapter: stub });
+  try {
+    /** @type {any[]} */
+    const seen = [];
+    const unsubscribe = h.manager.subscribe((payload) => seen.push(payload));
+    const { run } = h.manager.start({ employeeId: h.employeeId, text: "hi" });
+    await h.manager.whenQuiet();
+    unsubscribe();
+    h.manager.start({ employeeId: h.employeeId, text: "again" });
+    await h.manager.whenQuiet();
+    assert.ok(seen.some((p) => p.runId === run.id && p.event.type === "text_delta"));
+    assert.ok(seen.some((p) => p.event.type === "session_start"));
+    assert.equal(seen.filter((p) => p.runId === run.id).at(-1)?.event.type, "agent_end");
+  } finally {
+    await h.dispose();
+  }
+});
+
 test("start streams the engine events in order, closes the run as completed, and records the resume pointer", async () => {
   const script = [
     { type: "turn_start" },
