@@ -4,7 +4,7 @@
 
 **Blocked by:** 06
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] 应用运行时，时间表到点自动上班（可配上下班时刻）
 - [ ] 手动 override 立即生效，且不改动时间表

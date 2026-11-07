@@ -156,6 +156,25 @@ test("a cancelled or failed run marks the task 失败 (票 06: 取消终止并�
   }
 });
 
+test("paused（下班落盘）：不落四件套、不搬任务状态 —— 暂停的一轮等上班续跑（票 09）", async () => {
+  const ctx = await withCollector("paused", { ok: true, headNow: "c".repeat(40), stat: "", nameStatus: [], porcelain: "" });
+  try {
+    ctx.hook({
+      run: ctx.run,
+      status: "paused",
+      events: eventsOf([
+        { type: "tool_execution_start", toolCallId: "c9", toolName: "powershell", args: { command: "Start-Sleep -Seconds 3" } },
+        { type: "agent_end", status: "failed" },
+      ]),
+    });
+    assert.equal(ctx.store.listArtifacts({ taskId: ctx.task.id }).length, 0, "暂停的一轮不是交付：不写四件套");
+    assert.equal(ctx.diffCalls.length, 0, "也不为它跑 git diff");
+    assert.equal(/** @type {any} */ (ctx.store.taskById(ctx.task.id)).status, "running", "任务停在「进行中」挂暂停徽标，不搬去失败也不搬去待验收");
+  } finally {
+    await ctx.dispose();
+  }
+});
+
 test("artifacts still land when the workspace cannot be diffed — with an honest reason", async () => {
   const ctx = await withCollector("nogit", { ok: false, code: "not_a_git_workspace", message: "工作区不是 git 仓库" });
   try {

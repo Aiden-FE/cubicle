@@ -8,6 +8,7 @@ import { openStore } from "../src/host/store.mjs";
 import { createService } from "../src/host/service.mjs";
 import { createRunManager } from "../src/host/engine/run-manager.mjs";
 import { createTaskRunHook } from "../src/host/task/artifacts.mjs";
+import { createDutyRuntime } from "../src/host/duty/runtime.mjs";
 import { createGitReader } from "../src/host/git/reader.mjs";
 import { createInvoke } from "../src/shared/envelope.mjs";
 
@@ -874,5 +875,294 @@ test("engine.overview answers with each engine's name and config directory (票 
     assert.ok(typeof payload.dataDir === "string" && payload.dataDir.length > 0);
   } finally {
     await dispose();
+  }
+});
+
+// — 上下班 (ticket 09: schedule/duty 信封、下班闸门、pauseAll 异步收尾) —
+
+/**
+ * Real store + stub engine (optionally holding prompts open) + REAL duty
+ * runtime on an injected clock. task.* needs the git door; the stub answers
+ * a healthy workspace.
+ *
+ * @param {string} name
+ * @param {{ hold?: boolean }} [options]
+ */
+async function withDutyService(name, { hold = false } = {}) {
+  const dataDir = await mkdtemp(path.join(tmpdir(), `cubicle-duty-service-${name}-`));
+  const store = openStore({ dataDir });
+  let releasePrompt = /** @type {((value?: unknown) => void) | null} */ (null);
+  const git = /** @type {any} */ ({
+    head: () => ({ ok: true, sha: "a".repeat(40) }),
+    audit: () => [],
+    diffInfo: (/** @type {string} */ _w, /** @type {string} */ baseSha) => ({
+      ok: true,
+      headNow: baseSha,
+      stat: "",
+      nameStatus: [],
+      porcelain: "",
+    }),
+  });
+  const runManager = createRunManager({
+    store,
+    getAdapter: (engine) =>
+      engine === "pi"
+        ? {
+            async open({ onEvent }) {
+              return {
+                async prompt() {
+                  if (hold) await new Promise((resolve) => (releasePrompt = resolve));
+                  onEvent({ type: "agent_end", status: "ok" });
+                },
+                async abort() {
+                  onEvent({ type: "agent_end", status: "failed" });
+                  releasePrompt?.();
+                },
+                sessionFile: () => null,
+              };
+            },
+          }
+        : null,
+    emit: () => {},
+    onTaskRunFinished: createTaskRunHook({ store, git }),
+  });
+  let now = new Date(2026, 10, 5, 10, 0, 0).getTime(); // 默认班表内（10:00）
+  const duty = createDutyRuntime({ store, runManager, nowFn: () => now });
+  const service = createService({
+    store,
+    hostInfo: { pid: 4242, startedAt: "2026-11-05T09:00:00.000Z" },
+    runManager,
+    git,
+    duty,
+  });
+  const group = store.officeSnapshot().groups[0];
+  const company = store.officeSnapshot().companies[0];
+  const programmer = /** @type {any} */ (store.listRoles().find((r) => r.key === "programmer"));
+  const desk = store.listDesks({ groupId: group.id })[0];
+  const employee = store.hireEmployee({ deskId: desk.id, roleId: programmer.id, name: "小程" }).employee;
+  return {
+    service,
+    store,
+    runManager,
+    duty,
+    git,
+    groupId: group.id,
+    companyId: company.id,
+    employeeId: employee.id,
+    setNow: (/** @type {number} */ ms) => (now = ms),
+    at: (/** @type {number} */ h, /** @type {number} */ mi = 0, /** @type {number} */ s = 0) =>
+      new Date(2026, 10, 5, h, mi, s).getTime(),
+    settle: () => releasePrompt?.(),
+    dispose: async () => {
+      duty.stop();
+      store.close();
+      await rm(dataDir, { recursive: true, force: true });
+    },
+  };
+}
+
+/** @param {{ service: ReturnType<typeof createService>, employeeId: number }} ctx @returns {any} */
+function createOpenTask(ctx) {
+  const opened = ctx.service.handle(
+    createInvoke(`open-${Math.random().toString(36).slice(2)}`, "task.create", {
+      employeeId: ctx.employeeId,
+      text: "写一份部署文档",
+      goal: "写一份部署文档",
+      acceptance: ["可照做"],
+    }),
+  );
+  if (!opened.reply.ok) throw new Error(`open task failed: ${JSON.stringify(opened.reply.error)}`);
+  return /** @type {any} */ (opened.reply.payload).task;
+}
+
+test("schedule.get：没配过的公司读默认班表（90s 宽限）并标 configured=false", async () => {
+  const ctx = await withDutyService("schedule-default");
+  try {
+    const { reply, events } = ctx.service.handle(createInvoke("d1", "schedule.get", { companyId: ctx.companyId }));
+    assert.equal(reply.ok, true);
+    assert.deepEqual(events, []);
+    const payload = /** @type {any} */ (reply.payload);
+    assert.deepEqual(
+      { workStart: payload.schedule.workStart, workEnd: payload.schedule.workEnd, graceSeconds: payload.schedule.graceSeconds },
+      { workStart: "09:00", workEnd: "18:00", graceSeconds: 90 },
+    );
+    assert.equal(payload.configured, false);
+    assert.equal(payload.override, null);
+    assert.equal(payload.status.phase, "on", "10:00 在默认班表内");
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("schedule.set：合法就落库可改；非法时刻与宽限被拒且原样保留", async () => {
+  const ctx = await withDutyService("schedule-set");
+  try {
+    const set = ctx.service.handle(
+      createInvoke("d2", "schedule.set", { companyId: ctx.companyId, workStart: "10:30", workEnd: "20:00:15", graceSeconds: 5 }),
+    );
+    assert.equal(set.reply.ok, true);
+    assert.equal(/** @type {any} */ (set.events[0].payload).reason, "schedule.set");
+    const got = /** @type {any} */ (ctx.service.handle(createInvoke("d3", "schedule.get", { companyId: ctx.companyId })).reply.payload);
+    assert.deepEqual(
+      { workStart: got.schedule.workStart, workEnd: got.schedule.workEnd, graceSeconds: got.schedule.graceSeconds, configured: got.configured },
+      { workStart: "10:30", workEnd: "20:00:15", graceSeconds: 5, configured: true },
+    );
+
+    for (const bad of [
+      { companyId: ctx.companyId, workStart: "09:60", workEnd: "18:00" },
+      { companyId: ctx.companyId, workStart: "18:00", workEnd: "09:00" },
+      { companyId: ctx.companyId, workStart: "09:00", workEnd: "18:00", graceSeconds: -1 },
+      { companyId: ctx.companyId, workStart: "09:00", workEnd: "18:00", graceSeconds: 1.5 },
+    ]) {
+      const rejected = ctx.service.handle(createInvoke("d4", "schedule.set", bad));
+      assert.equal(rejected.reply.ok, false, `${JSON.stringify(bad)} 应被拒`);
+      assert.equal(rejected.reply.error?.code, "invalid_payload");
+    }
+    const still = /** @type {any} */ (ctx.service.handle(createInvoke("d5", "schedule.get", { companyId: ctx.companyId })).reply.payload);
+    assert.equal(still.schedule.workStart, "10:30", "被拒的 set 不动已存的配置");
+
+    const unknown = ctx.service.handle(createInvoke("d6", "schedule.set", { companyId: 99999, workStart: "09:00", workEnd: "18:00" }));
+    assert.equal(unknown.reply.error?.code, "unknown_company");
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("duty.override：立即下班/上班都立即生效，且绝不改动时间表", async () => {
+  const ctx = await withDutyService("override-envelope");
+  try {
+    const setSchedule = ctx.service.handle(
+      createInvoke("d7", "schedule.set", { companyId: ctx.companyId, workStart: "09:00", workEnd: "18:00", graceSeconds: 90 }),
+    );
+    assert.equal(setSchedule.reply.ok, true);
+
+    const off = ctx.service.handle(createInvoke("d8", "duty.override", { companyId: ctx.companyId, mode: "off" }));
+    assert.equal(off.reply.ok, true);
+    assert.equal(/** @type {any} */ (off.reply.payload).phase, "off", "立即下班：off，不进宽限");
+    assert.equal(/** @type {any} */ (off.events[0].payload).reason, "duty.override");
+    const afterOff = /** @type {any} */ (ctx.service.handle(createInvoke("d9", "schedule.get", { companyId: ctx.companyId })).reply.payload);
+    assert.deepEqual(
+      { workStart: afterOff.schedule.workStart, workEnd: afterOff.schedule.workEnd, graceSeconds: afterOff.schedule.graceSeconds },
+      { workStart: "09:00", workEnd: "18:00", graceSeconds: 90 },
+      "override 不改动时间表（验收 2）",
+    );
+    assert.deepEqual({ mode: afterOff.override.mode }, { mode: "off" }, "override 记录独立可见");
+
+    const badMode = ctx.service.handle(createInvoke("d10", "duty.override", { companyId: ctx.companyId, mode: "sleep" }));
+    assert.equal(badMode.reply.error?.code, "invalid_payload");
+
+    const on = ctx.service.handle(createInvoke("d11", "duty.override", { companyId: ctx.companyId, mode: "on" }));
+    assert.equal(/** @type {any} */ (on.reply.payload).phase, "on");
+    const afterOn = /** @type {any} */ (ctx.service.handle(createInvoke("d12", "schedule.get", { companyId: ctx.companyId })).reply.payload);
+    assert.deepEqual({ mode: afterOn.override.mode }, { mode: "on" }, "手动上班的 override 保留到越过排班界点（18:00）才失效");
+    assert.deepEqual(
+      { workStart: afterOn.schedule.workStart, workEnd: afterOn.schedule.workEnd, graceSeconds: afterOn.schedule.graceSeconds },
+      { workStart: "09:00", workEnd: "18:00", graceSeconds: 90 },
+      "时间表仍然一个字没改",
+    );
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("下班中派单/闲聊被拒 off_duty；宽限中可以（收尾窗口）；上班后恢复", async () => {
+  const ctx = await withDutyService("gate");
+  try {
+    const task = await createOpenTask(ctx);
+    ctx.service.handle(createInvoke("g1", "duty.override", { companyId: ctx.companyId, mode: "off" }));
+
+    const blocked = ctx.service.handle(createInvoke("g2", "task.dispatch", { taskId: task.id }));
+    assert.equal(blocked.reply.ok, false);
+    assert.equal(blocked.reply.error?.code, "off_duty");
+    assert.equal(/** @type {any} */ (ctx.store.taskById(task.id)).status, "open", "被拒的派单不留半成品：任务还是待办");
+
+    const blockedChat = ctx.service.handle(createInvoke("g3", "run.start", { employeeId: ctx.employeeId, text: "聊两句" }));
+    assert.equal(blockedChat.reply.error?.code, "off_duty", "下班中连聊天开工也拦");
+
+    // 到点下班的宽限相位：允许（收尾窗口内新工作可进）
+    ctx.service.handle(createInvoke("g4", "duty.override", { companyId: ctx.companyId, mode: "on" }));
+    ctx.store.setDutyStatus({ companyId: ctx.companyId, phase: "grace", phaseSince: ctx.at(18, 0), graceUntil: ctx.at(18, 1, 30) });
+    const grace = ctx.service.handle(createInvoke("g5", "task.dispatch", { taskId: task.id }));
+    assert.equal(grace.reply.ok, true, `宽限内可派单：${JSON.stringify(grace.reply.error)}`);
+    ctx.runManager.whenQuiet();
+    await ctx.settle();
+
+    // 上班后一切照常
+    ctx.service.handle(createInvoke("g6", "duty.override", { companyId: ctx.companyId, mode: "on" }));
+    const task2 = await createOpenTask(ctx);
+    const reopened = ctx.service.handle(createInvoke("g7", "task.dispatch", { taskId: task2.id }));
+    assert.equal(reopened.reply.ok, true);
+    await ctx.runManager.whenQuiet();
+    await ctx.settle();
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("host.pauseAll（退出直接退）：异步等到所有在跑 run 落盘 paused 才回答", async () => {
+  const ctx = await withDutyService("pause-all", { hold: true });
+  try {
+    const task = await createOpenTask(ctx);
+    const dispatched = ctx.service.handle(createInvoke("p1", "task.dispatch", { taskId: task.id }));
+    assert.equal(dispatched.reply.ok, true);
+
+    const handled = ctx.service.handle(createInvoke("p2", "host.pauseAll", {}));
+    // 同步门面撞上异步方法诚实报错；宿主门（handleEnvelope）返回 promise
+    assert.equal(/** @type {any} */ (handled.reply.error).code, "async_required");
+    const { reply } = await ctx.service.handleEnvelope(createInvoke("p3", "host.pauseAll", {}));
+    assert.equal(reply.ok, true);
+    assert.equal(/** @type {any} */ (reply.payload).paused, 1);
+
+    const run = /** @type {any} */ (ctx.store.latestRunForEmployee(ctx.employeeId));
+    assert.equal(run.status, "paused", "回答出口时已经落库：main 之后 kill host 不再丢状态");
+    assert.equal(/** @type {any} */ (ctx.store.latestTaskSessionForTask(task.id)).status, "paused");
+    assert.equal(/** @type {any} */ (ctx.store.taskById(task.id)).status, "running", "任务停在「进行中」，重启后可续跑");
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("host.awaitQuiet（退出「等完成」）：run 收尾才回答", async () => {
+  const ctx = await withDutyService("await-quiet", { hold: true });
+  try {
+    const task = await createOpenTask(ctx);
+    ctx.service.handle(createInvoke("q1", "task.dispatch", { taskId: task.id }));
+    let answered = false;
+    const promise = ctx.service.handleEnvelope(createInvoke("q2", "host.awaitQuiet", {})).then((result) => {
+      answered = true;
+      return result;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(answered, false, "还在跑：不许提前回答");
+    ctx.settle();
+    const { reply } = await promise;
+    assert.equal(reply.ok, true);
+    assert.equal(/** @type {any} */ (ctx.store.latestRunForEmployee(ctx.employeeId)).status, "completed");
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("task.list 行携带 latestSessionStatus：下班暂停后「进行中」工单挂暂停徽标的数据源", async () => {
+  const ctx = await withDutyService("badge-data", { hold: true });
+  try {
+    const task = createOpenTask(ctx);
+    ctx.service.handle(createInvoke("b1", "task.dispatch", { taskId: task.id }));
+    const paused = await ctx.service.handleEnvelope(createInvoke("b4", "host.pauseAll", {}));
+    assert.equal(paused.reply.ok, true, "host.pauseAll 走异步门面");
+
+    const listed = /** @type {any} */ (ctx.service.handle(createInvoke("b5", "task.list", { groupId: ctx.groupId })).reply.payload);
+    const row = listed.tasks.find((/** @type {any} */ t) => t.id === task.id);
+    assert.equal(row.status, "running", "五状态没有第六态");
+    assert.equal(row.latestSessionStatus, "paused", "暂停徽标看的是最近一轮会话");
+
+    // 上班续跑后徽标摘掉
+    ctx.service.handle(createInvoke("b6", "duty.override", { companyId: ctx.companyId, mode: "on" }));
+    const relisted = /** @type {any} */ (ctx.service.handle(createInvoke("b7", "task.list", { groupId: ctx.groupId })).reply.payload);
+    assert.equal(relisted.tasks.find((/** @type {any} */ t) => t.id === task.id).latestSessionStatus, "running", "续跑开着新一轮：不挂徽标");
+    ctx.settle();
+    await ctx.runManager.whenQuiet();
+  } finally {
+    await ctx.dispose();
   }
 });

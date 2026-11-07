@@ -15,7 +15,7 @@
  * @typedef {import("../store.mjs").RunRow} RunRow
  *
  * @typedef {{ at: number, event: NormalizedEvent }} TimedEvent
- * @typedef {{ run: RunRow, status: "completed" | "aborted" | "failed", events: TimedEvent[] }} TaskRunFinished
+ * @typedef {{ run: RunRow, status: "completed" | "aborted" | "failed" | "paused", events: TimedEvent[] }} TaskRunFinished
  */
 
 /** Keep artifacts viewable through IPC: generous, but bounded. */
@@ -129,6 +129,9 @@ export function finalReport(events) {
 export function createTaskRunHook({ store, git }) {
   return ({ run, status, events }) => {
     if (run.taskId === null) return;
+    // 票 09: paused（下班落盘）不是交付也不是失败 — 这一轮合上、任务留在
+    // 「进行中」挂暂停徽标，四件套留给上班续跑后的那轮收尾。
+    if (status === "paused") return;
     const task = store.taskById(run.taskId);
 
     /** @type {string[]} */

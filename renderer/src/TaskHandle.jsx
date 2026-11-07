@@ -21,7 +21,7 @@ const STATUS_LABELS = /** @type {Record<string, string>} */ ({ open: "待办", r
  * }} props
  */
 export function TaskHandle({ snapshot, onClose }) {
-  const [tasks, setTasks] = useState(/** @type {{ id: number, title: string, status: string, employeeName: string }[]} */ ([]));
+  const [tasks, setTasks] = useState(/** @type {{ id: number, title: string, status: string, employeeName: string, latestSessionStatus?: string | null }[]} */ ([]));
   const companyId = snapshot?.activeCompanyId ?? null;
 
   const loadTasks = useCallback(async () => {
@@ -78,7 +78,7 @@ export function TaskHandle({ snapshot, onClose }) {
 }
 
 /**
- * @param {{ testid: string, title: string, tasks: { id: number, title: string, status: string, employeeName: string }[], empty: string }} props
+ * @param {{ testid: string, title: string, tasks: { id: number, title: string, status: string, employeeName: string, latestSessionStatus?: string | null }[], empty: string }} props
  */
 function HandleSection({ testid, title, tasks, empty }) {
   return (
@@ -86,10 +86,20 @@ function HandleSection({ testid, title, tasks, empty }) {
       <div className="handle-section-title">{title} · {tasks.length}</div>
       {tasks.length === 0 ? <div className="task-empty">{empty}</div> : null}
       {tasks.map((task) => (
-        <div key={task.id} className="handle-row" data-testid="handle-row" data-task-id={task.id} data-status={task.status}>
+        <div
+          key={task.id}
+          className="handle-row"
+          data-testid="handle-row"
+          data-task-id={task.id}
+          data-status={task.status}
+          data-paused={task.status === "running" && task.latestSessionStatus === "paused" ? "true" : "false"}
+        >
           <span className="task-row-title">#{task.id} {task.title}</span>
           <span className="task-row-meta">
             {task.employeeName} · {STATUS_LABELS[task.status] ?? task.status}
+            {task.status === "running" && task.latestSessionStatus === "paused" ? (
+              <span className="task-paused-badge" data-testid="handle-paused-badge">已下班·暂停</span>
+            ) : null}
           </span>
         </div>
       ))}

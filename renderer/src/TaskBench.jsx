@@ -7,7 +7,7 @@ const DOMAIN_TOPIC = "domain.changed";
 const PLAYBOOK_LABELS = /** @type {Record<string, string>} */ ({ feature: "加功能", bugfix: "修 bug", docs: "写文档", free: "自由" });
 // 票 06：五个状态全部可见；转移合法性在 host，浮层只展示 + 触发合法转移。
 const STATUS_LABELS = /** @type {Record<string, string>} */ ({ open: "待办", running: "进行中", review: "待验收", done: "完成", failed: "失败" });
-const SESSION_LABELS = /** @type {Record<string, string>} */ ({ running: "进行中", completed: "已完成", aborted: "已取消", failed: "失败", interrupted: "中断" });
+const SESSION_LABELS = /** @type {Record<string, string>} */ ({ running: "进行中", completed: "已完成", aborted: "已取消", failed: "失败", interrupted: "中断", paused: "下班暂停" });
 
 /**
  * 工单台 — the work-order desk, a left-rail drawer (hard constraint: the
@@ -316,6 +316,12 @@ export function TaskBench({ snapshot, onClose }) {
             <span className={`task-state`} data-testid="task-status" data-status={detailTask.status}>
               {STATUS_LABELS[detailTask.status] ?? detailTask.status}
             </span>
+            {/* 票 09: 暂停徽标 — 五状态不变，「进行中」+ 最近一轮 paused = 下班挂起 */}
+            {detailTask.status === "running" && detail?.sessions?.at(-1)?.status === "paused" ? (
+              <span className="task-paused-badge" data-testid="detail-paused-badge" data-paused="true">
+                已下班·暂停
+              </span>
+            ) : null}
             <button type="button" className="task-back" data-testid="task-back" onClick={() => setOpenTaskId(null)}>
               ← 列表
             </button>
@@ -431,11 +437,15 @@ export function TaskBench({ snapshot, onClose }) {
               data-testid="task-row"
               data-task-id={task.id}
               data-status={task.status}
+              data-paused={task.status === "running" && task.latestSessionStatus === "paused" ? "true" : "false"}
               onClick={() => setOpenTaskId(task.id)}
             >
               <span className="task-row-title">#{task.id} {task.title}</span>
               <span className="task-row-meta">
                 {task.employeeName} · {PLAYBOOK_LABELS[task.playbook] ?? "自由"} · {STATUS_LABELS[task.status] ?? task.status}
+                {task.status === "running" && task.latestSessionStatus === "paused" ? (
+                  <span className="task-paused-badge" data-testid="paused-badge">已下班·暂停</span>
+                ) : null}
               </span>
             </button>
           ))}
@@ -455,7 +465,7 @@ const ARTIFACT_TITLES = /** @type {Record<string, string>} */ ({
 /**
  * Renderer-side mirrors of host payload shapes (process boundary).
  * @typedef {{ playbook: string, label: string, goal: string, acceptance: string[] }} TaskDraftData
- * @typedef {{ id: number, groupId: number, employeeId: number, title: string, goal: string, playbook: string, acceptance: string[], baseHead: string, status: string, createdAt: string, employeeName: string }} TaskRowData
+ * @typedef {{ id: number, groupId: number, employeeId: number, title: string, goal: string, playbook: string, acceptance: string[], baseHead: string, status: string, createdAt: string, employeeName: string, latestSessionStatus?: string | null }} TaskRowData
  * @typedef {{ id: number, taskId: number, employeeSessionId: number, engine: string, status: string, startedAt: string, endedAt: string | null, sessionFile: string | null, iteration: number }} TaskSessionData
  * @typedef {{ input: number, cachedInput: number, cacheWrite: number, output: number, reasoning: number, total: number }} TaskTokenData
  * @typedef {{ task: TaskRowData, sessions: TaskSessionData[], artifacts: { id: number, kind: string, content: string }[], tokens?: TaskTokenData, iterations?: number }} TaskDetailData

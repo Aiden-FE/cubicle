@@ -40,6 +40,7 @@ const HISTORY_CAP = 400;
  * @typedef {object} ActiveRun
  * @property {RunRow} run
  * @property {boolean} aborted
+ * @property {boolean} paused      票 09: 下班落盘 — 收尾写 paused 而非 aborted
  * @property {boolean} finished
  * @property {LiveSession | null} live        opened engine session for this run
  * @property {Promise<LiveSession> | null} opening in-flight adapter.open()
@@ -49,7 +50,7 @@ const HISTORY_CAP = 400;
 /**
  * @typedef {object} TaskRunFinished
  * @property {RunRow} run
- * @property {"completed" | "aborted" | "failed"} status
+ * @property {"completed" | "aborted" | "failed" | "paused"} status
  * @property {{ at: number, event: NormalizedEvent }[]} events the full run tail
  */
 
@@ -135,9 +136,11 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
   function finishRun(runRef, endEvent) {
     if (runRef.finished) return;
     runRef.finished = true;
-    const status = runRef.aborted
-      ? "aborted"
-      : /** @type {"completed" | "failed"} */ (endEvent.status === "ok" ? "completed" : "failed");
+    const status = runRef.paused
+      ? "paused"
+      : runRef.aborted
+        ? "aborted"
+        : /** @type {"completed" | "failed"} */ (endEvent.status === "ok" ? "completed" : "failed");
     // "unknown" (the engine settled without an agent_end) is recorded as
     // 'failed' on purpose: the protocol says every run ends with agent_end,
     // so a silent settle never counts as a clean completion.
@@ -189,10 +192,10 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
   }
 
   /**
-   * @param {{ employeeId: number, text: string, task?: { id: number } | null }} input
+   * @param {{ employeeId: number, text: string, task?: { id: number } | null, resume?: boolean }} input
    * @returns {{ run: RunRow, session: EmployeeSessionRow }}
    */
-  function start({ employeeId, text, task }) {
+  function start({ employeeId, text, task, resume }) {
     if (typeof employeeId !== "number" || !Number.isInteger(employeeId) || employeeId <= 0) {
       throw appError("invalid_payload", "employeeId must be a positive integer");
     }
@@ -202,6 +205,18 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
     const employee = store.employeeById(employeeId);
     if (!employee) throw appError("unknown_employee", `no employee with id ${employeeId}`);
     if (active.has(employeeId)) throw appError("employee_busy", `employee ${employeeId} is already working`);
+
+    // 票 09: 上班续跑 = 在「进行中」的任务上追加一轮会话（与打回同构）。
+    // 五状态转移表会拒绝 running→running，所以续跑走 resume 通道、跳过状态
+    // 门 — 但门必须先验：非「进行中」的任务误用 resume 一律拒绝，且不留
+    // 悬挂会话行（06 评审的同一条规矩）。
+    if (task && resume) {
+      const current = store.taskById(task.id);
+      if (!current) throw appError("unknown_task", `no task with id ${task.id}`);
+      if (current.status !== "running") {
+        throw appError("invalid_transition", `只有「进行中」（含下班暂停）的任务能续跑，这张是 ${current.status}`);
+      }
+    }
 
     const engine = employee.roleSnapshot.manifest.engine || "pi";
     const adapter = getAdapter(engine);
@@ -222,7 +237,7 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
     // 会话挂在任务下，可多条 — retry/打回 gets a fresh one). The status
     // gate comes FIRST: an illegal dispatch must not leave a session row
     // behind (the store's five-state map decides, ticket 06).
-    if (task) store.setTaskStatus(task.id, "running");
+    if (task && !resume) store.setTaskStatus(task.id, "running");
     const taskSession = task ? store.openTaskSession({ taskId: task.id, employeeSessionId: session.id, engine }) : null;
     const run = store.createRun({
       employeeId,
@@ -237,6 +252,7 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
     const runRef = {
       run,
       aborted: false,
+      paused: false,
       finished: false,
       live: liveSessions.get(employeeId) ?? null,
       opening: null,
@@ -303,14 +319,35 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
   /**
    * Synchronous validation (the service answers error codes on the reply
    * envelope), then a promise for the cancel handshake with the engine.
+   * `pause` (票 09) is the same handshake with a different landing status:
+   * the engine aborts, the run closes as 'paused' — and because the prompt
+   * is aborted, NO new tool call can follow the pause.
    *
    * @param {{ employeeId: number }} input
    * @returns {Promise<void>}
    */
   function abort({ employeeId }) {
+    return settleCancel(employeeId, false);
+  }
+
+  /**
+   * @param {{ employeeId: number }} input
+   * @returns {Promise<void>}
+   */
+  function pause({ employeeId }) {
+    return settleCancel(employeeId, true);
+  }
+
+  /**
+   * @param {number} employeeId
+   * @param {boolean} paused
+   * @returns {Promise<void>}
+   */
+  function settleCancel(employeeId, paused) {
     const runRef = active.get(employeeId);
     if (!runRef) throw appError("no_active_run", `employee ${employeeId} has no running job`);
-    runRef.aborted = true;
+    if (paused) runRef.paused = true;
+    else runRef.aborted = true;
     return (async () => {
       if (runRef.opening) {
         // cancel arrives mid-open: wait for the session, then cancel that
@@ -339,5 +376,15 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
     return { lastRun, events };
   }
 
-  return { start, abort, history, whenQuiet };
+  /**
+   * Live runs right now — the iteration door 下班 (pause per company) and
+   * host.pauseAll walk. Callers only ever read the returned RunRows.
+   *
+   * @returns {RunRow[]}
+   */
+  function activeRuns() {
+    return Array.from(active.values(), (runRef) => runRef.run);
+  }
+
+  return { start, abort, pause, history, whenQuiet, activeRuns };
 }

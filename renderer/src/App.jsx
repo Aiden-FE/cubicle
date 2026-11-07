@@ -6,6 +6,7 @@ import { TaskBench } from "./TaskBench.jsx";
 import { LeftRail } from "./LeftRail.jsx";
 import { RosterPanel } from "./RosterPanel.jsx";
 import { EngineCenterPanel } from "./EngineCenterPanel.jsx";
+import { WorkClockPanel } from "./WorkClockPanel.jsx";
 import { TaskHandle } from "./TaskHandle.jsx";
 import { StatusChip } from "./StatusChip.jsx";
 import { initialDeskActivity, reduceDeskActivity, expireDeskBlocked } from "./scene/deskActivity.js";
@@ -36,6 +37,7 @@ export function App() {
   const [handleOpen, setHandleOpen] = useState(false);
   const [rosterOpen, setRosterOpen] = useState(false);
   const [engineOpen, setEngineOpen] = useState(false);
+  const [dutyOpen, setDutyOpen] = useState(false);
   const lastHostState = useRef(/** @type {string | null} */ (null));
 
   const refresh = useCallback(async () => {
@@ -199,10 +201,13 @@ export function App() {
         onToggleRoster={() => setRosterOpen((open) => !open)}
         engineOpen={engineOpen}
         onToggleEngine={() => setEngineOpen((open) => !open)}
+        dutyOpen={dutyOpen}
+        onToggleDuty={() => setDutyOpen((open) => !open)}
       />
       {benchOpen ? <TaskBench snapshot={snapshot} onClose={() => setBenchOpen(false)} /> : null}
       {rosterOpen ? <RosterPanel snapshot={snapshot} onClose={() => setRosterOpen(false)} /> : null}
       {engineOpen ? <EngineCenterPanel onClose={() => setEngineOpen(false)} /> : null}
+      {dutyOpen ? <WorkClockPanel snapshot={snapshot} onClose={() => setDutyOpen(false)} /> : null}
       {/* 右缘任务把手：徽标 = 活跃工单数（进行中+待验收），拉开三段
           进行中 / 待验收 / 档案（done+failed）。 */}
       <button

@@ -12,7 +12,7 @@ async function main() {
     throw new Error("CUBICLE_DATA_DIR is required");
   }
 
-  const [{ openStore }, { createService }, { createRunManager }, { createPiAdapter }, { createGitReader }, { createTaskRunHook }, { parseEnvelope, createEvent, TOPICS }] =
+  const [{ openStore }, { createService }, { createRunManager }, { createPiAdapter }, { createGitReader }, { createTaskRunHook }, { createDutyRuntime }, { taskPrompt }, { parseEnvelope, createEvent, TOPICS }] =
     await Promise.all([
       import("./store.mjs"),
       import("./service.mjs"),
@@ -20,6 +20,8 @@ async function main() {
       import("./engine/pi/adapter.mjs"),
       import("./git/reader.mjs"),
       import("./task/artifacts.mjs"),
+      import("./duty/runtime.mjs"),
+      import("./task/playbook.mjs"),
       import("../shared/envelope.mjs"),
     ]);
 
@@ -48,20 +50,33 @@ async function main() {
     // Work-order runs collect their 四件套 (ticket 05).
     onTaskRunFinished: createTaskRunHook({ store, git }),
   });
-  const service = createService({ store, hostInfo, runManager, git });
+  // 票 09: 上下班调度 — 到点自动上班（激活有未完成任务的员工自动续跑）、
+  // 下班 90 秒宽限（可配）后落盘 paused；override 走 service 的立即通道。
+  const duty = createDutyRuntime({
+    store,
+    runManager,
+    taskPromptFor: (/** @type {any} */ task) => taskPrompt(task),
+  });
+  const service = createService({ store, hostInfo, runManager, git, duty });
 
   port.on("message", (event) => {
     const envelope = parseEnvelope(event.data);
     if (!envelope || envelope.kind !== "invoke") return;
-    const { reply, events } = service.handle(envelope);
-    send(reply);
-    for (const domainEvent of events) send(domainEvent);
+    // 同步方法立刻回；异步方法（host.pauseAll / host.awaitQuiet — 退出流程
+    // 的两扇门）等引擎收尾 promise 落定再回，回包顺序不敏感（按 id 关联）。
+    service.handleEnvelope(envelope).then(({ reply, events }) => {
+      send(reply);
+      for (const domainEvent of events) send(domainEvent);
+    });
   });
 
   const heartbeat = () =>
     send(createEvent(TOPICS.hostStatus, { state: "online", ...hostInfo }));
   heartbeat();
   setInterval(heartbeat, 2000);
+
+  // 上下班滴答循环（unref：不钉住宿主进程）
+  duty.start();
 
   // Pay pi's module-import cost while the office settles in, so the first
   // sentence an employee hears doesn't also wait for the engine's cold start.

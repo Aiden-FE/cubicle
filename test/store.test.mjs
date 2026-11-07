@@ -966,3 +966,276 @@ test("listTasksForCompany lists every group's tasks of one company with employee
     await dispose();
   }
 });
+
+// — 上下班 (ticket 09: 时间表落库可改 / override 独立 / paused 落盘可续跑) —
+
+/**
+ * Park a task at 进行中 with one open task session + run, then close the
+ * session/run with the ticket-09 'paused' outcome (下班落盘).
+ *
+ * @param {ReturnType<typeof openStore>} store
+ * @param {{ id: number, employeeId: number }} task
+ */
+function pauseTaskRun(store, task) {
+  const session = store.getOrCreateEmployeeSession({
+    employeeId: task.employeeId,
+    engine: "pi",
+    agentDir: "a",
+    sessionsDir: "s",
+    workspaceDir: "w",
+  });
+  const taskSession = store.openTaskSession({ taskId: task.id, employeeSessionId: session.id, engine: "pi" });
+  const run = store.createRun({
+    employeeId: task.employeeId,
+    employeeSessionId: session.id,
+    engine: "pi",
+    prompt: "干活",
+    taskId: task.id,
+    taskSessionId: taskSession.id,
+  });
+  return { session, taskSession, run };
+}
+
+test("每公司一份上下班时间表：没有配置行时读不到，upsert 就地覆盖并可改", async () => {
+  const { dataDir, dispose } = await withTempDir("schedule-crud");
+  try {
+    const store = openStore({ dataDir });
+    const a = store.officeSnapshot().companies[0];
+    assert.equal(store.getCompanySchedule(a.id), null, "没配过时间表就是没有——默认值由上层给，不在库里编造");
+
+    store.upsertCompanySchedule({ companyId: a.id, workStart: "09:00", workEnd: "18:00", graceSeconds: 90 });
+    const row = /** @type {any} */ (store.getCompanySchedule(a.id));
+    assert.deepEqual(
+      { companyId: row.companyId, workStart: row.workStart, workEnd: row.workEnd, graceSeconds: row.graceSeconds },
+      { companyId: a.id, workStart: "09:00", workEnd: "18:00", graceSeconds: 90 },
+    );
+
+    store.upsertCompanySchedule({ companyId: a.id, workStart: "10:30", workEnd: "20:15:30", graceSeconds: 4 });
+    const changed = /** @type {any} */ (store.getCompanySchedule(a.id));
+    assert.deepEqual(
+      { workStart: changed.workStart, workEnd: changed.workEnd, graceSeconds: changed.graceSeconds },
+      { workStart: "10:30", workEnd: "20:15:30", graceSeconds: 4 },
+      "改时间表是同一行覆盖，不追加历史",
+    );
+
+    const b = store.createCompany({ name: "远岸软件" });
+    store.upsertCompanySchedule({ companyId: b.id, workStart: "08:00", workEnd: "17:00", graceSeconds: 90 });
+    assert.equal(/** @type {any} */ (store.getCompanySchedule(b.id)).workStart, "08:00");
+    assert.equal(/** @type {any} */ (store.getCompanySchedule(a.id)).workStart, "10:30", "B 公司的时间表不污染 A 公司");
+
+    store.close();
+    const reopened = openStore({ dataDir });
+    assert.equal(/** @type {any} */ (reopened.getCompanySchedule(a.id)).workEnd, "20:15:30", "时间表落盘 survives reopen");
+    reopened.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("override 与 duty 状态是独立记录：写入/清除都不碰时间表行", async () => {
+  const { dataDir, dispose } = await withTempDir("duty-override");
+  try {
+    const store = openStore({ dataDir });
+    const company = store.officeSnapshot().companies[0];
+    store.upsertCompanySchedule({ companyId: company.id, workStart: "09:00", workEnd: "18:00", graceSeconds: 90 });
+
+    store.setDutyOverride({ companyId: company.id, mode: "off", at: 1_700_000_000_000 });
+    assert.deepEqual(
+      { .../** @type {any} */ (store.getDutyOverride(company.id)) } ,
+      { companyId: company.id, mode: "off", at: 1_700_000_000_000 },
+    );
+    const afterOverride = /** @type {any} */ (store.getCompanySchedule(company.id));
+    assert.deepEqual(
+      { workStart: afterOverride.workStart, workEnd: afterOverride.workEnd, graceSeconds: afterOverride.graceSeconds },
+      { workStart: "09:00", workEnd: "18:00", graceSeconds: 90 },
+      "override 只是另一张表的记录：时间表原样",
+    );
+
+    store.clearDutyOverride(company.id);
+    assert.equal(store.getDutyOverride(company.id), null);
+
+    store.setDutyStatus({ companyId: company.id, phase: "grace", phaseSince: 1_700_000_000_000, graceUntil: 1_700_000_090_000 });
+    store.close();
+    const reopened = openStore({ dataDir });
+    const status = /** @type {any} */ (reopened.getDutyStatus(company.id));
+    assert.deepEqual(
+      { phase: status.phase, phaseSince: status.phaseSince, graceUntil: status.graceUntil },
+      { phase: "grace", phaseSince: 1_700_000_000_000, graceUntil: 1_700_000_090_000 },
+      "相位（上班中/宽限中/下班中）落盘，重启后视图不说谎",
+    );
+    reopened.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("run 与 task_session 接受 paused（下班落盘），任务保持「进行中」不跳态", async () => {
+  const { dataDir, dispose } = await withTempDir("run-paused");
+  try {
+    const store = openStore({ dataDir });
+    const group = store.officeSnapshot().groups[0];
+    const employee = hireProgrammer(store);
+    const task = makeTask(store, employee);
+    store.setTaskStatus(task.id, "running");
+    const { taskSession, run } = pauseTaskRun(store, task);
+
+    const pausedRun = store.finishRun({ runId: run.id, status: "paused" });
+    assert.equal(pausedRun.status, "paused");
+    assert.notEqual(pausedRun.endedAt, null, "paused 也收尾：run 行不再开着");
+    const pausedSession = store.finishTaskSession({ taskSessionId: taskSession.id, status: "paused" });
+    assert.equal(pausedSession.status, "paused");
+
+    assert.equal(/** @type {any} */ (store.taskById(task.id)).status, "running", "五状态不新增第六态：暂停只是徽标");
+    store.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("重启后 paused 任务不被开库自愈翻回待办，仍可续跑（下班后可恢复）", async () => {
+  const { dataDir, dispose } = await withTempDir("paused-survives-heal");
+  try {
+    const store = openStore({ dataDir });
+    const employee = hireProgrammer(store);
+    const task = makeTask(store, employee);
+    store.setTaskStatus(task.id, "running");
+    const { taskSession, run } = pauseTaskRun(store, task);
+    store.finishRun({ runId: run.id, status: "paused" });
+    store.finishTaskSession({ taskSessionId: taskSession.id, status: "paused" });
+    store.close();
+
+    const reopened = openStore({ dataDir });
+    assert.equal(/** @type {any} */ (reopened.runById(run.id)).status, "paused", "开库自愈只翻 running，不动 paused");
+    assert.equal(/** @type {any} */ (reopened.latestTaskSessionForTask(task.id)).status, "paused");
+    assert.equal(/** @type {any} */ (reopened.taskById(task.id)).status, "running", "暂停的任务停在「进行中」，等上班续跑");
+
+    // 续跑 = 同一任务追加一条 task_session（与 06 打回同构）
+    const again = reopened.openTaskSession({
+      taskId: task.id,
+      employeeSessionId: /** @type {any} */ (reopened.employeeSessionById(taskSession.employeeSessionId)).id,
+      engine: "pi",
+    });
+    assert.equal(again.id > taskSession.id, true, "新会话行追加在同一任务下");
+    assert.equal(reopened.listTaskSessions(task.id).length, 2, "历史连续：paused + 续跑的 running");
+    reopened.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("开库自愈仍把崩溃遗留的 running 会话落回 interrupted、任务回待办（04/06 语义保持）", async () => {
+  const { dataDir, dispose } = await withTempDir("heal-interrupted");
+  try {
+    const store = openStore({ dataDir });
+    const employee = hireProgrammer(store);
+    const task = makeTask(store, employee);
+    store.setTaskStatus(task.id, "running");
+    pauseTaskRun(store, task); // session + run 都停在 running：像崩溃
+    store.close();
+
+    const reopened = openStore({ dataDir });
+    assert.equal(/** @type {any} */ (reopened.latestTaskSessionForTask(task.id)).status, "interrupted");
+    assert.equal(/** @type {any} */ (reopened.taskById(task.id)).status, "open", "崩溃自愈不变：任务回待办");
+    reopened.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("工单列表携带最后一轮会话状态（暂停徽标的数据源）", async () => {
+  const { dataDir, dispose } = await withTempDir("latest-session-status");
+  try {
+    const store = openStore({ dataDir });
+    const group = store.officeSnapshot().groups[0];
+    const employee = hireProgrammer(store);
+    const task = makeTask(store, employee);
+    store.setTaskStatus(task.id, "running");
+    const { taskSession, run } = pauseTaskRun(store, task);
+    store.finishRun({ runId: run.id, status: "paused" });
+    store.finishTaskSession({ taskSessionId: taskSession.id, status: "paused" });
+
+    const company = store.officeSnapshot().companies[0];
+    assert.equal(/** @type {any} */ (store.listTasks({ groupId: group.id })[0]).latestSessionStatus, "paused");
+    assert.equal(/** @type {any} */ (store.listTasksForCompany({ companyId: company.id })[0]).latestSessionStatus, "paused");
+
+    const fresh = store.openTaskSession({ taskId: task.id, employeeSessionId: taskSession.employeeSessionId, engine: "pi" });
+    assert.equal(/** @type {any} */ (store.listTasks({ groupId: group.id })[0]).latestSessionStatus, "running", "续跑后徽标摘掉");
+    void fresh;
+    store.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("旧库（run/task_session CHECK 没有 paused）开库时表重建，paused 状态可用", async () => {
+  const { dataDir, dispose } = await withTempDir("pause-state-migration");
+  try {
+    const store = openStore({ dataDir });
+    const employee = hireProgrammer(store);
+    const task = makeTask(store, employee);
+    store.setTaskStatus(task.id, "running");
+    const { taskSession, run } = pauseTaskRun(store, task);
+    store.close();
+
+    // Rewind to the pre-09 CHECK: neither run nor task_session knows 'paused'.
+    const raw = new DatabaseSync(path.join(dataDir, "cubicle.db"));
+    raw.exec(`
+      CREATE TABLE run_old (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_session_id INTEGER NOT NULL REFERENCES employee_session(id),
+        employee_id INTEGER NOT NULL REFERENCES employee(id),
+        engine TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'aborted', 'failed', 'interrupted')),
+        prompt TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        ended_at TEXT,
+        usage TEXT,
+        task_id INTEGER,
+        task_session_id INTEGER
+      );
+      INSERT INTO run_old SELECT id, employee_session_id, employee_id, engine, status, prompt, started_at, ended_at, usage, task_id, task_session_id FROM run;
+      DROP TABLE run;
+      ALTER TABLE run_old RENAME TO run;
+      CREATE TABLE task_session_old (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id INTEGER NOT NULL REFERENCES task(id),
+        employee_session_id INTEGER NOT NULL REFERENCES employee_session(id),
+        engine TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'aborted', 'failed', 'interrupted')),
+        started_at TEXT NOT NULL,
+        ended_at TEXT
+      );
+      INSERT INTO task_session_old SELECT id, task_id, employee_session_id, engine, status, started_at, ended_at FROM task_session;
+      DROP TABLE task_session;
+      ALTER TABLE task_session_old RENAME TO task_session;
+    `);
+    raw.close();
+
+    const reopened = openStore({ dataDir });
+    // 开库自愈先把遗留的 running 行翻成 interrupted（04 语义），所以这里
+    // 新开一轮再落 paused：迁移的意义在于 CHECK 已放宽、paused 写进得去。
+    const nextSession = reopened.openTaskSession({
+      taskId: task.id,
+      employeeSessionId: /** @type {any} */ (reopened.latestTaskSessionForTask(task.id)).employeeSessionId,
+      engine: "pi",
+    });
+    const nextRun = reopened.createRun({
+      employeeId: task.employeeId,
+      employeeSessionId: nextSession.employeeSessionId,
+      engine: "pi",
+      prompt: "上班续跑",
+      taskId: task.id,
+      taskSessionId: nextSession.id,
+    });
+    const pausedRun = reopened.finishRun({ runId: nextRun.id, status: "paused" });
+    assert.equal(pausedRun.status, "paused", "迁移后 CHECK 已放宽：paused 可落库");
+    const pausedSession = reopened.finishTaskSession({ taskSessionId: nextSession.id, status: "paused" });
+    assert.equal(pausedSession.status, "paused");
+    // 崩溃遗留的旧一轮已被自愈翻成 interrupted、任务回待办（04 语义），
+    // 新一轮的 paused 写入库不再被 CHECK 拒绝。
+    assert.equal(/** @type {any} */ (reopened.taskById(task.id)).status, "open");
+    reopened.close();
+  } finally {
+    await dispose();
+  }
+});

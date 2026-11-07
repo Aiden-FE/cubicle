@@ -80,7 +80,8 @@ import { appError } from "../shared/apperror.mjs";
  * @property {number} employeeSessionId
  * @property {number} employeeId
  * @property {string} engine
- * @property {"running" | "completed" | "aborted" | "failed" | "interrupted"} status
+ * @property {"running" | "completed" | "aborted" | "failed" | "interrupted" | "paused"} status
+ *   票 09: 'paused' = 下班落盘 — 这一轮收尾合上，任务仍停在「进行中」等上班续跑。
  * @property {string} prompt
  * @property {string} startedAt
  * @property {string | null} endedAt
@@ -101,17 +102,36 @@ import { appError } from "../shared/apperror.mjs";
  * @property {TaskStatus} status
  * @property {string} createdAt
  *
- * @typedef {TaskRow & { employeeName: string }} TaskRowWithEmployee
+ * @typedef {TaskRow & { employeeName: string, latestSessionStatus?: string | null }} TaskRowWithEmployee
+ *   latestSessionStatus 只在列表查询里携带（票 09: 暂停徽标）；taskById 不带。
  *
  * @typedef {object} TaskSessionRow
  * @property {number} id
  * @property {number} taskId
  * @property {number} employeeSessionId
  * @property {string} engine
- * @property {"running" | "completed" | "aborted" | "failed" | "interrupted"} status
+ * @property {"running" | "completed" | "aborted" | "failed" | "interrupted" | "paused"} status
  * @property {string} startedAt
  * @property {string | null} endedAt
  * @property {string | null} [sessionFile] employee session's resume pointer (list reads only)
+ *
+ * @typedef {object} ScheduleRow 票 09: 每公司一份上下班时间表（配置行）
+ * @property {number} companyId
+ * @property {string} workStart  "HH:MM" 或 "HH:MM:SS"（本地时间）
+ * @property {string} workEnd    同上
+ * @property {number} graceSeconds 下班宽限（默认 90，可配）
+ * @property {string} updatedAt
+ *
+ * @typedef {object} DutyOverrideRow 票 09: 手动上下班的 override 记录（独立于时间表）
+ * @property {number} companyId
+ * @property {"on" | "off"} mode
+ * @property {number} at epoch ms — 用于「越过下一个排班界点自动失效」判定
+ *
+ * @typedef {object} DutyStatusRow 票 09: 当前相位（视图显示 + 重启后不撒谎）
+ * @property {number} companyId
+ * @property {"on" | "grace" | "off"} phase
+ * @property {number} phaseSince epoch ms
+ * @property {number | null} graceUntil epoch ms（仅宽限相位）
  *
  * @typedef {object} ArtifactRow
  * @property {number} id
@@ -190,7 +210,7 @@ CREATE TABLE IF NOT EXISTS run (
   employee_session_id INTEGER NOT NULL REFERENCES employee_session(id),
   employee_id INTEGER NOT NULL REFERENCES employee(id),
   engine TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'aborted', 'failed', 'interrupted')),
+  status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'aborted', 'failed', 'interrupted', 'paused')),
   prompt TEXT NOT NULL,
   started_at TEXT NOT NULL,
   ended_at TEXT,
@@ -216,9 +236,27 @@ CREATE TABLE IF NOT EXISTS task_session (
   task_id INTEGER NOT NULL REFERENCES task(id),
   employee_session_id INTEGER NOT NULL REFERENCES employee_session(id),
   engine TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'aborted', 'failed', 'interrupted')),
+  status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'aborted', 'failed', 'interrupted', 'paused')),
   started_at TEXT NOT NULL,
   ended_at TEXT
+);
+CREATE TABLE IF NOT EXISTS company_schedule (
+  company_id INTEGER PRIMARY KEY REFERENCES company(id),
+  work_start TEXT NOT NULL,
+  work_end TEXT NOT NULL,
+  grace_seconds INTEGER NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS duty_override (
+  company_id INTEGER PRIMARY KEY REFERENCES company(id),
+  mode TEXT NOT NULL CHECK (mode IN ('on', 'off')),
+  at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS duty_status (
+  company_id INTEGER PRIMARY KEY REFERENCES company(id),
+  phase TEXT NOT NULL CHECK (phase IN ('on', 'grace', 'off')),
+  phase_since INTEGER NOT NULL,
+  grace_until INTEGER
 );
 CREATE TABLE IF NOT EXISTS artifact (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -232,11 +270,13 @@ CREATE TABLE IF NOT EXISTS artifact (
 
 /**
  * Run outcomes. 'running' is set by createRun; finishRun moves a run to one
- * of the terminal states. A run still 'running' when the store opens (host
+ * of the closed states. A run still 'running' when the store opens (host
  * restart / crash) is marked 'interrupted' — ticket 10 builds recovery on
- * top of that fact.
+ * top of that fact. Ticket 09 adds 'paused': 下班落盘 closes the row too
+ * (ended_at set) — the task keeps its 进行中 status, and 上班 appends a NEW
+ * run/task_session instead of reopening this one.
  */
-const TERMINAL_RUN_STATUSES = new Set(["completed", "aborted", "failed", "interrupted"]);
+const TERMINAL_RUN_STATUSES = new Set(["completed", "aborted", "failed", "interrupted", "paused"]);
 
 /**
  * Task status machine (ticket 06: 五个状态在界面上可见且不可跳过). The host —
@@ -478,6 +518,15 @@ function toTask(row) {
     baseHead: String(row.base_head),
     status: /** @type {TaskRow["status"]} */ (String(row.status)),
     createdAt: String(row.created_at),
+    ...(row.latest_session_status === undefined
+      ? {}
+      : {
+          // 票 09: 暂停徽标的数据源 — 最近一轮 task_session 的状态（列表查询携带）
+          latestSessionStatus:
+            row.latest_session_status === null || row.latest_session_status === undefined
+              ? null
+              : String(row.latest_session_status),
+        }),
   };
 }
 
@@ -519,6 +568,33 @@ function toArtifact(row) {
 }
 
 /**
+ * @param {Record<string, unknown>} row
+ * @returns {ScheduleRow}
+ */
+function toSchedule(row) {
+  return {
+    companyId: Number(row.company_id),
+    workStart: String(row.work_start),
+    workEnd: String(row.work_end),
+    graceSeconds: Number(row.grace_seconds),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+/**
+ * @param {Record<string, unknown>} row
+ * @returns {DutyStatusRow}
+ */
+function toDutyStatus(row) {
+  return {
+    companyId: Number(row.company_id),
+    phase: /** @type {DutyStatusRow["phase"]} */ (String(row.phase)),
+    phaseSince: Number(row.phase_since),
+    graceUntil: row.grace_until === null || row.grace_until === undefined ? null : Number(row.grace_until),
+  };
+}
+
+/**
  * Freeze a role row into the snapshot shape stored on every employee:
  * identity + manifest, as it is right now.
  *
@@ -544,6 +620,7 @@ export function openStore({ dataDir }) {
   db.exec(SCHEMA);
   migrateRunTaskColumns(db);
   migrateTaskStateMachine(db);
+  migrateRunPauseState(db);
   // A host that died (or was killed) mid-run must not leave phantom 'running'
   // rows behind: they become 'interrupted' the moment a host opens the store.
   markInterruptedRuns(db);
@@ -755,7 +832,7 @@ export function openStore({ dataDir }) {
     },
 
     /**
-     * @param {{ runId: number, status: "completed" | "aborted" | "failed" | "interrupted", usage?: import("./engine/events.mjs").Usage | null }} input
+     * @param {{ runId: number, status: "completed" | "aborted" | "failed" | "interrupted" | "paused", usage?: import("./engine/events.mjs").Usage | null }} input
      * @returns {RunRow}
      */
     finishRun({ runId, status, usage }) {
@@ -845,7 +922,9 @@ export function openStore({ dataDir }) {
     listTasks({ groupId }) {
       const rows = db
         .prepare(
-          `SELECT t.*, e.name AS e_name FROM task t JOIN employee e ON e.id = t.employee_id
+          `SELECT t.*, e.name AS e_name,
+            (SELECT ts.status FROM task_session ts WHERE ts.task_id = t.id ORDER BY ts.id DESC LIMIT 1) AS latest_session_status
+           FROM task t JOIN employee e ON e.id = t.employee_id
            WHERE t.group_id = ? ORDER BY t.id DESC`,
         )
         .all(groupId);
@@ -864,7 +943,9 @@ export function openStore({ dataDir }) {
     listTasksForCompany({ companyId }) {
       const rows = db
         .prepare(
-          `SELECT t.*, e.name AS e_name FROM task t
+          `SELECT t.*, e.name AS e_name,
+            (SELECT ts.status FROM task_session ts WHERE ts.task_id = t.id ORDER BY ts.id DESC LIMIT 1) AS latest_session_status
+           FROM task t
            JOIN employee e ON e.id = t.employee_id
            JOIN project_group g ON g.id = t.group_id
            WHERE g.company_id = ? ORDER BY t.id DESC`,
@@ -961,7 +1042,7 @@ export function openStore({ dataDir }) {
     },
 
     /**
-     * @param {{ taskSessionId: number, status: "completed" | "aborted" | "failed" | "interrupted" }} input
+     * @param {{ taskSessionId: number, status: "completed" | "aborted" | "failed" | "interrupted" | "paused" }} input
      * @returns {TaskSessionRow}
      */
     finishTaskSession({ taskSessionId, status }) {
@@ -1052,6 +1133,106 @@ export function openStore({ dataDir }) {
       return summary;
     },
 
+    // — 上下班 (ticket 09: 时间表落库可改 / override 独立 / 相位可恢复) —
+
+    /**
+     * The company's 上下班 timetable row, or null when nobody configured one
+     * (the duty layer supplies the default; the store never invents rows).
+     *
+     * @param {number} companyId
+     * @returns {ScheduleRow | null}
+     */
+    getCompanySchedule(companyId) {
+      const row = db.prepare("SELECT * FROM company_schedule WHERE company_id = ?").get(companyId);
+      return row ? toSchedule(/** @type {Record<string, unknown>} */ (row)) : null;
+    },
+
+    /**
+     * Upsert: one timetable row per company, edited in place (票 09 验收 1:
+     * 可配上下班时刻，落库可改). Validation lives in the duty layer.
+     *
+     * @param {{ companyId: number, workStart: string, workEnd: string, graceSeconds: number }} input
+     * @returns {ScheduleRow}
+     */
+    upsertCompanySchedule({ companyId, workStart, workEnd, graceSeconds }) {
+      if (!db.prepare("SELECT id FROM company WHERE id = ?").get(companyId)) {
+        throw appError("unknown_company", `no company with id ${companyId}`);
+      }
+      const updatedAt = new Date().toISOString();
+      db
+        .prepare(
+          `INSERT INTO company_schedule (company_id, work_start, work_end, grace_seconds, updated_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(company_id) DO UPDATE SET
+             work_start = excluded.work_start, work_end = excluded.work_end,
+             grace_seconds = excluded.grace_seconds, updated_at = excluded.updated_at`,
+        )
+        .run(companyId, workStart, workEnd, graceSeconds, updatedAt);
+      return /** @type {ScheduleRow} */ (this.getCompanySchedule(companyId));
+    },
+
+    /** @param {number} companyId @returns {DutyOverrideRow | null} */
+    getDutyOverride(companyId) {
+      const row = db.prepare("SELECT * FROM duty_override WHERE company_id = ?").get(companyId);
+      if (!row) return null;
+      const record = /** @type {Record<string, unknown>} */ (row);
+      return {
+        companyId: Number(record.company_id),
+        mode: /** @type {"on" | "off"} */ (String(record.mode)),
+        at: Number(record.at),
+      };
+    },
+
+    /**
+     * The manual override record (票 09 验收 2). Deliberately a different
+     * table from the timetable: overriding never touches the schedule rows.
+     *
+     * @param {{ companyId: number, mode: "on" | "off", at: number }} input
+     * @returns {DutyOverrideRow}
+     */
+    setDutyOverride({ companyId, mode, at }) {
+      if (mode !== "on" && mode !== "off") throw appError("invalid_payload", `duty override mode must be on/off, got ${mode}`);
+      db
+        .prepare(
+          `INSERT INTO duty_override (company_id, mode, at) VALUES (?, ?, ?)
+           ON CONFLICT(company_id) DO UPDATE SET mode = excluded.mode, at = excluded.at`,
+        )
+        .run(companyId, mode, at);
+      return /** @type {DutyOverrideRow} */ (this.getDutyOverride(companyId));
+    },
+
+    /** @param {number} companyId */
+    clearDutyOverride(companyId) {
+      db.prepare("DELETE FROM duty_override WHERE company_id = ?").run(companyId);
+    },
+
+    /** @param {number} companyId @returns {DutyStatusRow | null} */
+    getDutyStatus(companyId) {
+      const row = db.prepare("SELECT * FROM duty_status WHERE company_id = ?").get(companyId);
+      return row ? toDutyStatus(/** @type {Record<string, unknown>} */ (row)) : null;
+    },
+
+    /**
+     * The current duty phase, persisted so the view (and a restarting host)
+     * never claims 上班中 while the schedule says otherwise.
+     *
+     * @param {{ companyId: number, phase: "on" | "grace" | "off", phaseSince: number, graceUntil?: number | null }} input
+     * @returns {DutyStatusRow}
+     */
+    setDutyStatus({ companyId, phase, phaseSince, graceUntil }) {
+      if (!["on", "grace", "off"].includes(phase)) {
+        throw appError("invalid_payload", `duty phase must be on/grace/off, got ${phase}`);
+      }
+      db
+        .prepare(
+          `INSERT INTO duty_status (company_id, phase, phase_since, grace_until) VALUES (?, ?, ?, ?)
+           ON CONFLICT(company_id) DO UPDATE SET
+             phase = excluded.phase, phase_since = excluded.phase_since, grace_until = excluded.grace_until`,
+        )
+        .run(companyId, phase, phaseSince, graceUntil ?? null);
+      return /** @type {DutyStatusRow} */ (this.getDutyStatus(companyId));
+    },
+
     /**
      * Remember which company / project group the office view follows.
      * Partial updates are allowed: pass companyId, groupId, or both.
@@ -1104,24 +1285,33 @@ export function openStore({ dataDir }) {
  * a task whose session was interrupted goes back to 'open' so the boss can
  * dispatch it again (ticket 06 will add the richer retry story).
  *
+ * 票 09: a task parked by 下班 (its latest task_session is 'paused') is NOT
+ * a crash leftover — it deliberately stays 进行中 with a 暂停 badge, and
+ * 上班续跑 appends the next session. Only never-paused 进行中 tasks fall
+ * back to 待办.
+ *
  * @param {DatabaseSync} db
  */
 function markInterruptedRuns(db) {
   const running = db.prepare("SELECT id FROM run WHERE status = 'running'").all();
+  const interruptSessions = db.prepare("UPDATE task_session SET status = 'interrupted', ended_at = ? WHERE status = 'running'");
+  const reopenTasks = db.prepare(
+    `UPDATE task SET status = 'open'
+     WHERE status = 'running'
+       AND id NOT IN (SELECT task_id FROM task_session WHERE status = 'paused')`,
+  );
   if (running.length === 0) {
     // No orphan runs — task sessions/tasks can still be orphaned if the host
     // died between opening a session and creating its run; heal those too.
-    db.prepare("UPDATE task_session SET status = 'interrupted', ended_at = ? WHERE status = 'running'").run(
-      new Date().toISOString(),
-    );
-    db.prepare("UPDATE task SET status = 'open' WHERE status = 'running'").run();
+    interruptSessions.run(new Date().toISOString());
+    reopenTasks.run();
     return;
   }
   const endedAt = new Date().toISOString();
   const finish = db.prepare("UPDATE run SET status = 'interrupted', ended_at = ? WHERE id = ?");
   for (const row of running) finish.run(endedAt, Number(/** @type {Record<string, unknown>} */ (row).id));
-  db.prepare("UPDATE task_session SET status = 'interrupted', ended_at = ? WHERE status = 'running'").run(endedAt);
-  db.prepare("UPDATE task SET status = 'open' WHERE status = 'running'").run();
+  interruptSessions.run(endedAt);
+  reopenTasks.run();
 }
 
 /**
@@ -1190,6 +1380,68 @@ function migrateTaskStateMachine(db) {
   } catch (err) {
     db.exec("ROLLBACK");
     throw err;
+  }
+}
+
+/**
+ * Ticket 09 widens the run / task_session status CHECK with 'paused'
+ * (下班落盘). Same table-swap dance as migrateTaskStateMachine: CREATE IF
+ * NOT EXISTS never relaxes a pre-existing CHECK, so a database still
+ * missing 'paused' is rebuilt in place. Rows carry over unchanged — the
+ * statuses they hold are a subset of the new set.
+ *
+ * @param {DatabaseSync} db
+ */
+function migrateRunPauseState(db) {
+  for (const table of ["run", "task_session"]) {
+    const current = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+    const sql = current ? String(/** @type {Record<string, unknown>} */ (current).sql ?? "") : "";
+    if (sql.length === 0 || sql.includes("'paused'")) continue;
+
+    db.exec("BEGIN");
+    try {
+      if (table === "run") {
+        db.exec(`
+          CREATE TABLE run_v9 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_session_id INTEGER NOT NULL REFERENCES employee_session(id),
+            employee_id INTEGER NOT NULL REFERENCES employee(id),
+            engine TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'aborted', 'failed', 'interrupted', 'paused')),
+            prompt TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            ended_at TEXT,
+            usage TEXT,
+            task_id INTEGER,
+            task_session_id INTEGER
+          );
+          INSERT INTO run_v9 (id, employee_session_id, employee_id, engine, status, prompt, started_at, ended_at, usage, task_id, task_session_id)
+          SELECT id, employee_session_id, employee_id, engine, status, prompt, started_at, ended_at, usage, task_id, task_session_id FROM run;
+          DROP TABLE run;
+          ALTER TABLE run_v9 RENAME TO run;
+        `);
+      } else {
+        db.exec(`
+          CREATE TABLE task_session_v9 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id INTEGER NOT NULL REFERENCES task(id),
+            employee_session_id INTEGER NOT NULL REFERENCES employee_session(id),
+            engine TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'aborted', 'failed', 'interrupted', 'paused')),
+            started_at TEXT NOT NULL,
+            ended_at TEXT
+          );
+          INSERT INTO task_session_v9 (id, task_id, employee_session_id, engine, status, started_at, ended_at)
+          SELECT id, task_id, employee_session_id, engine, status, started_at, ended_at FROM task_session;
+          DROP TABLE task_session;
+          ALTER TABLE task_session_v9 RENAME TO task_session;
+        `);
+      }
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
   }
 }
 
