@@ -336,7 +336,7 @@ const exitCoordinator = createExitCoordinator({
 });
 
 app.whenReady().then(async () => {
-  if (!hasSingleInstanceLock) return; // second instance: the holder owns the data dir — do NOT sweep, do NOT spawn
+  if (instanceGuard.role !== "primary") return; // second instance: the holder owns the data dir — do NOT sweep, do NOT spawn
   // 票 10: sweep crash residue BEFORE the first host spawns — an orphaned
   // AgentHost from a force-killed launch is a second SQLite writer, and its
   // engine children are the orphan processes the ticket forbids. (The single-
