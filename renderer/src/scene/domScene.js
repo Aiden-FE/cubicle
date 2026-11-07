@@ -5,9 +5,13 @@
  * The room is a 640×440 virtual stage; desk coordinates in the database are
  * stage units (seeded by DESK_SLOTS in src/host/store.mjs).
  *
- * Current implementation: DOM/CSS positioning. Ticket 07 swaps this module
- * for the pre-rendered 3D-layer + 2D-character scene behind the same shape;
- * OfficeFloor never learns which one is active.
+ * Current implementation: DOM/CSS positioning. Ticket 07 added the工位
+ * animation layer (scene/{toolActivity,deskActivity,idleMotion,deskReadout}
+ * .js — pure state modules) behind the same seam, still painted with DOM/SVG
+ * art; swapping to a pre-rendered 3D-layer + 2D-character scene later only
+ * replaces OfficeFloor's painting step — the state modules and this
+ * positioning contract survive it, and OfficeFloor never learns which
+ * renderer is active.
  */
 
 export const ROOM = { width: 640, height: 440 };

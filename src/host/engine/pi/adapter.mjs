@@ -12,6 +12,13 @@
  * goes into the system prompt, and the role's tool list becomes the session
  * allowlist (skills/MCP land in ticket 05's capability wiring).
  *
+ * Runtime policy (ticket 07): an inline pi extension runs the host policy
+ * gate at every tool_call — a denied call never executes, and the verdict
+ * rides the normalized stream as `policy_blocked` so the工位 can show it.
+ * `noExtensions: true` only blocks FILE-based extensions (the user's ~/.pi
+ * stays out); inline factories always load — verified against pi 1.5.0's
+ * resource loader.
+ *
  * The live session is reused across conversations: the resume pointer (pi's
  * session file) is re-opened after a host restart, so a conversation can
  * continue (票 04: 可续).
@@ -20,6 +27,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 
 import { appError } from "../../../shared/apperror.mjs";
+import { decideToolAccess } from "../policy.mjs";
 import { normalizePiEvent } from "./normalize.mjs";
 
 /** The provider key the app's own models.json must declare (BYOK, decision 04). */
@@ -75,6 +83,33 @@ export function createPiAdapter({ dataDir, moduleImporter }) {
   }
 
   /**
+   * Inline extension: the policy gate bolted onto pi's tool_call hook.
+   * Deny → the call never runs AND the refusal is announced on the
+   * normalized stream (票 07: 被策略拒绝时工位有可见提示，不静默).
+   *
+   * @param {(event: import("../events.mjs").NormalizedEvent) => void} onEvent
+   * @returns {(piRuntime: any) => void}
+   */
+  function policyExtension(onEvent) {
+    return (piRuntime) => {
+      piRuntime.on("tool_call", (/** @type {any} */ event) => {
+        const verdict = decideToolAccess({ toolName: event.toolName, args: event.input });
+        if (verdict.verdict === "deny") {
+          onEvent({
+            type: "policy_blocked",
+            toolCallId: String(event.toolCallId ?? "unknown"),
+            toolName: String(event.toolName ?? "unknown"),
+            rule: verdict.rule,
+            reason: verdict.reason,
+          });
+          return { block: true, reason: `策略拦截（${verdict.rule}）：${verdict.reason}` };
+        }
+        return undefined;
+      });
+    };
+  }
+
+  /**
    * @param {{ employee: any, session: EmployeeSessionRow, onEvent: (event: NormalizedEvent) => void }} input
    * @returns {Promise<{ prompt(text: string): Promise<void>, abort(): Promise<void>, sessionFile(): string | null }>}
    */
@@ -121,6 +156,7 @@ export function createPiAdapter({ dataDir, moduleImporter }) {
         ? [`你是员工「${employeeName}」，角色：${roleLabel}。${persona}`]
         : [`你是员工「${employeeName}」，角色：${roleLabel}。`],
       noExtensions: true,
+      extensionFactories: [policyExtension(onEvent)],
     });
     await resourceLoader.reload();
 

@@ -898,6 +898,10 @@ body {
   color: var(--bad);
 }
 
+.chat-meta.warn {
+  color: var(--warn);
+}
+
 .chat-error {
   font-size: 12.5px;
   color: var(--bad);
@@ -960,4 +964,252 @@ body {
   border: 1px solid rgba(180, 72, 47, 0.5);
   background: transparent;
   color: var(--bad);
+}
+
+/* ── desks: animation layer (ticket 07) ────────────────────────── */
+
+/* monitor screen: state-driven picture */
+.screen-cursor {
+  animation: screen-cursor-blink 1.1s steps(1) infinite;
+}
+
+@keyframes screen-cursor-blink {
+  0%,
+  55% {
+    opacity: 1;
+  }
+  56%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.screen-line-b {
+  animation: screen-line-breathe 1.7s ease-in-out infinite;
+}
+
+@keyframes screen-line-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.screen-progress {
+  transform-box: fill-box;
+  transform-origin: left center;
+  animation: screen-progress-sweep 1.6s ease-in-out infinite;
+}
+
+@keyframes screen-progress-sweep {
+  0% {
+    transform: scaleX(0.15);
+  }
+  70% {
+    transform: scaleX(0.95);
+  }
+  100% {
+    transform: scaleX(0.95);
+  }
+}
+
+.screen-wash {
+  animation: screen-wash-in 240ms ease-out;
+}
+
+@keyframes screen-wash-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* always-on status light: 在忙/在闲 survives every text toggle */
+.desk-status-light {
+  position: absolute;
+  top: 4px;
+  right: 10px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1px solid rgba(43, 38, 32, 0.25);
+  background: var(--ok);
+}
+
+.desk-status-light.working {
+  background: var(--warn);
+  animation: desk-light-pulse 1.2s ease-in-out infinite;
+}
+
+.desk-status-light.blocked {
+  background: var(--bad);
+  animation: desk-light-pulse 0.8s ease-in-out infinite;
+}
+
+.desk-status-light.slack {
+  background: #4f8f9c;
+}
+
+.desk-status-light.coffee {
+  background: #8a7a63;
+}
+
+@keyframes desk-light-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* 策略拒绝 marker — never silent, never switchable */
+.desk-blocked {
+  position: absolute;
+  top: -4px;
+  left: 8px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  border-radius: 50%;
+  background: var(--bad);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(180, 72, 47, 0.4);
+  animation: desk-blocked-nudge 1.6s ease-in-out infinite;
+}
+
+@keyframes desk-blocked-nudge {
+  0%,
+  70%,
+  100% {
+    transform: rotate(0deg);
+  }
+  78% {
+    transform: rotate(-9deg);
+  }
+  86% {
+    transform: rotate(7deg);
+  }
+  93% {
+    transform: rotate(-3deg);
+  }
+}
+
+/* switchable 气泡 */
+.desk-bubble {
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--ink);
+  background: var(--paper-raised);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 2px 10px;
+  box-shadow: 0 3px 8px rgba(43, 38, 32, 0.12);
+  animation: screen-wash-in 180ms ease-out;
+}
+
+.desk-bubble::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  transform: translateX(-50%) rotate(45deg);
+  width: 8px;
+  height: 8px;
+  background: var(--paper-raised);
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+/* person micro-motion: typing hands + 摸鱼 lean */
+.person-typing .person-hand-l {
+  animation: person-type 0.42s ease-in-out infinite alternate;
+}
+
+.person-typing .person-hand-r {
+  animation: person-type 0.42s ease-in-out infinite alternate-reverse;
+}
+
+@keyframes person-type {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-0.8px);
+  }
+}
+
+.person-slack .slack-head {
+  animation: person-slack-nod 2.6s ease-in-out infinite;
+}
+
+.person-slack .slack-phone {
+  animation: person-phone-glow 1.8s ease-in-out infinite;
+}
+
+@keyframes person-slack-nod {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(0.6px, 1.2px);
+  }
+}
+
+@keyframes person-phone-glow {
+  0%,
+  100% {
+    opacity: 0.75;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* 去咖啡：empty chair reads at a glance */
+.desk-art-away {
+  opacity: 0.9;
+}
+
+/* view preference toggles (名牌/气泡) */
+.view-toggles {
+  position: absolute;
+  top: 46px;
+  right: 22px;
+  z-index: 11;
+  display: flex;
+  gap: 6px;
+}
+
+.view-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  background: var(--paper-raised);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 12px 3px 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.view-toggle input {
+  accent-color: var(--accent);
+  cursor: pointer;
 }

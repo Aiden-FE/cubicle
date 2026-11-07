@@ -338,6 +338,15 @@ function appendEvent(items, event) {
     case "error":
       next.push({ kind: "error", code: String(event.code ?? "error"), message: String(event.message ?? "") });
       break;
+    case "policy_blocked":
+      // 票 07: 被拒不静默 — the refusal is a first-class timeline line too.
+      next.push({
+        kind: "meta",
+        text: `被策略拦下：${String(event.toolName ?? "?")} — ${String(event.reason ?? "")}`,
+        metaType: "policy_blocked",
+        tone: "warn",
+      });
+      break;
     default:
       next.push({ kind: "meta", text: `未知事件：${String(event.type)}`, metaType: "unknown" });
       break;

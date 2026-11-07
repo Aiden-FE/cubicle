@@ -132,7 +132,7 @@ test("role.list answers with the three preset roles and no events", async () => 
       roles.map((/** @type {any} */ r) => r.key),
       ["programmer", "tester", "pm"],
     );
-    assert.deepEqual(roles[0].manifest.tools, ["read", "write", "edit", "bash", "grep"]);
+    assert.deepEqual(roles[0].manifest.tools, ["read", "write", "edit", "powershell", "grep"]);
   } finally {
     await dispose();
   }

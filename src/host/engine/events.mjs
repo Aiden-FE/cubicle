@@ -7,6 +7,12 @@
  * one terminal `agent_end` (adapters synthesize one if the engine settles
  * without it). `usage` rides on turn_end where the engine reports it.
  *
+ * Not everything on the wire comes from an engine: `policy_blocked` is
+ * host-originated — the policy gate (src/host/engine/policy.mjs) refuses a
+ * tool call and MUST say so on the same stream (票 07: 被拒不静默). Every
+ * host (SDK or CLI, ticket 11) emits this same event from its own choke
+ * point; adapters must not invent it.
+ *
  * @typedef {{ type: "session_start", sessionId?: string }} SessionStartEvent
  * @typedef {{ type: "turn_start" }} TurnStartEvent
  * @typedef {{ type: "text_delta", text: string }} TextDeltaEvent
@@ -17,6 +23,7 @@
  * @typedef {{ type: "agent_end", status: "ok" | "failed" | "unknown" }} AgentEndEvent
  * @typedef {{ type: "error", code: string, message: string }} ErrorEvent
  * @typedef {{ type: "unknown", rawType: string, payload: unknown }} UnknownEvent
+ * @typedef {{ type: "policy_blocked", toolCallId: string, toolName: string, rule: string, reason: string }} PolicyBlockedEvent
  * @typedef {{ input: number, cachedInput: number, cacheWrite: number, output: number, reasoning: number }} Usage
- * @typedef {SessionStartEvent | TurnStartEvent | TextDeltaEvent | ThinkingDeltaEvent | ToolExecutionStartEvent | ToolExecutionEndEvent | TurnEndEvent | AgentEndEvent | ErrorEvent | UnknownEvent} NormalizedEvent
+ * @typedef {SessionStartEvent | TurnStartEvent | TextDeltaEvent | ThinkingDeltaEvent | ToolExecutionStartEvent | ToolExecutionEndEvent | TurnEndEvent | AgentEndEvent | ErrorEvent | UnknownEvent | PolicyBlockedEvent} NormalizedEvent
  */

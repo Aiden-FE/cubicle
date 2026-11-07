@@ -164,6 +164,12 @@ const TERMINAL_RUN_STATUSES = new Set(["completed", "aborted", "failed", "interr
  * The v1 preset roster (decision 05: 程序员 / 测试 / 产品经理, default
  * engine pi; cost semantics from decision 04: per-task token soft gate).
  * Inserted by key, so an existing database gains roles without duplicates.
+ *
+ * Shell tool = pi's `powershell` (ticket 07): the app is Windows-first, and
+ * pi's `bash` tool resolves to Git-Bash/msys2, whose startup dies under this
+ * machine's security policy (NtCreateDirectoryObject → 0xC0000022) — the
+ *工位 would show永远失败的执行. PowerShell is the native Windows shell and
+ * survives the same policy.
  */
 const PRESET_ROLES = [
   {
@@ -173,7 +179,7 @@ const PRESET_ROLES = [
     manifest: {
       persona: "严谨务实的程序员：测试先行、小步提交、不主动 push，回滚靠重新派任务。",
       skills: ["git 工作流", "测试先行"],
-      tools: ["read", "write", "edit", "bash", "grep"],
+      tools: ["read", "write", "edit", "powershell", "grep"],
       mcpServers: [],
       engine: "pi",
       model: "default",
@@ -187,7 +193,7 @@ const PRESET_ROLES = [
     manifest: {
       persona: "苛刻的测试工程师：一切清单化，优先跑测试，不改动被测试的代码。",
       skills: ["测试清单化"],
-      tools: ["read", "bash", "grep"],
+      tools: ["read", "powershell", "grep"],
       mcpServers: [],
       engine: "pi",
       model: "default",
