@@ -10,7 +10,7 @@
   "main": "src/main/index.mjs",
   "scripts": {
     "spike": "node spike/run.mjs",
-    "test": "node --test --experimental-test-isolation=none",
+    "test": "node --test --experimental-test-isolation=none test/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.renderer.json",
     "check": "npm run typecheck && npm test",
     "build:renderer": "vite build",
