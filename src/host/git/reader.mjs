@@ -81,7 +81,7 @@ export function createGitReader({ runCommand } = {}) {
     if (result.failedToStart) {
       return { code: "git_unavailable", message: "本机找不到 git 命令：工单需要 git 工作区才能记录起点。" };
     }
-    if (/not a git repository/i.test(result.stderr)) {
+    if (/not a git repository|cannot change to|No such file or directory/i.test(result.stderr)) {
       return { code: "not_a_git_workspace", message: "工作区不是 git 仓库：无法记录起点 HEAD，工单不可用。" };
     }
     return { code: "no_head_commit", message: "git 工作区还没有任何提交：先让第一次提交落地，再开工单。" };

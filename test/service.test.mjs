@@ -8,6 +8,7 @@ import { openStore } from "../src/host/store.mjs";
 import { createService } from "../src/host/service.mjs";
 import { createRunManager } from "../src/host/engine/run-manager.mjs";
 import { createTaskRunHook } from "../src/host/task/artifacts.mjs";
+import { createGitReader } from "../src/host/git/reader.mjs";
 import { createInvoke } from "../src/shared/envelope.mjs";
 
 /**
@@ -133,7 +134,7 @@ test("role.list answers with the three preset roles and no events", async () => 
       roles.map((/** @type {any} */ r) => r.key),
       ["programmer", "tester", "pm"],
     );
-    assert.deepEqual(roles[0].manifest.tools, ["read", "write", "edit", "bash", "grep"]);
+    assert.deepEqual(roles[0].manifest.tools, ["read", "write", "edit", "bash", "powershell", "grep"]);
   } finally {
     await dispose();
   }
@@ -396,10 +397,10 @@ test("run methods answer engine_unavailable when the host has no run manager", a
  * test/git-reader.test.mjs).
  *
  * @param {string} name
- * @param {{ headScript?: { ok: boolean, sha?: string, code?: string, message?: string } }} [options]
+ * @param {{ headScript?: { ok: boolean, sha?: string, code?: string, message?: string }, useRealGit?: boolean }} [options]
  */
 async function withTaskService(name, options = {}) {
-  const { headScript = { ok: true, sha: "a".repeat(40) } } = options;
+  const { headScript = { ok: true, sha: "a".repeat(40) }, useRealGit = false } = options;
   const dataDir = await mkdtemp(path.join(tmpdir(), `cubicle-task-service-${name}-`));
   const store = openStore({ dataDir });
   const auditCommands = [
@@ -407,7 +408,9 @@ async function withTaskService(name, options = {}) {
     `git -C ${dataDir} diff --name-status ${"a".repeat(40)}`,
     `git -C ${dataDir} status --porcelain`,
   ];
-  const git = /** @type {any} */ ({
+  const git = useRealGit
+    ? /** @type {any} */ (createGitReader())
+    : /** @type {any} */ ({
     head: (/** @type {string} */ workspaceDir) => ({ ...headScript }),
     audit: () => auditCommands.slice(),
     diffInfo: (/** @type {string} */ workspaceDir, /** @type {string} */ baseSha) => ({
@@ -519,6 +522,19 @@ test("task.create says the workspace is unusable when it is not a git repository
     assert.match(/** @type {any} */ (reply.error).message, /不是 git 仓库/);
     const group = store.officeSnapshot().groups[0];
     assert.equal(store.listTasks({ groupId: group.id }).length, 0);
+  } finally {
+    await dispose();
+  }
+});
+
+test("with the real git door, a never-created workspace answers not_a_git_workspace (not a crash)", async () => {
+  const { service, employeeId, dispose } = await withTaskService("nogit-real", { useRealGit: true });
+  try {
+    const { reply } = service.handle(
+      createInvoke("k4b", "task.create", { employeeId, text: "加个欢迎语", goal: "加个欢迎语", acceptance: [] }),
+    );
+    assert.equal(reply.ok, false);
+    assert.equal(reply.error?.code, "not_a_git_workspace", `got: ${JSON.stringify(reply.error)}`);
   } finally {
     await dispose();
   }

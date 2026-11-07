@@ -169,6 +169,29 @@ test("commandTranscript keeps every bash command with its output and failure mar
   assert.ok(!transcript.includes("read"));
 });
 
+test("powershell runs count as command output too, rendered from the engine's structured result", () => {
+  const transcript = commandTranscript([
+    { at: 1, event: { type: "tool_execution_start", toolCallId: "p", toolName: "powershell", args: { command: "node --test" } } },
+    {
+      at: 2,
+      event: {
+        type: "tool_execution_end",
+        toolCallId: "p",
+        toolName: "powershell",
+        isError: false,
+        result: {
+          content: [{ type: "text", text: "# tests 2\n# pass 2\n# fail 0" }],
+          structuredContent: { output: "# tests 2\n# pass 2\n# fail 0", exit_code: 0 },
+          isError: false,
+        },
+      },
+    },
+  ]);
+  assert.ok(transcript.includes("$ node --test"));
+  assert.ok(transcript.includes("# pass 2"));
+  assert.ok(!transcript.includes("structuredContent"), "raw engine envelope JSON must not leak into the artifact");
+});
+
 test("finalReport is the assistant text after the last tool call", () => {
   assert.equal(
     finalReport([

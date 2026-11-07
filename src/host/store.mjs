@@ -240,7 +240,7 @@ const PRESET_ROLES = [
     manifest: {
       persona: "严谨务实的程序员：测试先行、小步提交、不主动 push，回滚靠重新派任务。",
       skills: ["git 工作流", "测试先行"],
-      tools: ["read", "write", "edit", "bash", "grep"],
+      tools: ["read", "write", "edit", "bash", "powershell", "grep"],
       mcpServers: [],
       engine: "pi",
       model: "default",

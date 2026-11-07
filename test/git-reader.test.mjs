@@ -68,6 +68,13 @@ test("head on a plain directory says it is not a git workspace", async () => {
   }
 });
 
+test("a workspace directory that does not exist reads as not a git workspace too", () => {
+  const reader = createGitReader();
+  const result = reader.head(path.join(tmpdir(), `cubicle-git-missing-${Date.now()}`));
+  assert.equal(result.ok, false);
+  assert.equal(/** @type {{ code: string }} */ (result).code, "not_a_git_workspace");
+});
+
 test("head on a repository without commits is reported distinctly", async () => {
   const { workspace, git, dispose } = await withRepo("empty");
   const reader = createGitReader();

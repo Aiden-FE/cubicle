@@ -25,10 +25,10 @@ ipcRenderer.on("cubicle:reply", (_event, envelope) => {
   if (envelope.ok) {
     waiter.resolve(envelope.payload);
   } else {
-    const err = new Error(envelope.error?.message ?? "host error");
-    // @ts-ignore — code rides along for callers that care.
-    err.code = envelope.error?.code ?? "host_error";
-    waiter.reject(err);
+    // Reject with the plain wire-shaped error object — custom properties on
+    // an Error (like .code) do NOT survive contextBridge's serializer, only
+    // plain data does. Callers read { code, message }.
+    waiter.reject({ code: envelope.error?.code ?? "host_error", message: envelope.error?.message ?? "host error" });
   }
 });
 
@@ -53,10 +53,7 @@ contextBridge.exposeInMainWorld("cubicle", {
       const id = `r${seq}-${Date.now().toString(36)}`;
       const timer = setTimeout(() => {
         pending.delete(id);
-        const err = new Error(`后台服务未在 ${INVOKE_TIMEOUT_MS / 1000} 秒内响应（${method}）`);
-        // @ts-ignore — code rides along for callers that care.
-        err.code = "host_timeout";
-        reject(err);
+        reject({ code: "host_timeout", message: `后台服务未在 ${INVOKE_TIMEOUT_MS / 1000} 秒内响应（${method}）` });
       }, INVOKE_TIMEOUT_MS);
       pending.set(id, { resolve, reject, timer });
       ipcRenderer.send("cubicle:invoke", {

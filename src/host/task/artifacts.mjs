@@ -36,15 +36,31 @@ function short(sha) {
 }
 
 /**
- * Render a tool result as display text (strings pass through, anything
- * else is JSON — an object result is data, not something to pretty-print
- * half away).
+ * Render a tool result as display text. pi hands back an envelope
+ * (content parts + structuredContent.output); prefer the actual command
+ * output, fall back to text parts, then JSON — the artifact should read
+ * like a terminal, not like a wire dump.
  *
  * @param {unknown} result
  * @returns {string}
  */
 function resultText(result) {
   if (typeof result === "string") return result;
+  if (result && typeof result === "object") {
+    const envelope = /** @type {Record<string, unknown>} */ (result);
+    const structured = /** @type {Record<string, unknown> | null} */ (
+      typeof envelope.structuredContent === "object" && envelope.structuredContent !== null
+        ? /** @type {Record<string, unknown>} */ (envelope.structuredContent)
+        : null
+    );
+    if (structured && typeof structured.output === "string") return structured.output;
+    if (Array.isArray(envelope.content)) {
+      const text = envelope.content
+        .map((part) => (typeof part === "object" && part !== null ? String(/** @type {Record<string, unknown>} */ (part).text ?? "") : ""))
+        .join("");
+      if (text.length > 0) return text;
+    }
+  }
   if (result === undefined || result === null) return "";
   try {
     return JSON.stringify(result, null, 2) ?? String(result);
@@ -53,9 +69,12 @@ function resultText(result) {
   }
 }
 
+/** Tool names that mean “the employee ran a command”. */
+const COMMAND_TOOLS = new Set(["bash", "powershell"]);
+
 /**
- * Every bash command the run executed, with its output — this is where
- * 测试 output surfaces in the artifacts (验收: 命令输出).
+ * Every command the run executed (bash or powershell), with its output —
+ * this is where 测试 output surfaces in the artifacts (验收: 命令输出).
  *
  * @param {TimedEvent[]} events
  * @returns {string}
@@ -65,13 +84,13 @@ export function commandTranscript(events) {
   /** @type {Map<string, string>} */
   const commands = new Map();
   for (const { event } of events) {
-    if (event.type !== "tool_execution_start" || event.toolName !== "bash") continue;
+    if (event.type !== "tool_execution_start" || !COMMAND_TOOLS.has(event.toolName)) continue;
     const args = /** @type {Record<string, unknown> | null} */ (event.args);
     commands.set(String(event.toolCallId), typeof args?.command === "string" ? args.command : "(命令未知)");
   }
   const blocks = [];
   for (const { event } of events) {
-    if (event.type !== "tool_execution_end" || event.toolName !== "bash") continue;
+    if (event.type !== "tool_execution_end" || !COMMAND_TOOLS.has(event.toolName)) continue;
     const command = commands.get(String(event.toolCallId)) ?? "(命令未知)";
     blocks.push(`$ ${command}\n${resultText(event.result)}${event.isError ? "\n[失败]" : ""}`);
   }
