@@ -1558,6 +1558,68 @@ test("票 10 task.rerun：open 形状直接原合同再开工；续跑后崩溃�
   }
 });
 
+test("票 10 rerun 的进行中形状（09 豁免：续跑后崩溃）：先落 failed（取消同边）再走 06 failed→running 出口", async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "cubicle-rerun-shape-"));
+  try {
+    const store = openStore({ dataDir });
+    const group = store.officeSnapshot().groups[0];
+    const programmer = /** @type {any} */ (store.listRoles().find((r) => r.key === "programmer"));
+    const desk = store.listDesks({ groupId: group.id })[0];
+    const employee = store.hireEmployee({ deskId: desk.id, roleId: programmer.id, name: "小程" }).employee;
+    const task = store.createTask({
+      groupId: group.id, employeeId: employee.id, workspaceDir: "w",
+      title: "续跑后崩溃", goal: "慢", playbook: "free", acceptance: [], baseHead: "d".repeat(40),
+    });
+    // 摆出 09 豁免形状：任务停在 running；一轮 paused + 最近一轮 interrupted。
+    const session = store.getOrCreateEmployeeSession({ employeeId: employee.id, engine: "pi", agentDir: "a", sessionsDir: "s", workspaceDir: "w" });
+    store.setTaskStatus(task.id, "running");
+    const s1 = store.openTaskSession({ taskId: task.id, employeeSessionId: session.id, engine: "pi" });
+    store.finishTaskSession({ taskSessionId: s1.id, status: "paused" });
+    const s2 = store.openTaskSession({ taskId: task.id, employeeSessionId: session.id, engine: "pi" });
+    store.finishTaskSession({ taskSessionId: s2.id, status: "interrupted" });
+
+    const runManager = createRunManager({
+      store,
+      getAdapter: (engine) =>
+        engine === "pi"
+          ? {
+              async open({ onEvent }) {
+                return {
+                  async prompt() {
+                    onEvent({ type: "agent_end", status: "ok" });
+                  },
+                  async abort() {
+                    onEvent({ type: "agent_end", status: "failed" });
+                  },
+                  sessionFile: () => null,
+                };
+              },
+            }
+          : null,
+      emit: () => {},
+    });
+    const service = createService({
+      store,
+      hostInfo: { pid: 1, startedAt: "x" },
+      runManager,
+      git: /** @type {any} */ ({ head: () => ({ ok: true, sha: "a".repeat(40) }), audit: () => [] }),
+      engineCapabilities: () => ({ resumes: true }),
+    });
+
+    const res = await service.handleEnvelope(createInvoke("r1", "task.rerun", { taskId: task.id }));
+    assert.equal(res.reply.ok, true, JSON.stringify(res.reply.error));
+    await runManager.whenQuiet();
+    // 转移门全程合法：running→failed（中断一轮如实归档）→ failed→running（06 重试出口）。
+    assert.equal(/** @type {any} */ (store.taskById(task.id)).status, "running");
+    assert.deepEqual(store.listTaskSessions(task.id).map((s) => s.status), ["paused", "interrupted", "completed"]);
+    const latest = /** @type {any} */ (store.latestRunForEmployee(employee.id));
+    assert.ok(!String(latest.prompt).includes("中断"), "重跑不带续跑说明（原合同重发）");
+    store.close();
+  } finally {
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
 test("票 10 task.abandon：中断任务落失败归档，历史（会话+产出）原样保留；非中断形状拒绝", async () => {
   const h = await withCrashService("abandon");
   try {
