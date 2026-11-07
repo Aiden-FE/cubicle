@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { OfficeFloor } from "./OfficeFloor.jsx";
 import { HireModal } from "./HireModal.jsx";
 import { ChatOverlay } from "./ChatOverlay.jsx";
+import { TaskBench } from "./TaskBench.jsx";
 import { Switcher } from "./Switcher.jsx";
 import { StatusChip } from "./StatusChip.jsx";
 
@@ -14,6 +15,7 @@ export function App() {
   const [bridgeError, setBridgeError] = useState(/** @type {string | null} */ (null));
   const [hireDesk, setHireDesk] = useState(/** @type {DeskData | null} */ (null));
   const [chatEmployee, setChatEmployee] = useState(/** @type {DeskOccupantData | null} */ (null));
+  const [benchOpen, setBenchOpen] = useState(false);
   /** employeeId → 正在干活（由 run.event 流的 session_start / agent_end 驱动） */
   const [workingIds, setWorkingIds] = useState(/** @type {Set<number>} */ (new Set()));
   const lastHostState = useRef(/** @type {string | null} */ (null));
@@ -86,6 +88,17 @@ export function App() {
       />
       <StatusChip status={status} />
       <Switcher snapshot={snapshot} onChanged={refresh} />
+      {/* 左轨工单台：工单创建/列表只在浮层，主画布永远是办公室（硬约束）。 */}
+      <button
+        type="button"
+        className="task-rail"
+        data-testid="task-rail"
+        aria-expanded={benchOpen ? "true" : "false"}
+        onClick={() => setBenchOpen((open) => !open)}
+      >
+        工单台
+      </button>
+      {benchOpen ? <TaskBench snapshot={snapshot} onClose={() => setBenchOpen(false)} /> : null}
       {hireDesk ? <HireModal desk={hireDesk} onClose={() => setHireDesk(null)} /> : null}
       {chatEmployee ? <ChatOverlay employee={chatEmployee} onClose={() => setChatEmployee(null)} /> : null}
     </div>
