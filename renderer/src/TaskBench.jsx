@@ -180,7 +180,7 @@ export function TaskBench({ snapshot, onClose }) {
    * 验收动作（票 06：浮层只触发合法转移——合法性由 host 强制；host 拒绝时
    * 错误消息就是诚实的状态说明）.
    *
-   * @param {"task.accept" | "task.reject" | "task.cancel" | "task.dispatch"} method
+   * @param {"task.accept" | "task.reject" | "task.cancel" | "task.dispatch" | "task.resume" | "task.rerun" | "task.abandon"} method
    * @param {Record<string, unknown>} payload
    */
   const act = async (method, payload) => {
@@ -327,6 +327,12 @@ export function TaskBench({ snapshot, onClose }) {
                 已下班·暂停
               </span>
             ) : null}
+            {/* 票 10: 中断徽标 — 崩溃/强杀留下的 interrupted，等老板三选 */}
+            {detail?.interrupted ? (
+              <span className="task-interrupted-badge" data-testid="detail-interrupted-badge">
+                崩溃中断
+              </span>
+            ) : null}
             <button type="button" className="task-back" data-testid="task-back" onClick={() => setOpenTaskId(null)}>
               ← 列表
             </button>
@@ -361,6 +367,46 @@ export function TaskBench({ snapshot, onClose }) {
             </div>
           ) : null}
 
+          {/* 票 10: 中断任务的三选出口（host 的判决在 detail.interrupted）。 */}
+          {detail?.interrupted ? (
+            <div className="task-review" data-testid="detail-interrupted-actions">
+              <div className="interrupted-hint">
+                崩溃把这张工单留在了中断处：续跑（引擎从断点继续）/ 重跑（原合同新一轮）/ 放弃（进失败归档，历史保留）。
+              </div>
+              <div className="task-review-actions">
+                {detail.interrupted.canResume ? (
+                  <button
+                    type="button"
+                    className="task-accept"
+                    data-testid="detail-resume"
+                    onClick={() => void act("task.resume", { taskId: detailTask.id })}
+                  >
+                    续跑
+                  </button>
+                ) : (
+                  <span className="interrupted-hint" data-testid="detail-resume-hint" title={detail.interrupted.resumeHint ?? ""}>
+                    {detail.interrupted.resumeHint ?? "不能续跑"}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="task-reject"
+                  data-testid="detail-rerun"
+                  onClick={() => void act("task.rerun", { taskId: detailTask.id })}
+                >
+                  重跑
+                </button>
+                <button
+                  type="button"
+                  className="task-cancel"
+                  data-testid="detail-abandon"
+                  onClick={() => void act("task.abandon", { taskId: detailTask.id })}
+                >
+                  放弃
+                </button>
+              </div>
+            </div>
+          ) : null}
           {detailTask.status === "review" ? (
             <div className="task-review" data-testid="task-review">
               <textarea
@@ -451,6 +497,9 @@ export function TaskBench({ snapshot, onClose }) {
                 {task.status === "running" && task.latestSessionStatus === "paused" ? (
                   <span className="task-paused-badge" data-testid="paused-badge">已下班·暂停</span>
                 ) : null}
+                {(task.status === "open" || task.status === "running") && task.latestSessionStatus === "interrupted" ? (
+                  <span className="task-interrupted-badge" data-testid="bench-interrupted-badge">崩溃中断</span>
+                ) : null}
               </span>
             </button>
           ))}
@@ -473,5 +522,5 @@ const ARTIFACT_TITLES = /** @type {Record<string, string>} */ ({
  * @typedef {{ id: number, groupId: number, employeeId: number, title: string, goal: string, playbook: string, acceptance: string[], baseHead: string, status: string, createdAt: string, employeeName: string, latestSessionStatus?: string | null }} TaskRowData
  * @typedef {{ id: number, taskId: number, employeeSessionId: number, engine: string, status: string, startedAt: string, endedAt: string | null, sessionFile: string | null, iteration: number }} TaskSessionData
  * @typedef {{ input: number, cachedInput: number, cacheWrite: number, output: number, reasoning: number, total: number }} TaskTokenData
- * @typedef {{ task: TaskRowData, sessions: TaskSessionData[], artifacts: { id: number, kind: string, content: string }[], tokens?: TaskTokenData, iterations?: number }} TaskDetailData
+ * @typedef {{ task: TaskRowData, sessions: TaskSessionData[], artifacts: { id: number, kind: string, content: string }[], tokens?: TaskTokenData, iterations?: number, interrupted?: { canResume: boolean, resumeHint: string | null } | null }} TaskDetailData
  */
