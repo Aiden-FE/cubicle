@@ -34,6 +34,7 @@ async function withManager(name, options = {}) {
     employee,
     employeeId: employee.id,
     emitted,
+    dataDir,
     dispose: async () => {
       store.close();
       await rm(dataDir, { recursive: true, force: true });
@@ -67,6 +68,7 @@ function makeStub({ events = [], pending = false, openThrows = null, sessionFile
   return {
     state,
     forAll: true,
+    sessionFileFor: sessionFile,
     /**
      * @param {{ employee: any, session: any, onEvent: (event: any) => void }} input
      */
@@ -628,6 +630,56 @@ test("resume 只给「进行中」的任务续跑：待办/待验收误用被拒
       (err) => /** @type {{ code?: string }} */ (err).code === "invalid_transition",
     );
     assert.equal(ctx.store.listTaskSessions(task.id).length, 0, "被拒的 resume 不留悬挂会话行");
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("票 10 崩溃续跑（整环）：强杀遗留 running 行 → 开库自愈 → resume 通道 open→running + 追加会话；恢复指针崩溃前就已落库", async () => {
+  const stub = makeStub({ pending: true });
+  const ctx = await withManager("crash-resume", { adapter: stub });
+  try {
+    const group = ctx.store.officeSnapshot().groups[0];
+    const task = ctx.store.createTask({
+      groupId: group.id,
+      employeeId: ctx.employeeId,
+      workspaceDir: "C:\\nowhere",
+      title: "崩溃的慢活",
+      goal: "g",
+      playbook: "free",
+      acceptance: [],
+      baseHead: "d".repeat(40),
+    });
+    const first = ctx.manager.start({ employeeId: ctx.employeeId, text: "派单慢活", task: { id: task.id } });
+    await waitForActive(ctx.manager, 1); // 引擎会话已 open：恢复指针应当已经落库（不等 finishRun）
+
+    // 崩溃时指针就已在库里 —— 否则每次首轮崩溃都退化成「只能重跑」。
+    assert.equal(
+      /** @type {any} */ (ctx.store.employeeSessionById(/** @type {number} */ (first.run.employeeSessionId))).sessionFile,
+      stub.sessionFileFor ?? path.join("E:", "engine", "session.jsonl"), // makeStub 默认指针
+      "resume pointer is persisted as soon as the engine session opens, not only at finishRun",
+    );
+
+    // 「强杀」：run 行还 running 就掀桌（store seam 钉过自愈语义，这里走整环）。
+    const store = openStore({ dataDir: ctx.dataDir });
+    assert.equal(/** @type {any} */ (store.taskById(task.id)).status, "open", "自愈后任务回待办（04/06 语义不变）");
+    assert.equal(/** @type {any} */ (store.latestTaskSessionForTask(task.id)).status, "interrupted");
+
+    const manager = createRunManager({ store, getAdapter: () => stub, emit: () => {} });
+    const second = manager.start({ employeeId: ctx.employeeId, text: "崩溃续跑", task: { id: task.id }, resume: true });
+    assert.equal(/** @type {any} */ (store.taskById(task.id)).status, "running", "interrupted 续跑走 open→running 合法转移 + resume 标记");
+    assert.ok(
+      /** @type {number} */ (second.run.taskSessionId) > /** @type {number} */ (first.run.taskSessionId),
+      "续跑 = 追加一条 task_session（与打回/上班续跑同构）",
+    );
+    stub.push(AGENT_END, ctx.employeeId);
+    stub.settle(ctx.employeeId);
+    await manager.whenQuiet();
+
+    const sessions = store.listTaskSessions(task.id);
+    assert.deepEqual(sessions.map((s) => s.status), ["interrupted", "completed"]);
+    assert.equal(sessions[0].employeeSessionId, sessions[1].employeeSessionId, "同一员工会话实体：历史连续");
+    store.close();
   } finally {
     await ctx.dispose();
   }

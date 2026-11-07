@@ -217,11 +217,24 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
     // 五状态转移表会拒绝 running→running，所以续跑走 resume 通道、跳过状态
     // 门 — 但门必须先验：非「进行中」的任务误用 resume 一律拒绝，且不留
     // 悬挂会话行（06 评审的同一条规矩）。
+    //
+    // 票 10 adds one accepted shape: the crash-healed interrupted task
+    // (待办 + 最近一轮 interrupted). 续跑它 means: perform the legal
+    // open→running transition first, then take the same append-a-session
+    // channel. The five-state map is untouched — the crash fact lives at
+    // task_session.interrupted, and the transition table decides legality.
     if (task && resume) {
       const current = store.taskById(task.id);
       if (!current) throw appError("unknown_task", `no task with id ${task.id}`);
-      if (current.status !== "running") {
-        throw appError("invalid_transition", `只有「进行中」（含下班暂停）的任务能续跑，这张是 ${current.status}`);
+      if (current.status === "running") {
+        // 09: 任务本就在进行中，无需（也不允许）再走一次转移。
+      } else if (
+        current.status === "open" &&
+        store.latestTaskSessionForTask(task.id)?.status === "interrupted"
+      ) {
+        store.setTaskStatus(task.id, "running"); // open→running 是表上的合法边
+      } else {
+        throw appError("invalid_transition", `只有「进行中」（含下班暂停）或崩溃中断落回待办的任务能续跑，这张是 ${current.status}`);
       }
     }
 
@@ -293,6 +306,22 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
    * @param {{ open(input: { employee: unknown, session: EmployeeSessionRow, onEvent: (event: NormalizedEvent) => void }): Promise<LiveSession> }} adapter
    */
   async function runFlow(runRef, employee, session, adapter) {
+    // 票 10: the resume pointer must survive a crash. finishRun-only persistence
+    // loses it exactly when recovery needs it (a run killed mid-flight never
+    // finishes), so the manager saves it once it exists — right after the
+    // engine session opens, and again when a CLI host names its thread mid-run.
+    let pointerSaved = false;
+    const savePointerOnce = () => {
+      if (pointerSaved) return;
+      const pointer = runRef.live?.sessionFile?.() ?? null;
+      if (!pointer) return;
+      pointerSaved = true;
+      try {
+        store.setEmployeeSessionFile({ employeeSessionId: session.id, sessionFile: pointer });
+      } catch {
+        // store closing under a live run: finishRun's own save is the backstop
+      }
+    };
     try {
       let handle = liveSessions.get(session.id);
       if (!handle) {
@@ -303,6 +332,7 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
             const current = active.get(session.employeeId);
             if (!current) return;
             pushEvent(current, event);
+            savePointerOnce();
             if (event.type === "agent_end") finishRun(current, event);
           },
         });
@@ -315,6 +345,7 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
         liveSessions.set(session.id, handle);
       }
       runRef.live = handle;
+      savePointerOnce();
       if (runRef.finished) return;
       if (runRef.aborted) {
         // cancelled while the engine session was still opening

@@ -560,12 +560,15 @@ test("the five-state task machine (待办/进行中/待验收/完成/失败) acc
   }
 });
 
-test("skipping states is impossible: 待办 cannot jump to 待验收/完成/失败, 待验收 cannot jump to 失败", async () => {
+test("skipping states is impossible: 待办 cannot jump to 待验收/完成, 待验收 cannot jump to 失败", async () => {
   const { dataDir, dispose } = await withTempDir("task-skip");
   try {
     const store = openStore({ dataDir });
     const task = makeTask(store, hireProgrammer(store));
-    for (const next of ["review", "done", "failed"]) {
+    // 票 10 changed the rejected set: 待办→失败 is now a legal edge (abandoning an
+    // interrupted ticket into the failure archive). The service gates that edge to
+    // the interrupted shape; the map below still keeps 待办 away from 待验收/完成.
+    for (const next of ["review", "done"]) {
       assert.throws(
         () => store.setTaskStatus(task.id, /** @type {any} */ (next)),
         (err) => /** @type {{ code?: string }} */ (err).code === "invalid_transition",
@@ -1234,6 +1237,138 @@ test("旧库（run/task_session CHECK 没有 paused）开库时表重建，pause
     // 崩溃遗留的旧一轮已被自愈翻成 interrupted、任务回待办（04 语义），
     // 新一轮的 paused 写入库不再被 CHECK 拒绝。
     assert.equal(/** @type {any} */ (reopened.taskById(task.id)).status, "open");
+    reopened.close();
+  } finally {
+    await dispose();
+  }
+});
+
+// — 票 10 崩溃恢复：转移表唯一新增边 + 「中断的任务」列表 —
+
+/**
+ * Hire a programmer onto the given desk (the default group has four).
+ * @param {ReturnType<typeof openStore>} store
+ * @param {number} deskIndex
+ * @param {string} name
+ */
+function hireAtDesk(store, deskIndex, name) {
+  const group = store.officeSnapshot().groups[0];
+  const desk = store.listDesks({ groupId: group.id })[deskIndex];
+  const programmer = /** @type {any} */ (store.listRoles().find((r) => r.key === "programmer"));
+  return store.hireEmployee({ deskId: desk.id, roleId: programmer.id, name }).employee;
+}
+
+test("票 10 放弃边：open → failed 是崩溃恢复给转移表加的唯一新边（待办→待验收/完成仍不可跳）", async () => {
+  const { dataDir, dispose } = await withTempDir("task-abandon-edge");
+  try {
+    const store = openStore({ dataDir });
+    const task = makeTask(store, hireProgrammer(store));
+    // 放弃一张中断过的待办工单 → 失败归档。这是票 10 唯一放宽的边；合法性由
+    // service 限定「中断形状」才可用，转移表本身仍堵死 待办→待验收/完成。
+    assert.equal(store.setTaskStatus(task.id, "failed").status, "failed");
+    for (const next of ["review", "done"]) {
+      assert.throws(
+        () => store.setTaskStatus(task.id, /** @type {any} */ (next)),
+        (err) => /** @type {{ code?: string }} */ (err).code === "invalid_transition",
+        `failed → ${next} must be rejected except retry`,
+      );
+    }
+    // 失败非终态：06 的重试出口原样保留（failed → running）。
+    assert.equal(store.setTaskStatus(task.id, "running").status, "running");
+    store.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("票 10 中断列表：开库自愈后列出两种形状的 interrupted 任务，带引擎/恢复指针/迭代数", async () => {
+  const { dataDir, dispose } = await withTempDir("interrupted-list");
+  try {
+    const store = openStore({ dataDir });
+    const companyId = store.officeSnapshot().activeCompanyId;
+
+    // 形状 A：从没暂停过、崩溃时被派单进行中 → 自愈落回 待办 + interrupted 会话。
+    const employeeA = hireAtDesk(store, 0, "甲");
+    const taskA = makeTask(store, employeeA);
+    store.setTaskStatus(taskA.id, "running");
+    const sessionA = store.getOrCreateEmployeeSession({
+      employeeId: employeeA.id,
+      engine: "pi",
+      agentDir: "a",
+      sessionsDir: "s",
+      workspaceDir: "w",
+    });
+    store.setEmployeeSessionFile({ employeeSessionId: sessionA.id, sessionFile: "C:/fake/sess-a.jsonl" });
+    const tsA = store.openTaskSession({ taskId: taskA.id, employeeSessionId: sessionA.id, engine: "pi" });
+    store.createRun({
+      employeeId: employeeA.id,
+      employeeSessionId: sessionA.id,
+      engine: "pi",
+      prompt: "慢活",
+      taskId: taskA.id,
+      taskSessionId: tsA.id,
+    });
+
+    // 形状 B：下班暂停后上班续跑、续跑中崩溃 → 任务留在 进行中 + 最近一轮 interrupted。
+    const employeeB = hireAtDesk(store, 1, "乙");
+    const taskB = makeTask(store, employeeB);
+    store.setTaskStatus(taskB.id, "running");
+    const sessionB = store.getOrCreateEmployeeSession({
+      employeeId: employeeB.id,
+      engine: "codex",
+      agentDir: "a2",
+      sessionsDir: "s2",
+      workspaceDir: "w2",
+    });
+    store.setEmployeeSessionFile({ employeeSessionId: sessionB.id, sessionFile: "thread:th-42" });
+    const tsB1 = store.openTaskSession({ taskId: taskB.id, employeeSessionId: sessionB.id, engine: "codex" });
+    store.finishTaskSession({ taskSessionId: tsB1.id, status: "paused" });
+    const tsB2 = store.openTaskSession({ taskId: taskB.id, employeeSessionId: sessionB.id, engine: "codex" });
+    store.createRun({
+      employeeId: employeeB.id,
+      employeeSessionId: sessionB.id,
+      engine: "codex",
+      prompt: "慢活",
+      taskId: taskB.id,
+      taskSessionId: tsB2.id,
+    });
+
+    // 对照：待验收（completed 收尾）与从没派过单的待办，都不进中断列表。
+    const employeeC = hireAtDesk(store, 2, "丙");
+    const taskC = makeTask(store, employeeC);
+    store.setTaskStatus(taskC.id, "running");
+    const sessionC = store.getOrCreateEmployeeSession({
+      employeeId: employeeC.id,
+      engine: "pi",
+      agentDir: "a3",
+      sessionsDir: "s3",
+      workspaceDir: "w3",
+    });
+    const tsC = store.openTaskSession({ taskId: taskC.id, employeeSessionId: sessionC.id, engine: "pi" });
+    store.finishTaskSession({ taskSessionId: tsC.id, status: "completed" });
+    store.setTaskStatus(taskC.id, "review");
+    const taskFresh = makeTask(store, hireAtDesk(store, 3, "丁"));
+
+    store.close();
+    const reopened = openStore({ dataDir });
+
+    const rows = /** @type {any[]} */ (reopened.listInterruptedTasks({ companyId }));
+    assert.deepEqual(rows.map((r) => r.id), [taskB.id, taskA.id], "最新在前；待验收/待办无会话的不算中断");
+    assert.equal(rows[0].status, "running", "续跑后崩溃的形状停在「进行中」");
+    assert.equal(rows[0].latestSessionStatus, "interrupted");
+    assert.equal(rows[0].engine, "codex");
+    assert.equal(rows[0].sessionFile, "thread:th-42", "恢复指针随行携带，service 据此判 canResume");
+    assert.equal(rows[0].iterations, 2);
+    assert.notEqual(rows[0].interruptedAt, null);
+    assert.equal(rows[0].employeeName, "乙");
+    assert.equal(rows[1].status, "open", "从没暂停过、崩溃回待办的形状");
+    assert.equal(rows[1].engine, "pi");
+    assert.equal(rows[1].sessionFile, "C:/fake/sess-a.jsonl");
+    assert.equal(rows[1].iterations, 1);
+
+    // 别的公司（不存在/没派过单）查不到这张公司的中断任务。
+    assert.deepEqual(reopened.listInterruptedTasks({ companyId: companyId + 100 }), []);
+
     reopened.close();
   } finally {
     await dispose();

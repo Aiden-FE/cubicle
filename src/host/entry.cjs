@@ -98,6 +98,17 @@ async function main() {
     configured: existsSync(path.join(store.dataDir, "engines", engine, "models.json")),
   });
 
+  // 票 10: 引擎能力声明 — the adapters own the promise ("can this engine
+  // continue its own conversation?"). No adapter / no flag ⇒ NOT resumable:
+  // the UI only offers 重跑, which is the conservative door the ticket asks for.
+  const engineCapabilities = (/** @type {string} */ engine) => ({
+    resumes: adapterFor(engine)?.resumes === true,
+  });
+  /** @param {string} engine */
+  function adapterFor(engine) {
+    return engine === "pi" ? piAdapter : engine === "codex" ? codexAdapter : null;
+  }
+
   const service = createService({
     store,
     hostInfo,
@@ -106,6 +117,7 @@ async function main() {
     duty,
     engineProbe: probeRunner,
     engineFacts,
+    engineCapabilities,
     notifyDomain: (payload) => send(createEvent(TOPICS.domainChanged, payload)),
   });
 

@@ -34,6 +34,7 @@ import { fileURLToPath } from "node:url";
 import { appError } from "../../../shared/apperror.mjs";
 import { startPolicyBridge } from "./bridge.mjs";
 import { createCodexNormalizer } from "./normalize.mjs";
+import { createPidLedger, engineLedgerFile } from "../child-ledger.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -58,6 +59,11 @@ const STDERR_TAIL_CHARS = 2000;
  */
 export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProcess, killTree }) {
   const engineRoot = path.join(dataDir, "engines", "codex");
+  // 票 10 crash hygiene: every spawned child lands in the ledger BEFORE it
+  // works, and leaves it when it settles. A hard kill runs no exit hooks, so
+  // the next launch reads this file and sweeps the orphans (sweepCrashResidue).
+  const ledger = createPidLedger({ file: engineLedgerFile(dataDir, "codex") });
+  const ledgerName = path.basename(String(codexBinary)).replace(/\.exe$/i, "").toLowerCase();
 
   /** @type {Promise<import("./bridge.mjs").PolicyBridge> | null} */
   let bridgePromise = null;
@@ -246,6 +252,9 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
       throw appError("engine_spawn_failed", `codex 启动失败：${err instanceof Error ? err.message : err}`);
     }
     liveChildren.set(session.id, child);
+    if (typeof child.pid === "number") {
+      ledger.record({ pid: child.pid, name: ledgerName, startedAt: new Date().toISOString() });
+    }
 
     return await new Promise((resolve, reject) => {
       const normalizer = createCodexNormalizer();
@@ -315,6 +324,7 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
         }
         liveChildren.delete(session.id);
         killedByUs.delete(child);
+        if (typeof child.pid === "number") ledger.forget(child.pid);
         if (context.threadId) streamsByThread.delete(context.threadId);
         resolve();
       };
@@ -326,6 +336,7 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
         if (settled) return;
         settled = true;
         liveChildren.delete(session.id);
+        if (typeof child.pid === "number") ledger.forget(child.pid);
         reject(appError("engine_spawn_failed", `codex 进程故障：${err?.message ?? err}`));
       });
     });
@@ -405,10 +416,15 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
   return {
     open,
     bridgeEnv,
+    /** 票 10 capability: codex keeps its thread under CODEX_HOME and resumes
+     *  it via `codex exec resume <thread_id>` (proven end-to-end in ticket 11). */
+    resumes: true,
     /**
      * Synchronous, best-effort: kill every live codex child. Registered on the
      * host's `exit` so even an abrupt SIGTERM (supervisor stop → kill) leaves
      * no codex process parented under the AgentHost (票 04 留的回收义务).
+     * A hard kill (taskkill /F) never runs this — that path is covered by the
+     * children.json ledger + sweepCrashResidue at next launch (票 10).
      */
     killChildrenSync: killAllChildren,
     /** Host exit: no codex child may outlive the AgentHost (also closes the bridge). */

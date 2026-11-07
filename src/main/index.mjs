@@ -14,11 +14,21 @@ import { app, BrowserWindow, Menu, ipcMain, utilityProcess, dialog } from "elect
 import { createHostSupervisor } from "./supervisor.mjs";
 import { createEventCoalescer } from "./coalescer.mjs";
 import { createExitCoordinator } from "./exit-coordinator.mjs";
+import { recordHostPid, sweepCrashResidue } from "./crash-residue.mjs";
 import { createInvoke, createEvent, createErrorReply, parseEnvelope, TOPICS } from "../shared/envelope.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(here, "..", "..");
 const bootStartMs = Date.now();
+
+// 票 10: one Cubicle per data dir at a time. A second instance would race the
+// first on the SQLite WAL AND — worse — the crash-residue sweep would read
+// the FIRST instance's live host as an orphan and kill it. The single-
+// instance lock is what makes "a live host in the pid ledger means the app
+// died" a sound conclusion.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+}
 
 // The entry lives in src/main; without an explicit userData Electron would
 // call the app "Electron" and use %APPDATA%\Electron. Default data home is
@@ -100,6 +110,10 @@ const supervisor = createHostSupervisor({
       stdio: "pipe",
       env: { ...process.env, CUBICLE_DATA_DIR: dataDir },
     });
+    // 票 10: record who we just spawned — if THIS app is force-killed, the
+    // orphaned host is still holding the SQLite WAL; the next launch's
+    // sweepCrashResidue reads this line and kills it before spawning a new one.
+    recordHostPid({ dataDir, pid: child.pid });
     // Host stderr → <dataDir>/agenthost.log, so a silent crash leaves evidence.
     child.stderr?.on("data", (chunk) => {
       try {
@@ -286,6 +300,27 @@ const exitCoordinator = createExitCoordinator({
 });
 
 app.whenReady().then(async () => {
+  // 票 10: sweep crash residue BEFORE the first host spawns — an orphaned
+  // AgentHost from a force-killed launch is a second SQLite writer, and its
+  // engine children are the orphan processes the ticket forbids. (The single-
+  // instance lock above guarantees any live host in the ledgers IS residue.)
+  try {
+    const swept = await sweepCrashResidue({
+      dataDir: resolveDataDir(),
+      log: (message) => {
+        try {
+          appendFileSync(path.join(resolveDataDir(), "agenthost.log"), `crash sweep: ${message}\n`);
+        } catch {
+          // evidence is best-effort
+        }
+      },
+    });
+    if (swept.host.checked > 0 || Object.values(swept.engines).some((outcome) => outcome.checked > 0)) {
+      console.log(`crash residue swept: host=${JSON.stringify(swept.host)} engines=${JSON.stringify(swept.engines)}`);
+    }
+  } catch {
+    // residue sweep must never block boot; the ledgers stay for next launch
+  }
   supervisor.start();
   createMainWindow();
 

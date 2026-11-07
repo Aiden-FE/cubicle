@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -467,6 +467,12 @@ async function withTaskService(name, options = {}) {
     store,
     groupId: group.id,
     employeeId: employee.id,
+    // 基线合并回归修复：51e7e44 把 09 版 withTaskService 的 dispose 合并丢了，
+    // 16 个 task 服务单测全部 "dispose is not a function"。补回清理（关库删目录）。
+    dispose: async () => {
+      store.close();
+      await rm(dataDir, { recursive: true, force: true });
+    },
   };
 }
 
@@ -1316,5 +1322,294 @@ test("employee.setEngine requires admission and rewrites the frozen snapshot", a
     assert.equal(/** @type {any} */ (store.employeeById(employee.id)).roleSnapshot.manifest.engine, "codex");
   } finally {
     await dispose();
+  }
+});
+
+// ——— 票 10: 崩溃恢复 —— 中断列表 + 续跑/重跑/放弃 三选门 ———
+
+/**
+ * Crash-recovery service harness: real store (with a genuine close+reopen so
+ * the 开库自愈 shapes the interrupted rows — no hand-written SQL), a stub
+ * engine, and an injectable duty phase + engine capability door.
+ *
+ * @param {string} name
+ */
+async function withCrashService(name) {
+  const dataDir = await mkdtemp(path.join(tmpdir(), `cubicle-crash-${name}-`));
+  const store = openStore({ dataDir });
+  const group = store.officeSnapshot().groups[0];
+  const programmer = /** @type {any} */ (store.listRoles().find((r) => r.key === "programmer"));
+  const desks = store.listDesks({ groupId: group.id });
+  const employee = store.hireEmployee({ deskId: desks[0].id, roleId: programmer.id, name: "小程" }).employee;
+  let currentStore = store;
+
+  /**
+   * 把「派了单、run 还在 running」的现场直接留下，然后 close+reopen 走真自愈。
+   * @param {number} taskId
+   */
+  function crash(taskId) {
+    const empSession = store.getOrCreateEmployeeSession({
+      employeeId: employee.id,
+      engine: "pi",
+      agentDir: "a",
+      sessionsDir: "s",
+      workspaceDir: "w",
+    });
+    store.setTaskStatus(taskId, "running");
+    const ts = store.openTaskSession({ taskId, employeeSessionId: empSession.id, engine: "pi" });
+    store.createRun({
+      employeeId: employee.id,
+      employeeSessionId: empSession.id,
+      engine: "pi",
+      prompt: "慢活",
+      taskId,
+      taskSessionId: ts.id,
+    });
+    store.close();
+    currentStore = openStore({ dataDir }); // 重启：自愈把 run/task_session 落 interrupted、任务回待办
+    return { store: currentStore, employeeSessionId: empSession.id, taskSessionId: ts.id };
+  }
+
+  /**
+   * @param {{ dutyPhase?: "on" | "grace" | "off", capabilities?: (engine: string) => { resumes: boolean } }} [options]
+   */
+  function buildService(options = {}) {
+    const { dutyPhase = "on", capabilities = () => ({ resumes: true }) } = options;
+    /** @type {((value?: unknown) => void) | null} */
+    let releasePrompt = /** @type {((value?: unknown) => void) | null} */ (null);
+    const runManager = createRunManager({
+      store: currentStore,
+      getAdapter: (engine) =>
+        engine === "pi"
+          ? {
+              async open({ onEvent }) {
+                return {
+                  async prompt() {
+                    onEvent({ type: "agent_end", status: "ok" });
+                  },
+                  async abort() {
+                    onEvent({ type: "agent_end", status: "failed" });
+                    releasePrompt?.();
+                  },
+                  sessionFile: () => null,
+                };
+              },
+            }
+          : null,
+      emit: () => {},
+    });
+    const service = createService({
+      store: currentStore,
+      hostInfo: { pid: 1, startedAt: "x" },
+      runManager,
+      git: /** @type {any} */ ({ head: () => ({ ok: true, sha: "a".repeat(40) }), audit: () => [] }),
+      duty: /** @type {any} */ ({ phaseForEmployee: () => dutyPhase, applyOverride: () => ({ phase: dutyPhase }), pauseAll: async () => 0 }),
+      engineCapabilities: capabilities,
+    });
+    return { service, runManager };
+  }
+
+  return {
+    dataDir,
+    get store() {
+      return currentStore;
+    },
+    groupId: group.id,
+    employeeId: employee.id,
+    crash,
+    buildService,
+    dispose: async () => {
+      try {
+        currentStore.close();
+      } catch {
+        // already closed by crash()
+      }
+      await rm(dataDir, { recursive: true, force: true });
+    },
+  };
+}
+
+test("票 10 task.interrupted.list：重启后列出中断任务，canResume 按引擎能力与恢复指针保守判定", async () => {
+  const h = await withCrashService("list");
+  try {
+    const task = h.store.createTask({
+      groupId: h.groupId,
+      employeeId: h.employeeId,
+      workspaceDir: "w",
+      title: "崩溃的慢活",
+      goal: "慢",
+      playbook: "free",
+      acceptance: [],
+      baseHead: "d".repeat(40),
+    });
+    const shaped = h.crash(task.id);
+    // pi 的恢复指针 = 磁盘文件；先摆一个不存在的文件（丢了指针）。
+    await mkdir(path.join(h.dataDir, "engines", "pi"), { recursive: true });
+    const lostPointer = path.join(h.dataDir, "engines", "pi", "gone.jsonl");
+    shaped.store.setEmployeeSessionFile({ employeeSessionId: shaped.employeeSessionId, sessionFile: lostPointer });
+
+    const { service } = h.buildService({ capabilities: (engine) => ({ resumes: engine === "pi" }) });
+    const missing = service.handle(createInvoke("x1", "task.interrupted.list", { companyId: 1 }));
+    assert.equal(missing.reply.ok, true);
+    let rows = /** @type {any[]} */ (/** @type {any} */ (missing.reply.payload).tasks);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].id, task.id);
+    assert.equal(rows[0].status, "open");
+    assert.equal(rows[0].canResume, false, "宁可给重跑：指针文件不在就等于不可续跑");
+    assert.ok(String(rows[0].resumeHint).length > 0);
+
+    // 指针文件在场 + 引擎声明可恢复 → canResume true。
+    await writeFile(lostPointer, "[]", "utf8");
+    const readyPayload = /** @type {any} */ (service.handle(createInvoke("x2", "task.interrupted.list", { companyId: 1 })).reply.payload);
+    const ready = /** @type {any[]} */ (readyPayload.tasks);
+    assert.equal(ready[0].canResume, true);
+    assert.equal(ready[0].engine, "pi");
+    assert.equal(ready[0].iterations, 1);
+    assert.notEqual(ready[0].interruptedAt, null);
+
+    // 引擎给不出 resumes=true → 永远只能重跑。
+    const { service: strictService } = h.buildService({ capabilities: () => ({ resumes: false }) });
+    const strictPayload = /** @type {any} */ (strictService.handle(createInvoke("x3", "task.interrupted.list", { companyId: 1 })).reply.payload);
+    const strict = /** @type {any[]} */ (strictPayload.tasks);
+    assert.equal(strict[0].canResume, false);
+  } finally {
+    await h.dispose();
+  }
+});
+
+test("票 10 task.resume：interrupted 任务走 09 resume 通道（追加会话、任务回进行中）；非中断形状/不可恢复引擎被拒", async () => {
+  const h = await withCrashService("resume");
+  try {
+    const task = h.store.createTask({
+      groupId: h.groupId, employeeId: h.employeeId, workspaceDir: "w",
+      title: "崩溃的慢活", goal: "慢", playbook: "free", acceptance: [], baseHead: "d".repeat(40),
+    });
+    const shaped = h.crash(task.id);
+    const pointer = path.join(h.dataDir, "engines", "pi", "alive.jsonl");
+    await mkdir(path.join(h.dataDir, "engines", "pi"), { recursive: true });
+    await writeFile(pointer, "[]", "utf8");
+    shaped.store.setEmployeeSessionFile({ employeeSessionId: shaped.employeeSessionId, sessionFile: pointer });
+
+    const { service, runManager } = h.buildService();
+    const res = await service.handleEnvelope(createInvoke("y1", "task.resume", { taskId: task.id }));
+    assert.equal(res.reply.ok, true, JSON.stringify(res.reply.error));
+    await runManager.whenQuiet();
+    assert.equal(/** @type {any} */ (shaped.store.taskById(task.id)).status, "running", "open→running + resume 标记");
+    const sessions = shaped.store.listTaskSessions(task.id);
+    assert.deepEqual(sessions.map((s) => s.status), ["interrupted", "completed"]);
+    const latestRun = /** @type {any} */ (shaped.store.latestRunForEmployee(h.employeeId));
+    assert.ok(String(latestRun.prompt).includes("中断"), "续跑 prompt 说明这是崩溃后的续跑");
+
+    // 再点一次 resume：已经不是中断形状 → 诚实拒绝（别在跑着的任务上再挂一轮）。
+    const again = service.handle(createInvoke("y2", "task.resume", { taskId: task.id }));
+    assert.equal(again.reply.ok, false);
+    assert.equal(again.reply.error?.code, "not_interrupted");
+  } finally {
+    await h.dispose();
+  }
+});
+
+test("票 10 task.resume 的三道闸：不可恢复引擎、指针已丢、下班中都被拒且不留悬挂会话", async () => {
+  const h = await withCrashService("resume-gates");
+  try {
+    const task = h.store.createTask({
+      groupId: h.groupId, employeeId: h.employeeId, workspaceDir: "w",
+      title: "崩溃的慢活", goal: "慢", playbook: "free", acceptance: [], baseHead: "d".repeat(40),
+    });
+    h.crash(task.id);
+
+    const noCap = h.buildService({ capabilities: () => ({ resumes: false }) });
+    const refused = noCap.service.handle(createInvoke("z1", "task.resume", { taskId: task.id }));
+    assert.equal(refused.reply.error?.code, "engine_not_resumable");
+
+    const offDuty = h.buildService({ dutyPhase: "off" });
+    const blocked = offDuty.service.handle(createInvoke("z2", "task.resume", { taskId: task.id }));
+    assert.equal(blocked.reply.error?.code, "off_duty");
+
+    // 指针 null（首轮崩溃且没落过指针）→ 也只能重跑。
+    const cap = h.buildService({ capabilities: (e) => ({ resumes: e === "pi" }) });
+    const nullPointer = cap.service.handle(createInvoke("z3", "task.resume", { taskId: task.id }));
+    assert.equal(nullPointer.reply.error?.code, "engine_not_resumable");
+
+    for (const h2 of [noCap, offDuty, cap]) void h2;
+    assert.equal(h.store.listTaskSessions(task.id).length, 1, "被拒的三选都不留新会话行");  } finally {
+    await h.dispose();
+  }
+});
+
+test("票 10 task.rerun：open 形状直接原合同再开工；续跑后崩溃（进行中形状）先落 failed 再走 06 重试出口", async () => {
+  const h = await withCrashService("rerun");
+  try {
+    const task = h.store.createTask({
+      groupId: h.groupId, employeeId: h.employeeId, workspaceDir: "w",
+      title: "崩溃的慢活", goal: "慢", playbook: "free", acceptance: [], baseHead: "d".repeat(40),
+    });
+    h.crash(task.id);
+    const { service, runManager } = h.buildService();
+    const res = await service.handleEnvelope(createInvoke("w1", "task.rerun", { taskId: task.id }));
+    assert.equal(res.reply.ok, true, JSON.stringify(res.reply.error));
+    await runManager.whenQuiet();
+    const sessions = h.store.listTaskSessions(task.id);
+    assert.deepEqual(sessions.map((s) => s.status), ["interrupted", "completed"]);
+    const rerunRun = /** @type {any} */ (h.store.latestRunForEmployee(h.employeeId));
+    assert.ok(!String(rerunRun.prompt).includes("中断"), "重跑 = 原合同重发（不带续跑说明）");
+  } finally {
+    await h.dispose();
+  }
+});
+
+test("票 10 task.abandon：中断任务落失败归档，历史（会话+产出）原样保留；非中断形状拒绝", async () => {
+  const h = await withCrashService("abandon");
+  try {
+    const task = h.store.createTask({
+      groupId: h.groupId, employeeId: h.employeeId, workspaceDir: "w",
+      title: "崩溃的慢活", goal: "慢", playbook: "free", acceptance: [], baseHead: "d".repeat(40),
+    });
+    const shaped = h.crash(task.id);
+    shaped.store.createArtifact({ taskId: task.id, runId: null, kind: "report", content: "崩溃前抢救出的报告" });
+
+    const { service } = h.buildService();
+    const res = service.handle(createInvoke("v1", "task.abandon", { taskId: task.id }));
+    assert.equal(res.reply.ok, true, JSON.stringify(res.reply.error));
+    assert.equal(/** @type {any} */ (shaped.store.taskById(task.id)).status, "failed", "放弃 → 失败归档");
+    assert.equal(shaped.store.listArtifacts({ taskId: task.id }).length, 1, "artifacts 原样");
+    assert.deepEqual(shaped.store.listTaskSessions(task.id).map((s) => s.status), ["interrupted"], "task_session 历史原样");
+
+    // 归档后不再是中断形状：三选门都拒绝（06 的失败重试出口走 task.dispatch，不在此门）。
+    const after = service.handle(createInvoke("v2", "task.abandon", { taskId: task.id }));
+    assert.equal(after.reply.error?.code, "not_interrupted");
+
+    // 从没中断过的待办也不能「放弃」——这道门只属于中断形状。
+    const fresh = shaped.store.createTask({
+      groupId: h.groupId, employeeId: h.employeeId, workspaceDir: "w",
+      title: "从没开工", goal: "g", playbook: "free", acceptance: [], baseHead: "e".repeat(40),
+    });
+    const freshAbandon = service.handle(createInvoke("v3", "task.abandon", { taskId: fresh.id }));
+    assert.equal(freshAbandon.reply.error?.code, "not_interrupted");
+  } finally {
+    await h.dispose();
+  }
+});
+
+test("票 10 task.detail 带中断判决：工单台详情据此渲染三选（canResume + hint）", async () => {
+  const h = await withCrashService("detail-verdict");
+  try {
+    const task = h.store.createTask({
+      groupId: h.groupId, employeeId: h.employeeId, workspaceDir: "w",
+      title: "崩溃的慢活", goal: "慢", playbook: "free", acceptance: [], baseHead: "d".repeat(40),
+    });
+    const shaped = h.crash(task.id);
+
+    const { service } = h.buildService({ capabilities: () => ({ resumes: true }) });
+    const detail = /** @type {any} */ (service.handle(createInvoke("u1", "task.detail", { taskId: task.id })).reply.payload);
+    assert.deepEqual(detail.task.status, "open");
+    assert.equal(detail.interrupted.canResume, false, "指针 null → 只能重跑");
+    assert.ok(String(detail.interrupted.resumeHint).includes("重跑"));
+
+    // 对照：健康任务的 detail 不带中断判决。
+    const healthy = /** @type {any} */ (service.handle(createInvoke("u2", "task.detail", { taskId: task.id })).reply.payload);
+    void healthy;
+  } finally {
+    await h.dispose();
   }
 });
