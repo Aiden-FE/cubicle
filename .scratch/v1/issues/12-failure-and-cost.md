@@ -4,7 +4,7 @@
 
 **Blocked by:** 06
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] 失败显示人话原因（不是堆栈），并给出一键重试
 - [ ] 重试创建新会话，历史与产出保留

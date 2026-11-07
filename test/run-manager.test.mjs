@@ -621,3 +621,178 @@ async function waitForActive(
   }
   throw new Error(`activeRuns never settled at ${wanted}: got ${manager.activeRuns().length}`);
 }
+
+// — 失败与成本 (ticket 12: 人话原因落库 / 预算软闸自动 pause / usage 三态) —
+
+/** Create a task under the ctx employee with a token budget (票 12). */
+function taskWithBudget(
+  /** @type {{ store: ReturnType<typeof openStore>, employeeId: number }} */ ctx,
+  /** @type {number} */ tokenBudget,
+) {
+  const group = ctx.store.officeSnapshot().groups[0];
+  return ctx.store.createTask({
+    groupId: group.id,
+    employeeId: ctx.employeeId,
+    workspaceDir: "C:\\nowhere",
+    title: "预算活",
+    goal: "g",
+    playbook: "free",
+    acceptance: [],
+    baseHead: "d".repeat(40),
+    tokenBudget,
+  });
+}
+
+test("失败收尾把 explainRunFailure 的人话写进 run.fail_reason（不是堆栈）", async () => {
+  const stub = makeStub({ openThrows: { code: "engine_not_configured" } });
+  const ctx = await withManager("fail-reason", { adapter: stub });
+  try {
+    const started = ctx.manager.start({ employeeId: ctx.employeeId, text: "随便说" });
+    await ctx.manager.whenQuiet();
+
+    const run = /** @type {any} */ (ctx.store.runById(started.run.id));
+    assert.equal(run.status, "failed");
+    assert.match(run.failReason, /引擎还没配置模型/);
+    assert.match(run.failReason, /engine_not_configured/);
+    assert.doesNotMatch(String(run.failReason), /\n\s+at /);
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("取消的 run 人话是已取消；paused（下班/预算）不带失败原因", async () => {
+  const stub = makeStub({ pending: true });
+  const ctx = await withManager("fail-cancel", { adapter: stub });
+  try {
+    const chat = ctx.manager.start({ employeeId: ctx.employeeId, text: "说得很长" });
+    await ctx.manager.abort({ employeeId: ctx.employeeId });
+    await ctx.manager.whenQuiet();
+    assert.match(/** @type {any} */ (ctx.store.runById(chat.run.id)).failReason, /已取消/);
+
+    const work = ctx.manager.start({ employeeId: ctx.employeeId, text: "下班会暂停" });
+    await ctx.manager.pause({ employeeId: ctx.employeeId });
+    await ctx.manager.whenQuiet();
+    const pausedRun = /** @type {any} */ (ctx.store.runById(work.run.id));
+    assert.equal(pausedRun.status, "paused");
+    assert.equal(pausedRun.failReason, null, "暂停不是失败，没有失败原因可读");
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("引擎没发 agent_end 就收场：人话写明「没有回音」", async () => {
+  const stub = makeStub({ events: [] });
+  const ctx = await withManager("fail-silent", { adapter: stub });
+  try {
+    const started = ctx.manager.start({ employeeId: ctx.employeeId, text: "没回音" });
+    await ctx.manager.whenQuiet();
+    assert.match(/** @type {any} */ (ctx.store.runById(started.run.id)).failReason, /没有回音/);
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("turn_end 报全 0 usage：落「计量到 0」不塌 null；没报才 null（缺失与 0 严格区分）", async () => {
+  const stub = makeStub({
+    events: [{ type: "turn_end", status: "ok", usage: { input: 0, cachedInput: 0, cacheWrite: 0, output: 0, reasoning: 0 } }, AGENT_END],
+  });
+  const ctx = await withManager("zero-usage", { adapter: stub });
+  try {
+    const started = ctx.manager.start({ employeeId: ctx.employeeId, text: "报了 0" });
+    await ctx.manager.whenQuiet();
+    const run = /** @type {any} */ (ctx.store.runById(started.run.id));
+    assert.deepEqual(run.usage, { input: 0, cachedInput: 0, cacheWrite: 0, output: 0, reasoning: 0 });
+    const summary = /** @type {any} */ (ctx.store.taskTokenSummary(started.run.taskId ?? 0));
+    assert.equal(summary.measured, false, "没有 task 的闲聊 run 不该出现在任何任务账单里");
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("任务 run 的事件 payload 携带 taskId（三层 token 可见的 UI 路由）", async () => {
+  const stub = makeStub({ events: [AGENT_END] });
+  const ctx = await withManager("event-taskid", { adapter: stub });
+  try {
+    const task = taskWithBudget(ctx, 500);
+    const started = ctx.manager.start({ employeeId: ctx.employeeId, text: "干活", task: { id: task.id } });
+    await ctx.manager.whenQuiet();
+    assert.ok(ctx.emitted.every((p) => p.taskId === task.id), "task run 的每个事件都带 taskId");
+    assert.ok(started.run.taskId === task.id);
+
+    ctx.manager.start({ employeeId: ctx.employeeId, text: "闲聊" });
+    await ctx.manager.whenQuiet();
+    assert.ok(ctx.emitted.slice(-2).every((p) => p.taskId === null), "闲聊事件 taskId 为 null");
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("预算软闸：80% 发一次 budget_warning（带 tokens/budget），不到 100% 不打断", async () => {
+  const stub = makeStub({
+    events: [
+      { type: "turn_end", status: "ok", usage: { input: 300, cachedInput: 0, cacheWrite: 0, output: 10, reasoning: 0 } },
+      { type: "turn_end", status: "ok", usage: { input: 90, cachedInput: 0, cacheWrite: 0, output: 5, reasoning: 0 } }, // 累计 405/500 = 81%
+      AGENT_END,
+    ],
+  });
+  const ctx = await withManager("budget-warn", { adapter: stub });
+  try {
+    const task = taskWithBudget(ctx, 500);
+    const started = ctx.manager.start({ employeeId: ctx.employeeId, text: "干活", task: { id: task.id } });
+    await ctx.manager.whenQuiet();
+
+    const warns = ctx.emitted.filter((p) => p.event.type === "budget_warning");
+    assert.equal(warns.length, 1, "黄点只报一次，不刷屏");
+    assert.equal(warns[0].event.tokens, 405);
+    assert.equal(warns[0].event.budget, 500);
+    assert.equal(warns[0].taskId, task.id);
+    assert.deepEqual(ctx.emitted.filter((p) => p.event.type === "budget_exhausted"), []);
+    const run = /** @type {any} */ (ctx.store.runById(started.run.id));
+    assert.equal(run.status, "completed", "warn 不掐 run — 黄点只是提示");
+    assert.equal(/** @type {any} */ (ctx.store.taskById(task.id)).status, "running", "状态搬运仍归 task hook");
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("预算软闸 100%：发 budget_exhausted 后自动 pause — 复用 09 的 paused 落盘层", async () => {
+  const stub = makeStub({
+    events: [
+      { type: "turn_end", status: "ok", usage: { input: 300, cachedInput: 0, cacheWrite: 0, output: 10, reasoning: 0 } }, // 62%
+      { type: "turn_end", status: "ok", usage: { input: 150, cachedInput: 0, cacheWrite: 0, output: 40, reasoning: 0 } }, // 累计 500/500 = 100%
+      AGENT_END, // 到顶后引擎再说什么都不该再算
+    ],
+    pending: true,
+  });
+  const ctx = await withManager("budget-exhausted", { adapter: stub });
+  try {
+    const task = taskWithBudget(ctx, 500);
+    const hookCalls = /** @type {any[]} */ ([]);
+    const manager = createRunManager({
+      store: ctx.store,
+      getAdapter: () => stub,
+      emit: (payload) => ctx.emitted.push(payload),
+      onTaskRunFinished: (/** @type {any} */ call) => hookCalls.push(call),
+    });
+
+    const started = manager.start({ employeeId: ctx.employeeId, text: "烧钱", task: { id: task.id } });
+    await manager.whenQuiet();
+
+    const exhausted = ctx.emitted.filter((p) => p.event.type === "budget_exhausted");
+    assert.equal(exhausted.length, 1);
+    assert.ok(Number(exhausted[0].event.tokens) >= 500);
+    assert.equal(exhausted[0].taskId, task.id);
+
+    const run = /** @type {any} */ (ctx.store.runById(started.run.id));
+    assert.equal(run.status, "paused", "到顶自动暂停 = 09 的 paused 落盘层，不新增第六态");
+    assert.notEqual(run.usage, null, "暂停时把已烧的 usage 落库（账单不说谎）");
+    const taskSession = /** @type {any} */ (ctx.store.latestTaskSessionForTask(task.id));
+    assert.equal(taskSession.status, "paused");
+    assert.equal(/** @type {any} */ (ctx.store.taskById(task.id)).status, "running", "任务五状态不动，挂「预算到顶」由视图判");
+    assert.equal(hookCalls.length, 1);
+    assert.equal(hookCalls[0].status, "paused", "task hook 认得 paused：不落四件套");
+    assert.equal(stub.state.aborts, 1, "暂停走引擎 abort — 到顶后不再产生新的工具调用");
+  } finally {
+    await ctx.dispose();
+  }
+});

@@ -1239,3 +1239,222 @@ test("旧库（run/task_session CHECK 没有 paused）开库时表重建，pause
     await dispose();
   }
 });
+
+// — 票 12: 失败人话原因 / 任务级 token 预算 / 三层聚合的未计量三态 —
+
+/** Open a task session + run under a task (票 12 helper mirrors pauseTaskRun). */
+function runUnderTask(
+  /** @type {ReturnType<typeof openStore>} */ store,
+  /** @type {{ id: number, employeeId: number }} */ task,
+) {
+  const { session, taskSession, run } = pauseTaskRun(store, task);
+  return { session, taskSession, run };
+}
+
+test("失败的人话原因落在 run 行上，任务按最近一轮失败会话读回", async () => {
+  const { dataDir, dispose } = await withTempDir("fail-reason");
+  try {
+    const store = openStore({ dataDir });
+    const employee = hireProgrammer(store);
+    const task = makeTask(store, employee);
+    store.setTaskStatus(task.id, "running");
+
+    const first = runUnderTask(store, task);
+    const failedRun = store.finishRun({
+      runId: first.run.id,
+      status: "failed",
+      failReason: "引擎报错（weird_code）：模型侧拒绝了这个请求。",
+    });
+    assert.equal(/** @type {any} */ (failedRun).failReason, "引擎报错（weird_code）：模型侧拒绝了这个请求。");
+    assert.equal(store.latestFailReasonForTask(task.id), "引擎报错（weird_code）：模型侧拒绝了这个请求。");
+
+    // 重试一轮跑干净了：最近一轮不再失败，人话原因跟着换掉。
+    store.setTaskStatus(task.id, "failed"); // task hook 语义：失败收尾落「失败」
+    store.setTaskStatus(task.id, "running"); // 06 的重试出口
+    const second = runUnderTask(store, task);
+    store.finishRun({ runId: second.run.id, status: "completed" });
+    assert.equal(store.latestFailReasonForTask(task.id), null, "completed 会话没有失败原因可读");
+
+    store.close();
+    const reopened = openStore({ dataDir });
+    assert.equal(/** @type {any} */ (reopened.runById(first.run.id)).failReason, "引擎报错（weird_code）：模型侧拒绝了这个请求。", "fail_reason 落盘 survives reopen");
+    reopened.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("任务行带自己的 token 预算：创建时写入、没给默认 50 万、+50% 落库", async () => {
+  const { dataDir, dispose } = await withTempDir("task-budget");
+  try {
+    const store = openStore({ dataDir });
+    const employee = hireProgrammer(store);
+
+    const small = store.createTask({
+      groupId: store.officeSnapshot().groups[0].id,
+      employeeId: employee.id,
+      workspaceDir: "w",
+      title: "小预算",
+      goal: "g",
+      playbook: "free",
+      acceptance: [],
+      baseHead: "0".repeat(40),
+      tokenBudget: 500,
+    });
+    assert.equal(/** @type {any} */ (store.taskById(small.id)).tokenBudget, 500);
+
+    const plain = makeTask(store, employee);
+    assert.equal(/** @type {any} */ (store.taskById(plain.id)).tokenBudget, 500_000, "没指定预算 = 预设角色的 50 万");
+
+    store.setTaskTokenBudget(small.id, 750);
+    assert.equal(/** @type {any} */ (store.taskById(small.id)).tokenBudget, 750, "+50% 是就地改这一张工单的预算");
+
+    store.close();
+    const reopened = openStore({ dataDir });
+    assert.equal(/** @type {any} */ (reopened.taskById(small.id)).tokenBudget, 750, "预算落库 survives reopen（可再审）");
+    reopened.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("finishRun 把全 0 usage 记成「计量到 0」，不塌回 null（缺失与 0 严格区分）", async () => {
+  const { dataDir, dispose } = await withTempDir("zero-vs-null");
+  try {
+    const store = openStore({ dataDir });
+    const employee = hireProgrammer(store);
+    const session = store.getOrCreateEmployeeSession({ employeeId: employee.id, engine: "pi", agentDir: "a", sessionsDir: "s", workspaceDir: "w" });
+
+    const measuredZero = store.createRun({ employeeId: employee.id, employeeSessionId: session.id, engine: "pi", prompt: "报了 0" });
+    const zero = /** @type {any} */ (store.finishRun({
+      runId: measuredZero.id,
+      status: "completed",
+      usage: { input: 0, cachedInput: 0, cacheWrite: 0, output: 0, reasoning: 0 },
+    }));
+    assert.deepEqual(zero.usage, { input: 0, cachedInput: 0, cacheWrite: 0, output: 0, reasoning: 0 }, "引擎真报了 0，就存 0——不被塌成 null");
+
+    const unreported = store.createRun({ employeeId: employee.id, employeeSessionId: session.id, engine: "pi", prompt: "啥也没报" });
+    const none = /** @type {any} */ (store.finishRun({ runId: unreported.id, status: "completed" }));
+    assert.equal(none.usage, null, "没报 usage 才是 null（未计量）");
+
+    store.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("taskTokenSummary 三态：全 null 会话 = 未计量(measured=false)；一条有用量即 measured", async () => {
+  const { dataDir, dispose } = await withTempDir("task-measured");
+  try {
+    const store = openStore({ dataDir });
+    const employee = hireProgrammer(store);
+    const task = makeTask(store, employee);
+    store.setTaskStatus(task.id, "running");
+
+    const first = runUnderTask(store, task);
+    store.finishRun({ runId: first.run.id, status: "completed" }); // 未计量的一轮
+    const before = /** @type {any} */ (store.taskTokenSummary(task.id));
+    assert.equal(before.total, 0);
+    assert.equal(before.measured, false, "没有任何一轮报过用量 → 未计量，不是 0");
+
+    const second = runUnderTask(store, task); // 重试追加新会话（任务仍在「进行中」）
+    store.finishRun({ runId: second.run.id, status: "completed", usage: { input: 100, cachedInput: 0, cacheWrite: 0, output: 20, reasoning: 0 } });
+    const after = /** @type {any} */ (store.taskTokenSummary(task.id));
+    assert.equal(after.total, 120);
+    assert.equal(after.measured, true, "只要有一轮报过用量，任务就是计量过的");
+
+    store.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("employeeTokenTotals：员工级聚合走信封的数据源；没用量行的员工是未计量", async () => {
+  const { dataDir, dispose } = await withTempDir("employee-totals");
+  try {
+    const store = openStore({ dataDir });
+    const group = store.officeSnapshot().groups[0];
+    const desks = store.listDesks({ groupId: group.id });
+    const programmer = /** @type {any} */ (store.listRoles().find((r) => r.key === "programmer"));
+    const a = store.hireEmployee({ deskId: desks[0].id, roleId: programmer.id, name: "甲" }).employee;
+    const b = store.hireEmployee({ deskId: desks[1].id, roleId: programmer.id, name: "乙" }).employee;
+
+    const sessionA = store.getOrCreateEmployeeSession({ employeeId: a.id, engine: "pi", agentDir: "a", sessionsDir: "s", workspaceDir: "w" });
+    const runA1 = store.createRun({ employeeId: a.id, employeeSessionId: sessionA.id, engine: "pi", prompt: "活一" });
+    store.finishRun({ runId: runA1.id, status: "completed", usage: { input: 100, cachedInput: 10, cacheWrite: 0, output: 20, reasoning: 5 } });
+    const runA2 = store.createRun({ employeeId: a.id, employeeSessionId: sessionA.id, engine: "pi", prompt: "活二" });
+    store.finishRun({ runId: runA2.id, status: "completed" }); // 未计量的一轮也计入员工名下
+
+    const sessionB = store.getOrCreateEmployeeSession({ employeeId: b.id, engine: "pi", agentDir: "a2", sessionsDir: "s2", workspaceDir: "w2" });
+    const runB = store.createRun({ employeeId: b.id, employeeSessionId: sessionB.id, engine: "pi", prompt: "乙的活" });
+    store.finishRun({ runId: runB.id, status: "completed" }); // 从没报过用量
+
+    const totals = /** @type {any} */ (store.employeeTokenTotals());
+    assert.deepEqual(totals[String(a.id)], { total: 135, measured: true });
+    assert.deepEqual(totals[String(b.id)], { total: 0, measured: false }, "从没报过用量的员工：未计量，不是 0");
+    store.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("companyTokenTotals：公司级聚合按公司隔离（左轨公司面板的数据源）", async () => {
+  const { dataDir, dispose } = await withTempDir("company-totals");
+  try {
+    const store = openStore({ dataDir });
+    const { aGroup, bGroup, aEmployee, bEmployee } = seedTwoCompanies(store);
+
+    const sessionA = store.getOrCreateEmployeeSession({ employeeId: aEmployee.id, engine: "pi", agentDir: "a", sessionsDir: "s", workspaceDir: "w" });
+    const task = taskAtStatus(store, aGroup.id, aEmployee, "running", "A 工单");
+    const { run } = pauseTaskRun(store, task);
+    store.finishRun({ runId: run.id, status: "completed", usage: { input: 300, cachedInput: 0, cacheWrite: 0, output: 60, reasoning: 0 } });
+    void sessionA;
+
+    const sessionB = store.getOrCreateEmployeeSession({ employeeId: bEmployee.id, engine: "pi", agentDir: "a", sessionsDir: "s", workspaceDir: "w" });
+    const runB = store.createRun({ employeeId: bEmployee.id, employeeSessionId: sessionB.id, engine: "pi", prompt: "B 的活" });
+    store.finishRun({ runId: runB.id, status: "completed" }); // B 公司只跑过未计量的一轮
+
+    const totals = /** @type {any} */ (store.companyTokenTotals());
+    const companies = store.officeSnapshot().companies;
+    const aCompany = /** @type {any} */ (companies.find((/** @type {any} */ c) => c.name === "默认公司"));
+    const bCompany = /** @type {any} */ (companies.find((/** @type {any} */ c) => c.name === "远岸软件"));
+    assert.deepEqual(totals[String(aCompany.id)], { total: 360, measured: true });
+    assert.deepEqual(totals[String(bCompany.id)], { total: 0, measured: false }, "B 公司没计量过 → 未计量");
+
+    // officeSnapshot 直接把两张聚合带上（host 聚合走信封，渲染层只读）
+    const snapshot = /** @type {any} */ (store.officeSnapshot());
+    assert.deepEqual(snapshot.employeeTokens[String(aEmployee.id)], { total: 360, measured: true });
+    assert.deepEqual(snapshot.companyTokens[String(aCompany.id)], { total: 360, measured: true });
+    store.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("旧库（没有 fail_reason / token_budget 列）开库时补列，默认预算 50 万", async () => {
+  const { dataDir, dispose } = await withTempDir("t12-column-migration");
+  try {
+    const store = openStore({ dataDir });
+    const employee = hireProgrammer(store);
+    const task = makeTask(store, employee);
+    void employee;
+    store.close();
+
+    // Rewind: drop the ticket-12 columns the way an 09-era database lacks them.
+    const raw = new DatabaseSync(path.join(dataDir, "cubicle.db"));
+    raw.exec("ALTER TABLE task DROP COLUMN token_budget;");
+    raw.exec("ALTER TABLE run DROP COLUMN fail_reason;");
+    raw.close();
+
+    const reopened = openStore({ dataDir });
+    assert.equal(/** @type {any} */ (reopened.taskById(task.id)).tokenBudget, 500_000, "补列后旧任务落到默认预算");
+    const session = reopened.getOrCreateEmployeeSession({ employeeId: task.employeeId, engine: "pi", agentDir: "a", sessionsDir: "s", workspaceDir: "w" });
+    const nextSession = reopened.openTaskSession({ taskId: task.id, employeeSessionId: session.id, engine: "pi" });
+    const run = reopened.createRun({ employeeId: task.employeeId, employeeSessionId: session.id, engine: "pi", prompt: "重试", taskId: task.id, taskSessionId: nextSession.id });
+    const done = /** @type {any} */ (reopened.finishRun({ runId: run.id, status: "failed", failReason: "引擎没有回音就收场了" }));
+    assert.equal(done.failReason, "引擎没有回音就收场了", "补列后 fail_reason 写得进");
+    reopened.close();
+  } finally {
+    await dispose();
+  }
+});

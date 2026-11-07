@@ -1166,3 +1166,142 @@ test("task.list 行携带 latestSessionStatus：下班暂停后「进行中」�
     await ctx.dispose();
   }
 });
+
+// — 失败与成本 (ticket 12: 人话原因上信封 / +50% 落库续跑 / 快照 token 聚合) —
+
+test("task.create 把角色 cost 的预算抄进任务行（detail 带 budget 与 measured）", async () => {
+  const { service, employeeId, dispose } = await withTaskService("t12-budget-create");
+  try {
+    const created = /** @type {any} */ (serviceTaskCreate(service, employeeId, "加个欢迎语").task);
+    assert.equal(created.tokenBudget, 500_000, "预设程序员角色 cost.tokenBudgetPerTask = 50 万");
+
+    const detail = /** @type {any} */ (service.handle(createInvoke("d2", "task.detail", { taskId: created.id })).reply.payload);
+    assert.equal(detail.budget, 500_000);
+    assert.equal(detail.tokens.measured, false, "还没有任何一轮报过用量 → 未计量");
+  } finally {
+    await dispose();
+  }
+});
+
+test("task.detail 带最近一轮失败的人话原因（store 折叠，视图不重新推导）", async () => {
+  const { service, store, employeeId, dispose } = await withTaskService("t12-failure-detail");
+  try {
+    const created = /** @type {any} */ (serviceTaskCreate(service, employeeId, "会挂的活").task);
+    // 直接走 store 落一条失败会话（run-manager 写失败事实的门在 run-manager seam 钉）
+    store.setTaskStatus(created.id, "running");
+    const session = store.getOrCreateEmployeeSession({ employeeId, engine: "pi", agentDir: "a", sessionsDir: "s", workspaceDir: "w" });
+    const taskSession = store.openTaskSession({ taskId: created.id, employeeSessionId: session.id, engine: "pi" });
+    const run = store.createRun({ employeeId, employeeSessionId: session.id, engine: "pi", prompt: "干活", taskId: created.id, taskSessionId: taskSession.id });
+    store.finishRun({ runId: run.id, status: "failed", failReason: "引擎报错（weird_code）：模型侧拒绝了这个请求。" });
+    store.finishTaskSession({ taskSessionId: taskSession.id, status: "failed" });
+    store.setTaskStatus(created.id, "failed");
+
+    const detail = /** @type {any} */ (service.handle(createInvoke("f1", "task.detail", { taskId: created.id })).reply.payload);
+    assert.equal(detail.task.status, "failed");
+    assert.equal(detail.failure.reason, "引擎报错（weird_code）：模型侧拒绝了这个请求。");
+
+    // 干净的一轮盖过旧失败：failure 回到 null（重试成功后人话原因不残留）
+    store.setTaskStatus(created.id, "running");
+    const secondSession = store.openTaskSession({ taskId: created.id, employeeSessionId: session.id, engine: "pi" });
+    const secondRun = store.createRun({ employeeId, employeeSessionId: session.id, engine: "pi", prompt: "重试", taskId: created.id, taskSessionId: secondSession.id });
+    store.finishRun({ runId: secondRun.id, status: "completed" });
+    store.finishTaskSession({ taskSessionId: secondSession.id, status: "completed" });
+    const after = /** @type {any} */ (service.handle(createInvoke("f2", "task.detail", { taskId: created.id })).reply.payload);
+    assert.equal(after.failure.reason, null, "重试成功：上一轮的人话原因不再显示");
+  } finally {
+    await dispose();
+  }
+});
+
+test("task.extendBudget：预算到顶（paused）后一键 +50% — 落库 1.5× 并当场续跑", async () => {
+  const ctx = await withDutyService("t12-extend", { hold: true });
+  try {
+    const task = createOpenTask(ctx);
+    ctx.service.handle(createInvoke("x1", "task.dispatch", { taskId: task.id }));
+    const paused = await ctx.service.handleEnvelope(createInvoke("x2", "host.pauseAll", {}));
+    assert.equal(paused.reply.ok, true);
+
+    const extended = service_handle(ctx, "task.extendBudget", { taskId: task.id }, "x3");
+    assert.equal(extended.ok, true);
+    const payload = /** @type {any} */ (extended.payload);
+    assert.equal(payload.task.tokenBudget, 750_000, "50 万 → 75 万，落库可再审");
+    assert.equal(payload.resumed, true);
+
+    const sessions = ctx.store.listTaskSessions(task.id);
+    assert.equal(sessions.length, 2, "续跑 = 追加新会话（与 06/09 同构），历史保留");
+    assert.equal(sessions[0].status, "paused", "旧会话原样在场");
+    assert.equal(/** @type {any} */ (ctx.store.taskById(task.id)).status, "running", "五状态不动");
+    await new Promise((resolve) => setTimeout(resolve, 10)); // 续跑的 prompt 挂上后才有东西可 settle
+    ctx.settle();
+    await ctx.runManager.whenQuiet();
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("task.extendBudget：下班中的公司只涨预算不续跑（可懂的 resumed=false）", async () => {
+  const ctx = await withDutyService("t12-extend-offduty", { hold: true });
+  try {
+    const task = createOpenTask(ctx);
+    ctx.service.handle(createInvoke("y1", "task.dispatch", { taskId: task.id }));
+    await ctx.service.handleEnvelope(createInvoke("y2", "host.pauseAll", {}));
+    ctx.service.handle(createInvoke("y3", "duty.override", { companyId: ctx.companyId, mode: "off" }));
+
+    const extended = /** @type {any} */ (service_handle(ctx, "task.extendBudget", { taskId: task.id }, "y4"));
+    assert.equal(extended.ok, true);
+    assert.equal(extended.payload.task.tokenBudget, 750_000, "预算照样落库（可再审）");
+    assert.equal(extended.payload.resumed, false);
+    assert.match(extended.payload.resumeNote, /下班/);
+    assert.equal(ctx.store.listTaskSessions(task.id).length, 1, "没续跑就不该多一条会话");
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("task.extendBudget：员工还在跑时只涨预算（employee_busy 可懂），待办/未知工单被拒", async () => {
+  const ctx = await withDutyService("t12-extend-busy", { hold: true });
+  try {
+    const task = createOpenTask(ctx);
+    ctx.service.handle(createInvoke("z1", "task.dispatch", { taskId: task.id })); // 在跑（hold）
+
+    const extended = /** @type {any} */ (service_handle(ctx, "task.extendBudget", { taskId: task.id }, "z2"));
+    assert.equal(extended.ok, true);
+    assert.equal(extended.payload.task.tokenBudget, 750_000);
+    assert.equal(extended.payload.resumed, false);
+    assert.match(extended.payload.resumeNote, /还在跑/);
+
+    const open = createOpenTask(ctx);
+    const refused = ctx.service.handle(createInvoke("z3", "task.extendBudget", { taskId: open.id }));
+    assert.equal(refused.reply.error?.code, "invalid_transition", "待办还没开工，谈不上预算到顶");
+    const unknown = ctx.service.handle(createInvoke("z4", "task.extendBudget", { taskId: 987654 }));
+    assert.equal(unknown.reply.error?.code, "unknown_task");
+
+    await new Promise((resolve) => setTimeout(resolve, 10)); // 让 hold 住的 prompt 先挂上
+    ctx.settle();
+    await ctx.runManager.whenQuiet();
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("office.get 随快照带员工级与公司级 token 聚合（未计量 = measured:false，不是 0）", async () => {
+  const ctx = await withDutyService("t12-aggregates", {});
+  try {
+    const task = createOpenTask(ctx);
+    ctx.service.handle(createInvoke("g1", "task.dispatch", { taskId: task.id }));
+    await ctx.runManager.whenQuiet();
+
+    const snapshot = /** @type {any} */ (ctx.service.handle(createInvoke("g2", "office.get", {})).reply.payload);
+    assert.deepEqual(snapshot.employeeTokens[String(ctx.employeeId)], { total: 0, measured: false }, "stub 没报 usage → 未计量");
+    assert.deepEqual(snapshot.companyTokens[String(ctx.companyId)], { total: 0, measured: false });
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+/** helper: run a service method through the sync door, return the reply. */
+function service_handle(/** @type {any} */ ctx, /** @type {string} */ method, /** @type {unknown} */ payload, /** @type {string} */ id) {
+  const { reply } = ctx.service.handle(createInvoke(id, method, payload));
+  if (!reply.ok) throw Object.assign(new Error(`${method}: ${reply.error?.code}`), { reply });
+  return reply;
+}

@@ -310,6 +310,10 @@ function saveViewPrefs(prefs) {
  * @property {number} y
  * @property {DeskOccupantData | null} occupant
  *
+ * @typedef {object} TokenTotalData
+ * @property {number} total
+ * @property {boolean} measured false = 未计量（显示「未计量」而不是 0）
+ *
  * @typedef {object} OfficeSnapshotData
  * @property {{ id: number, name: string, createdAt: string }[]} companies
  * @property {number} activeCompanyId
@@ -317,6 +321,8 @@ function saveViewPrefs(prefs) {
  * @property {number | null} activeGroupId
  * @property {DeskData[]} desks
  * @property {Record<string, { running: number, review: number }>} taskCounts 票 08: 每公司活跃数（进行中/待验收）
+ * @property {Record<string, TokenTotalData>} employeeTokens 票 12: 员工级 token 聚合（名牌数据源）
+ * @property {Record<string, TokenTotalData>} companyTokens 票 12: 公司级 token 聚合（公司面板数据源）
  * @property {{ pid: number, startedAt: string, dataDir: string, dbPath: string }} host
  *
  * @typedef {object} HostStatusData

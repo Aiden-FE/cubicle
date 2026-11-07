@@ -4,6 +4,7 @@ import { appearanceFor } from "./roleAppearance.js";
 import { initialDeskActivity } from "./scene/deskActivity.js";
 import { initialMotion } from "./scene/idleMotion.js";
 import { deskSignals, bubbleTextFor } from "./scene/deskReadout.js";
+import { tokenText } from "./scene/tokenReadout.js";
 
 /**
  * The main canvas — always the office (hard constraint). Desks are drawn
@@ -49,6 +50,7 @@ export function OfficeFloor({ snapshot, status, bridgeError, onHireAt, onTalkTo,
             onHireAt={onHireAt}
             onTalkTo={onTalkTo}
             deskState={desk.occupant ? deskStates.get(desk.occupant.id) ?? null : null}
+            tokenSummary={desk.occupant ? snapshot?.employeeTokens?.[String(desk.occupant.id)] ?? null : null}
             viewPrefs={viewPrefs}
           />
         ))}
@@ -63,10 +65,11 @@ export function OfficeFloor({ snapshot, status, bridgeError, onHireAt, onTalkTo,
  *   onHireAt: (desk: import("./App.jsx").DeskData) => void,
  *   onTalkTo: (occupant: import("./App.jsx").DeskOccupantData) => void,
  *   deskState: import("./App.jsx").DeskState | null,
+ *   tokenSummary: import("./App.jsx").TokenTotalData | null,
  *   viewPrefs: import("./App.jsx").ViewPrefs,
  * }} props
  */
-function DeskCard({ desk, onHireAt, onTalkTo, deskState, viewPrefs }) {
+function DeskCard({ desk, onHireAt, onTalkTo, deskState, tokenSummary, viewPrefs }) {
   const occupant = desk.occupant;
   const empty = occupant === null;
   const openDesk = empty ? () => onHireAt(desk) : occupant ? () => onTalkTo(occupant) : undefined;
@@ -146,6 +149,15 @@ function DeskCard({ desk, onHireAt, onTalkTo, deskState, viewPrefs }) {
           title={`${occupant.name} · ${occupant.roleSnapshot.name}`}
         >
           {working ? "干活中…" : `${occupant.name} · ${occupant.roleSnapshot.name}`}
+          {/* 票 12 验收 3: 员工名牌上的员工级 token 聚合（host 聚合走信封）；
+              未计量的引擎显示「未计量」，不是 0。 */}
+          <span
+            className="desk-plate-token"
+            data-testid="desk-token"
+            data-measured={tokenSummary?.measured === true ? "true" : "false"}
+          >
+            {tokenText(tokenSummary)}
+          </span>
         </div>
       ) : null}
       {empty ? <div className="desk-plate desk-plate-empty">{desk.label} · 空闲</div> : null}

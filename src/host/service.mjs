@@ -10,6 +10,7 @@ import { appError } from "../shared/apperror.mjs";
 import { draftTask, rejectPrompt, taskPrompt } from "./task/playbook.mjs";
 import { engineConfigDir, enginePaths } from "./engine/paths.mjs";
 import { DEFAULT_SCHEDULE, validateSchedule } from "./duty/schedule.mjs";
+import { extendBudgetBy50 } from "./cost/budget.mjs";
 
 /**
  * @typedef {import("../shared/envelope.mjs").InvokeEnvelope} InvokeEnvelope
@@ -18,6 +19,40 @@ import { DEFAULT_SCHEDULE, validateSchedule } from "./duty/schedule.mjs";
  *
  * @typedef {{ reply: ReplyEnvelope, events: EventEnvelope[] }} HandleResult
  */
+
+/**
+ * 票 12: the employee's frozen role snapshot carries the cost policy
+ * (`cost.tokenBudgetPerTask`) — copy it onto the task at creation. A bad or
+ * missing value lets the store land the preset default; nothing here invents.
+ *
+ * @param {unknown} roleSnapshot
+ * @returns {number | undefined}
+ */
+function readRoleTokenBudget(roleSnapshot) {
+  const manifest = /** @type {Record<string, unknown> | undefined} */ (
+    /** @type {Record<string, unknown> | undefined} */ (roleSnapshot)?.manifest
+  );
+  const cost = /** @type {Record<string, unknown> | undefined} */ (manifest?.cost);
+  const budget = cost?.tokenBudgetPerTask;
+  return typeof budget === "number" && Number.isInteger(budget) && budget > 0 ? budget : undefined;
+}
+
+/**
+ * 票 12: the续跑 contract after the soft gate capped a task — the 票 09 resume
+ * channel, with the raised budget stated so the engine knows to continue
+ * (not restart) its work.
+ *
+ * @param {{ id: number, playbook: string, goal: string, acceptance: string[] }} task
+ * @param {number} budget
+ * @returns {string}
+ */
+function budgetResumePrompt(task, budget) {
+  return [
+    taskPrompt(task),
+    "",
+    `【预算】这张工单的 token 预算已被老板提到 ${budget}：从中断处继续完成任务，不要重复已经完成的步骤。`,
+  ].join("\n");
+}
 
 /**
  * @param {unknown} payload
@@ -208,6 +243,8 @@ export function createService({ store, hostInfo, runManager, git, duty }) {
         playbook,
         acceptance,
         baseHead: head.sha,
+        // 票 12: 角色 cost 的每任务预算在开单时抄进任务行（之后 +50% 只改这一行）。
+        tokenBudget: readRoleTokenBudget(employee.roleSnapshot),
       });
       return { payload: { task }, event: { reason: "task.create", taskId: task.id } };
     },
@@ -320,7 +357,54 @@ export function createService({ store, hostInfo, runManager, git, duty }) {
           artifacts: store.listArtifacts({ taskId }),
           tokens: store.taskTokenSummary(taskId),
           iterations: sessions.length,
+          // 票 12: 预算与「到顶/黄点」判定的原料一起上信封（判定纯函数在渲染层镜像）；
+          // failure.reason = 最近一轮失败会话的人话原因（store 已折叠，视图不重derive）。
+          budget: task.tokenBudget,
+          failure: { reason: store.latestFailReasonForTask(taskId) },
         },
+      };
+    },
+
+    /**
+     * 「+50%」 (票 12 验收 4): the exhausted task's budget grows to 1.5× and
+     * the task续跑 through the 票 09 resume channel (append a session — no
+     * sixth task state). The raise lands even when the resume cannot start
+     * (下班中 / 员工还在跑) — the reply says why, honestly, and the UI shows it.
+     */
+    "task.extendBudget"(payload) {
+      const taskId = requirePositiveId(payload, "taskId");
+      const task = store.taskById(taskId);
+      if (!task) throw appError("unknown_task", `no task with id ${taskId}`);
+      if (task.status !== "running") {
+        throw appError("invalid_transition", "只有「进行中」（含预算到顶暂停）的工单能加预算。");
+      }
+      const raised = extendBudgetBy50(task.tokenBudget);
+      const updated = store.setTaskTokenBudget(taskId, raised);
+
+      let resumed = false;
+      let resumeNote = "";
+      if (duty && duty.phaseForEmployee(task.employeeId) === "off") {
+        resumeNote = "公司正在下班中：预算已提高，等上班（到点自动或「立即上班」）后会自己续跑。";
+      } else {
+        try {
+          requireRunManager().start({
+            employeeId: task.employeeId,
+            text: budgetResumePrompt(task, raised),
+            task: { id: task.id },
+            resume: true,
+          });
+          resumed = true;
+        } catch (err) {
+          const code = /** @type {{ code?: string }} */ (err ?? {}).code ?? "unknown";
+          resumeNote =
+            code === "employee_busy"
+              ? "员工这一轮还在跑：新预算已生效，这一轮继续按新预算跑，不需要续跑。"
+              : `预算已提高，但续跑没起来：${code}`;
+        }
+      }
+      return {
+        payload: { task: updated, budget: raised, resumed, resumeNote },
+        event: { reason: "task.extendBudget", taskId },
       };
     },
 

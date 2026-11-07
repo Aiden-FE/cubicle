@@ -96,6 +96,10 @@ function foldToolEnd(raw) {
  * reported it, the usage numbers pi spells cacheRead/cacheWrite — folded
  * onto the neutral usage shape, missing numbers counting as zero.
  *
+ * 票 12: an all-zero usage is pi's placeholder for "the provider never
+ * spoke about tokens" — it must NOT fold as a real 0, or 「未计量」 engines
+ * would silently bill as free. Only a non-zero number counts as a report.
+ *
  * @param {Record<string, unknown>} raw
  * @returns {NormalizedEvent[]}
  */
@@ -105,13 +109,14 @@ function foldTurnEnd(raw) {
   /** @type {{ type: "turn_end", status: "ok" | "failed", usage?: Usage }} */
   const folded = { type: "turn_end", status: failed ? "failed" : "ok" };
   if (message?.usage) {
-    folded.usage = {
+    const usage = {
       input: count(message.usage.input),
       cachedInput: count(message.usage.cacheRead),
       cacheWrite: count(message.usage.cacheWrite),
       output: count(message.usage.output),
       reasoning: count(message.usage.reasoning),
     };
+    if (Object.values(usage).some((n) => n > 0)) folded.usage = usage;
   }
   return [folded];
 }

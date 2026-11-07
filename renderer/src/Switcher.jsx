@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { tokenText } from "./scene/tokenReadout.js";
 
 /**
  * 公司 · 项目组切换器（票 08 起收进左轨）：Lists and "create" live in
@@ -110,6 +111,14 @@ export function Switcher({ snapshot, onChanged }) {
                   {company.name}
                   <span className="switcher-active-count" data-testid="company-active">
                     进行中 {counts?.running ?? 0} · 待验收 {counts?.review ?? 0}
+                  </span>
+                  {/* 票 12 验收 3: 公司级 token 聚合（host 聚合走信封；未计量不是 0） */}
+                  <span
+                    className="switcher-token-count"
+                    data-testid="company-tokens"
+                    data-measured={snapshot?.companyTokens?.[String(company.id)]?.measured === true ? "true" : "false"}
+                  >
+                    tokens {tokenText(snapshot?.companyTokens?.[String(company.id)])}
                   </span>
                 </button>
               );

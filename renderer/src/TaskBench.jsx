@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { budgetStateFor, taskBudgetMarker, tokenText } from "./scene/tokenReadout.js";
 
 // Topic names mirrored from src/shared/envelope.mjs TOPICS (process boundary).
 const RUN_TOPIC = "run.event";
@@ -38,6 +39,9 @@ export function TaskBench({ snapshot, onClose }) {
   const [openTaskId, setOpenTaskId] = useState(/** @type {number | null} */ (null));
   const [detail, setDetail] = useState(/** @type {TaskDetailData | null} */ (null));
   const [rejectReason, setRejectReason] = useState("");
+  // 票 12: run 进行中的预算信号（budget_warning / budget_exhausted 事件带
+  // tokens/budget）— 落库的 taskTokenSummary 只含已收尾的轮，黄点必须活在事件上。
+  const [liveBudget, setLiveBudget] = useState(() => new Map());
   const editedContract = useRef(false);
   const draftTimer = useRef(/** @type {ReturnType<typeof setTimeout> | null} */ (null));
 
@@ -111,7 +115,23 @@ export function TaskBench({ snapshot, onClose }) {
   // so the detail reload is deliberately late.
   useEffect(() => {
     const unsubscribe = window.cubicle.subscribe(RUN_TOPIC, (envelope) => {
-      const payload = /** @type {{ event: { type: string } }} */ (envelope.payload);
+      const payload = /** @type {{ taskId?: number | null, event: { type: string } }} */ (envelope.payload);
+      if (payload.event.type === "budget_warning" || payload.event.type === "budget_exhausted") {
+        // 票 12: 软闸信号 — 黄点/到顶在轮还没收尾时就得上屏
+        const signal = /** @type {{ type: string, tokens?: number, budget?: number }} */ (payload.event);
+        if (typeof payload.taskId === "number") {
+          setLiveBudget((prev) => {
+            const next = new Map(prev);
+            next.set(payload.taskId, {
+              tokens: Number(signal.tokens ?? 0),
+              budget: Number(signal.budget ?? 0),
+              state: signal.type === "budget_exhausted" ? "exhausted" : "warn",
+            });
+            return next;
+          });
+        }
+        return;
+      }
       if (payload.event.type !== "agent_end") return;
       void loadTasks();
       if (openTaskId !== null) void loadDetail(openTaskId);
@@ -175,6 +195,45 @@ export function TaskBench({ snapshot, onClose }) {
   };
 
   const detailTask = detail?.task ?? null;
+
+  // 票 12: 三层可见的任务级读层 — 落库账单（taskTokenSummary）+ 活在事件流上的
+  // 预算信号，取更坏的那个判定；未计量不判（没数不猜）。
+  const live = openTaskId !== null ? liveBudget.get(openTaskId) ?? null : null;
+  const persistedTotal = detail?.tokens?.measured === true ? Number(detail.tokens.total ?? 0) : 0;
+  const usedTokens = Math.max(persistedTotal, live?.tokens ?? 0);
+  const tokensMeasured = detail?.tokens?.measured === true || (live?.tokens ?? 0) > 0;
+  const tokenSummary = detail?.tokens || live ? { measured: tokensMeasured, total: usedTokens } : null;
+  const budgetValue = detail?.budget ?? live?.budget ?? null;
+  const budgetMarker = tokensMeasured ? budgetStateFor(usedTokens, budgetValue) : taskBudgetMarker(detail);
+  const liveTokens = live && (live.tokens ?? 0) > persistedTotal ? live.tokens : null;
+
+  /** 「+50%」：host 落库 1.5× 并走 09 的续跑通道；续跑被拒时把可懂的原因上屏。 */
+  const extendBudget = async () => {
+    if (openTaskId === null) return;
+    setNote(null);
+    try {
+      const result = /** @type {{ resumed?: boolean, resumeNote?: string }} */ (
+        await window.cubicle.invoke("task.extendBudget", { taskId: openTaskId })
+      );
+      if (result.resumeNote) setNote(result.resumeNote);
+      setLiveBudget((prev) => {
+        const next = new Map(prev);
+        next.delete(openTaskId);
+        return next;
+      });
+      await loadTasks();
+      await loadDetail(openTaskId);
+    } catch (err) {
+      const failure = /** @type {{ code?: string, message?: string }} */ (err);
+      setNote(
+        failure.code === "invalid_transition"
+          ? failure.message ?? "这张工单的当前状态不能加预算。"
+          : failure.code === "off_duty"
+            ? failure.message ?? "公司正在下班中：先在左轨「上下班」点「立即上班」。"
+            : `加预算失败：${failure.code ?? "unknown"}`,
+      );
+    }
+  };
 
   /**
    * 验收动作（票 06：浮层只触发合法转移——合法性由 host 强制；host 拒绝时
@@ -321,10 +380,16 @@ export function TaskBench({ snapshot, onClose }) {
             <span className={`task-state`} data-testid="task-status" data-status={detailTask.status}>
               {STATUS_LABELS[detailTask.status] ?? detailTask.status}
             </span>
-            {/* 票 09: 暂停徽标 — 五状态不变，「进行中」+ 最近一轮 paused = 下班挂起 */}
+            {/* 票 09: 暂停徽标 — 五状态不变，「进行中」+ 最近一轮 paused = 挂起；
+                票 12: 预算到顶的暂停挂「预算到顶」而不是「已下班·暂停」。 */}
             {detailTask.status === "running" && detail?.sessions?.at(-1)?.status === "paused" ? (
-              <span className="task-paused-badge" data-testid="detail-paused-badge" data-paused="true">
-                已下班·暂停
+              <span
+                className="task-paused-badge"
+                data-testid="detail-paused-badge"
+                data-paused="true"
+                data-reason={budgetMarker === "exhausted" ? "budget" : "duty"}
+              >
+                {budgetMarker === "exhausted" ? "预算到顶" : "已下班·暂停"}
               </span>
             ) : null}
             <button type="button" className="task-back" data-testid="task-back" onClick={() => setOpenTaskId(null)}>
@@ -341,11 +406,35 @@ export function TaskBench({ snapshot, onClose }) {
             起点 HEAD <code>{detailTask.baseHead.slice(0, 7)}…</code>（所有 diff 相对它）
           </div>
 
-          <div className="task-tokens" data-testid="task-tokens">
-            本任务 token <code>{detail?.tokens?.total ?? 0}</code>
+          <div className="task-tokens" data-testid="task-tokens" data-budget-state={budgetMarker} data-tokens-live={String(liveTokens ?? "")}>
+            本任务 token <code>{tokenText(tokenSummary)}</code>
             <span className="task-tokens-detail">
               （输入 {detail?.tokens?.input ?? 0} · 输出 {detail?.tokens?.output ?? 0}）
             </span>
+            {/* 票 12 验收 4: 80% 黄点 / 100% 预算到顶（软闸判定在 host，信号走事件流） */}
+            {budgetMarker === "warn" ? (
+              <span className="budget-dot" data-testid="token-warn-dot" title={`token 用量已过 80%（${liveTokens ?? detail?.tokens?.total ?? 0}/${detail?.budget ?? "?"}）`}>
+                ● 80%
+              </span>
+            ) : null}
+            {budgetMarker === "exhausted" ? (
+              <span className="budget-capped" data-testid="token-exhausted-badge">
+                预算到顶
+              </span>
+            ) : null}
+          </div>
+          <div className="task-budget-line" data-testid="task-budget-line" data-budget={String(detail?.budget ?? "")}>
+            本任务预算 <code>{detail?.budget ?? "—"}</code> token
+            {detailTask.status === "running" && budgetMarker === "exhausted" ? (
+              <button
+                type="button"
+                className="task-budget-extend"
+                data-testid="task-budget-plus50"
+                onClick={() => void extendBudget()}
+              >
+                +50% 继续
+              </button>
+            ) : null}
           </div>
 
           {detail && detail.sessions.length > 0 ? (
@@ -402,14 +491,21 @@ export function TaskBench({ snapshot, onClose }) {
             </button>
           ) : null}
           {detailTask.status === "failed" ? (
-            <button
-              type="button"
-              className="task-retry"
-              data-testid="task-retry"
-              onClick={() => void act("task.dispatch", { taskId: detailTask.id })}
-            >
-              重试（再来一轮）
-            </button>
+            <div className="task-failure" data-testid="task-failure">
+              {/* 票 12 验收 1: host 折叠的人话原因（不是堆栈）+ 一键重试；
+                  验收 2: 重试走 task.dispatch = 新会话（06 语义），历史与产出原样。 */}
+              <div className="task-fail-reason" data-testid="task-fail-reason">
+                {detail?.failure?.reason ?? "这一轮失败了，引擎没有给出更具体的原因。"}
+              </div>
+              <button
+                type="button"
+                className="task-retry"
+                data-testid="task-retry"
+                onClick={() => void act("task.dispatch", { taskId: detailTask.id })}
+              >
+                重试（新会话再来一轮）
+              </button>
+            </div>
           ) : null}
 
           {detail && detail.artifacts.length > 0 ? (
@@ -472,6 +568,6 @@ const ARTIFACT_TITLES = /** @type {Record<string, string>} */ ({
  * @typedef {{ playbook: string, label: string, goal: string, acceptance: string[] }} TaskDraftData
  * @typedef {{ id: number, groupId: number, employeeId: number, title: string, goal: string, playbook: string, acceptance: string[], baseHead: string, status: string, createdAt: string, employeeName: string, latestSessionStatus?: string | null }} TaskRowData
  * @typedef {{ id: number, taskId: number, employeeSessionId: number, engine: string, status: string, startedAt: string, endedAt: string | null, sessionFile: string | null, iteration: number }} TaskSessionData
- * @typedef {{ input: number, cachedInput: number, cacheWrite: number, output: number, reasoning: number, total: number }} TaskTokenData
- * @typedef {{ task: TaskRowData, sessions: TaskSessionData[], artifacts: { id: number, kind: string, content: string }[], tokens?: TaskTokenData, iterations?: number }} TaskDetailData
+ * @typedef {{ input: number, cachedInput: number, cacheWrite: number, output: number, reasoning: number, total: number, measured?: boolean }} TaskTokenData
+ * @typedef {{ task: TaskRowData, sessions: TaskSessionData[], artifacts: { id: number, kind: string, content: string }[], tokens?: TaskTokenData, iterations?: number, budget?: number, failure?: { reason: string | null } }} TaskDetailData
  */
