@@ -1238,3 +1238,6 @@ body {
 .engine-btn { border: 1px solid var(--line); background: var(--paper-raised); color: var(--ink); border-radius: 6px; padding: 2px 10px; cursor: pointer; }
 .engine-btn-risk { color: var(--bad); border-color: var(--bad); }
 .engine-note { color: var(--warn); padding: 4px 0; }
+.engine-probe-chip { color: var(--ink-soft); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; }
+.engine-probe-error { color: var(--bad); font-style: italic; max-width: 100%; overflow-wrap: anywhere; }
+

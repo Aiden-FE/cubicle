@@ -111,8 +111,24 @@ test("ticket 11 admission gate: a not-enabled engine cannot take work, enabling 
   }
 });
 
-test("subscribe rides every run event with the run id (probe observation)", async () => {
-  const stub = makeStub({ events: [{ type: "text_delta", text: "hi" }, AGENT_END] });
+test("the admission probe bypasses the gate for a not-yet-enabled engine", async () => {
+  const stub = makeStub({ events: [AGENT_END] });
+  const h = await withManager("probe-gate", { adapter: stub });
+  try {
+    h.store.setEmployeeEngine({ employeeId: h.employeeId, engine: "codex" });
+    assert.throws(() => h.manager.start({ employeeId: h.employeeId, text: "干活" }), (err) => /** @type {any} */ (err).code === "engine_not_admitted");
+    // probe:true runs the engine to TEST admission
+    const { run } = h.manager.start({ employeeId: h.employeeId, text: "探针", probe: true });
+    await h.manager.whenQuiet();
+    assert.equal(run.engine, "codex");
+    assert.equal(h.store.latestRunForEmployee(h.employeeId)?.status, "completed");
+    assert.equal(h.store.engineState("codex")?.enabled, false); // a probe run does not admit by itself
+  } finally {
+    await h.dispose();
+  }
+});
+
+test("subscribe rides every run event with the run id (probe observation)", async () => {  const stub = makeStub({ events: [{ type: "text_delta", text: "hi" }, AGENT_END] });
   const h = await withManager("subscribe", { adapter: stub });
   try {
     /** @type {any[]} */

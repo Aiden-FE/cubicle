@@ -144,10 +144,10 @@ export function createRunManager({ store, getAdapter, emit }) {
   }
 
   /**
-   * @param {{ employeeId: number, text: string }} input
+   * @param {{ employeeId: number, text: string, probe?: boolean }} input
    * @returns {{ run: RunRow, session: EmployeeSessionRow }}
    */
-  function start({ employeeId, text }) {
+  function start({ employeeId, text, probe = false }) {
     if (typeof employeeId !== "number" || !Number.isInteger(employeeId) || employeeId <= 0) {
       throw appError("invalid_payload", "employeeId must be a positive integer");
     }
@@ -161,10 +161,10 @@ export function createRunManager({ store, getAdapter, emit }) {
     const engine = employee.roleSnapshot.manifest.engine || "pi";
 
     // Ticket 11 admission gate: an engine must be enabled (probe passed, or
-    // hand-enabled with the risk flag) before it may take real work. Only
-    // enforced when the store tracks the engine (databases predating the
-    // gate — the fake-store unit tests — stay permissive).
-    if (typeof store.engineState === "function") {
+    // hand-enabled with the risk flag) before it may take REAL work. The
+    // probe itself is the admission test, so its runs bypass the gate. Only
+    // enforced when the store tracks the engine (legacy stores stay permissive).
+    if (!probe && typeof store.engineState === "function") {
       const state = store.engineState(engine);
       if (state && !state.enabled) {
         throw appError("engine_not_admitted", `engine ${engine} 尚未准入（未通过探针且未手动启用）`);

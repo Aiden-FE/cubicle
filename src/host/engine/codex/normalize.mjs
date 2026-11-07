@@ -7,6 +7,12 @@
  * `end()` synthesizes exactly one `agent_end`, mirroring the pi adapter's
  * protocol duty (every run ends with one agent_end, see run-manager).
  *
+ * `push` returns the events folded from THAT line, not a growing transcript:
+ * the CLI host forwards them as the lines land, so a codex run animates the
+ * 工位 while it works (read → exec → done) exactly like the SDK host. Buffering
+ * everything until exit would paint the whole run in one frame and the desk
+ * would never show a posture (ticket 11's 复用 07 的工位 reducer).
+ *
  * This is a table folder like pi/normalize.mjs — a new codex record type is
  * one row in RECORD_FOLDERS, not another switch arm. Non-JSON lines (stderr
  * diagnostics merged into stdout) are counted and skipped; unrecognized
@@ -20,8 +26,8 @@
  * @typedef {import("../events.mjs").Usage} Usage
  *
  * @typedef {object} CodexNormalizer
- * @property {(line: string) => void} push Feed one raw stdout line.
- * @property {() => NormalizedEvent[]} end Flush the terminal event, return the stream.
+ * @property {(line: string) => NormalizedEvent[]} push Feed one raw stdout line; returns that line's events.
+ * @property {() => NormalizedEvent[]} end Flush the terminal event (exactly one agent_end).
  * @property {number} ignoredLines Count of blank or non-JSON lines.
  * @property {number} warningLines Count of benign engine warnings folded away.
  */
@@ -127,52 +133,47 @@ const ITEM_FOLDERS = new Map([
  * @returns {CodexNormalizer}
  */
 export function createCodexNormalizer() {
-  /** @type {NormalizedEvent[]} */
-  const events = [];
   /** @type {"ok" | "failed" | "unknown"} */
   let lastTurnStatus = "unknown";
   let ignoredLines = 0;
   let warningLines = 0;
 
-  function foldItemRecord(/** @type {Record<string, any>} */ record) {
+  /** @param {Record<string, any>} record @returns {NormalizedEvent[]} */
+  function foldItemRecord(record) {
     const phase = record.type === "item.started" ? "started" : "completed";
     const item = isRecord(record.item) ? record.item : {};
     const folder = ITEM_FOLDERS.get(typeof item.type === "string" ? item.type : "");
-    if (folder) {
-      events.push(...folder(item, phase));
-      return;
-    }
+    if (folder) return folder(item, phase);
     if (item.type === "error" && typeof item.message === "string") {
       if (BENIGN_WARNING_NEEDLES.some((needle) => item.message.includes(needle))) {
         warningLines += 1;
-        return;
+        return [];
       }
-      events.push({ type: "error", code: "codex_item_error", message: item.message });
-      return;
+      return [{ type: "error", code: "codex_item_error", message: item.message }];
     }
-    events.push({ type: "unknown", rawType: String(record.type), payload: item });
+    return [{ type: "unknown", rawType: String(record.type), payload: item }];
   }
 
   /**
    * Top-level record table. A new codex record type = one row here; the
    * default keeps forward compatibility as `unknown` diagnostics.
-   * @type {ReadonlyMap<string, (record: Record<string, any>) => void>}
+   * @type {ReadonlyMap<string, (record: Record<string, any>) => NormalizedEvent[]>}
    */
   const RECORD_FOLDERS = new Map([
     [
       "thread.started",
-      (record) => {
-        events.push({
+      (record) => [
+        {
           type: "session_start",
           sessionId: typeof record.thread_id === "string" ? record.thread_id : undefined,
-        });
-      },
+        },
+      ],
     ],
     [
       "turn.started",
       () => {
         lastTurnStatus = "unknown";
-        events.push({ type: "turn_start" });
+        return [{ type: "turn_start" }];
       },
     ],
     ["item.started", foldItemRecord],
@@ -181,7 +182,7 @@ export function createCodexNormalizer() {
       "turn.completed",
       (record) => {
         lastTurnStatus = "ok";
-        events.push({ type: "turn_end", status: "ok", usage: toUsage(record.usage) });
+        return [{ type: "turn_end", status: "ok", usage: toUsage(record.usage) }];
       },
     ],
     [
@@ -189,23 +190,25 @@ export function createCodexNormalizer() {
       (record) => {
         lastTurnStatus = "failed";
         const error = isRecord(record.error) ? record.error : {};
-        events.push({
-          type: "error",
-          code: "turn_failed",
-          message: typeof error.message === "string" ? error.message : "codex turn failed",
-        });
-        events.push({ type: "turn_end", status: "failed" });
+        return [
+          {
+            type: "error",
+            code: "turn_failed",
+            message: typeof error.message === "string" ? error.message : "codex turn failed",
+          },
+          { type: "turn_end", status: "failed" },
+        ];
       },
     ],
     [
       "error",
-      (record) => {
-        events.push({
+      (record) => [
+        {
           type: "error",
           code: "provider_error",
           message: typeof record.message === "string" ? record.message : "codex error",
-        });
-      },
+        },
+      ],
     ],
   ]);
 
@@ -219,7 +222,7 @@ export function createCodexNormalizer() {
 
     push(line) {
       const trimmed = line.trim();
-      if (trimmed.length === 0) return;
+      if (trimmed.length === 0) return [];
 
       /** @type {unknown} */
       let record;
@@ -227,27 +230,23 @@ export function createCodexNormalizer() {
         record = JSON.parse(trimmed);
       } catch {
         ignoredLines += 1;
-        return;
+        return [];
       }
       if (!isRecord(record) || typeof record.type !== "string") {
         ignoredLines += 1;
-        return;
+        return [];
       }
 
       const fold = RECORD_FOLDERS.get(record.type);
-      if (fold) {
-        fold(record);
-        return;
-      }
-      events.push({ type: "unknown", rawType: record.type, payload: record });
+      if (fold) return fold(record);
+      return [{ type: "unknown", rawType: record.type, payload: record }];
     },
 
     end() {
       // The process closed: whatever the last turn reported is the run's
       // verdict; a stream that never completed a turn is an honest "unknown"
       // (run-manager records that as failed — never a clean end).
-      events.push({ type: "agent_end", status: lastTurnStatus });
-      return events;
+      return [{ type: "agent_end", status: lastTurnStatus }];
     },
   };
 }

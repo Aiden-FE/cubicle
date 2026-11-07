@@ -47,6 +47,19 @@ function eventType(event) {
 }
 
 /**
+ * One human-readable line for an engine error event. appError already puts
+ * the code in the message, so don't print it twice.
+ *
+ * @param {any} event
+ * @returns {string}
+ */
+function engineErrorNote(event) {
+  const code = String(event?.code ?? "engine_error");
+  const message = String(event?.message ?? "");
+  return message.startsWith(code) ? message : `${code}：${message}`;
+}
+
+/**
  * The pure half: fold two recorded event streams into the four verdicts.
  *
  * @param {{ functionalEvents: any[], refusalEvents: any[], marker: string }} input
@@ -88,6 +101,9 @@ export function evaluateProbe({ functionalEvents, refusalEvents, marker }) {
         : { result: "fail", detail: "拒绝没有产生 policy_blocked 事件" };
 
   const ends = functionalEvents.filter((e) => eventType(e) === "agent_end");
+  // An engine-level error event is the specific truth: say what the engine
+  // reported instead of only noting that the skeleton is thin.
+  const engineError = functionalEvents.find((e) => eventType(e) === "error");
   const skeletonOk =
     functionalEvents.some((e) => eventType(e) === "session_start") &&
     functionalEvents.some((e) => eventType(e) === "turn_start") &&
@@ -95,9 +111,14 @@ export function evaluateProbe({ functionalEvents, refusalEvents, marker }) {
     functionalEvents.some((e) => eventType(e) === "turn_end") &&
     ends.length === 1;
   /** @type {ProbeVerdict} */
-  const eventsVerdict = skeletonOk
-    ? { result: "pass", detail: "会话开始/回合/内容/收尾事件完整，恰好一个 agent_end" }
-    : { result: "fail", detail: `事件骨架不完整（agent_end 数量=${ends.length}）` };
+  const eventsVerdict = engineError
+    ? {
+        result: "fail",
+        detail: `引擎报错 ${engineErrorNote(engineError)}`,
+      }
+    : skeletonOk
+      ? { result: "pass", detail: "会话开始/回合/内容/收尾事件完整，恰好一个 agent_end" }
+      : { result: "fail", detail: `事件骨架不完整（agent_end 数量=${ends.length}）` };
 
   return { injection, tools, refusal, events: eventsVerdict };
 }
@@ -155,45 +176,61 @@ export function createProbeRunner({ store, startRun, subscribeRunEvents, runTime
   }
 
   /**
+   * Run the whole probe for one engine.
+   *
+   * Contract: the CALLER owns the admission bookkeeping — it flips
+   * probe_status to "running" (and rejects a second probe) before calling
+   * here, synchronously with its own reply. Re-checking "running" inside this
+   * function would reject every probe the service starts, because the
+   * service just wrote that state itself (ticket 11 e2e caught exactly that
+   * self-deadlock). Every failure — including one before the first run —
+   * lands in the store as "failed" with its reason, so an engine can never
+   * stay stuck showing 运行中… forever.
+   *
    * @param {string} engine
    * @returns {Promise<{ engine: string, status: "passed" | "failed", verdicts: ProbeVerdicts }>}
    */
   async function startProbe(engine) {
-    const state = store.engineState(engine);
-    if (!state) throw appError("unknown_engine", `no engine state for ${engine}`);
-    if (state.probeStatus === "running") throw appError("engine_probe_running", `engine ${engine} 的探针正在运行`);
-
-    const marker = markerFactory();
-    const employee = store.ensureProbeEmployee({
-      name: `准入探针·${engine}`,
-      engine,
-      roleSnapshot: {
-        key: "probe",
-        name: "探针",
-        tagline: "引擎准入探针",
-        manifest: {
-          persona: `${PROBE_MARKER_PREFIX}${marker}\n你是引擎准入探针：按指令报告标记行、执行指定命令，不要做多余的探索。`,
-          skills: [],
-          tools: ["read", "powershell"],
-          mcpServers: [],
-          engine,
-          model: "default",
-          cost: { tokenBudgetPerTask: 50000 },
-        },
-      },
-    });
-
-    store.setEngineProbeResult({ engine, status: "running" });
     try {
+      const state = store.engineState(engine);
+      if (!state) throw appError("unknown_engine", `no engine state for ${engine}`);
+
+      const marker = markerFactory();
+      const employee = store.ensureProbeEmployee({
+        name: `准入探针·${engine}`,
+        engine,
+        roleSnapshot: {
+          key: "probe",
+          name: "探针",
+          tagline: "引擎准入探针",
+          manifest: {
+            persona: `${PROBE_MARKER_PREFIX}${marker}\n你是引擎准入探针：按指令报告标记行、执行指定命令，不要做多余的探索。`,
+            skills: [],
+            tools: ["read", "powershell"],
+            mcpServers: [],
+            engine,
+            model: "default",
+            cost: { tokenBudgetPerTask: 50000 },
+          },
+        },
+      });
+
       const functionalEvents = await probeRun(employee.id, PROMPT_FUNCTIONAL);
       const refusalEvents = await probeRun(employee.id, PROMPT_REFUSAL);
       const verdicts = evaluateProbe({ functionalEvents, refusalEvents, marker });
       const allPass = Object.values(verdicts).every((verdict) => verdict.result === "pass");
       const status = allPass ? "passed" : "failed";
+      // An engine that answered with an error event never throws here, so the
+      // reason has to ride the verdict record — the engine card shows it.
+      const engineError = [...functionalEvents, ...refusalEvents].find((e) => eventType(e) === "error");
       store.setEngineProbeResult({
         engine,
         status,
-        probe: { verdicts, markerShown: false },
+        probe: {
+          verdicts,
+          markerShown: false,
+          ...(engineError ? { error: engineErrorNote(engineError) } : {}),
+        },
       });
       return { engine, status, verdicts };
     } catch (err) {

@@ -102,6 +102,32 @@ test("a failed probe does not admit; manual enable keeps the risk flag", () => {
   }
 });
 
+test("a probe left 'running' by a dead host comes back failed, not wedged", () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "cubicle-probe-stale-"));
+  try {
+    const first = openStore({ dataDir: dir });
+    try {
+      first.setEngineProbeResult({ engine: "codex", status: "running" });
+      assert.equal(/** @type {any} */ (first.engineState("codex")).probeStatus, "running");
+    } finally {
+      first.close();
+    }
+    // A probe lives inside the host process: a new host can never receive its
+    // verdict, so opening the store must land the stale state honestly.
+    const second = openStore({ dataDir: dir });
+    try {
+      const state = /** @type {any} */ (second.engineState("codex"));
+      assert.equal(state.probeStatus, "failed");
+      assert.match(state.probe.error, /AgentHost/);
+      assert.equal(state.enabled, false);
+    } finally {
+      second.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("switching an employee's engine rewrites the frozen role snapshot", () => {
   const { store, dir } = tempStore();
   try {

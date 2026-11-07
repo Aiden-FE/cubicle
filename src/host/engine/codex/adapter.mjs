@@ -40,6 +40,9 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 /** The provider key the app's own models.json must declare (BYOK, like pi's). */
 const PROVIDER_KEY = "cubicle";
 
+/** How much codex stderr is kept to explain a run that died silently. */
+const STDERR_TAIL_CHARS = 2000;
+
 /**
  * @typedef {import("../events.mjs").NormalizedEvent} NormalizedEvent
  * @typedef {import("../../store.mjs").EmployeeSessionRow} EmployeeSessionRow
@@ -67,6 +70,9 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
   /** live child processes by employeeSessionId, for abort/shutdown */
   /** @type {Map<number, any>} */
   const liveChildren = new Map();
+  /** children WE killed (abort / shutdown): their exit is not an engine error */
+  /** @type {Set<any>} */
+  const killedByUs = new Set();
 
   function bridge() {
     if (!bridgePromise) {
@@ -134,7 +140,9 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
       throw appError("engine_bad_config", "engines/codex/models.json 需要 baseUrl、apiKey、model 三个字段");
     }
 
-    const hookPath = path.join(engineRoot, "hooks", "policy-hook.mjs").replace(/\\/g, "\\\\");
+    const hookPath = path.join(engineRoot, "hooks", "policy-hook.mjs");
+    const hookPosix = hookPath.replace(/\\/g, "/");
+    const hookWindows = hookPath.replace(/\\/g, "\\\\");
     const toml = [
       `model_provider = "${PROVIDER_KEY}"`,
       `model = "${models.model}"`,
@@ -150,7 +158,12 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
       "[[hooks.PreToolUse]]",
       "[[hooks.PreToolUse.hooks]]",
       'type = "command"',
-      `commandWindows = "node \\"${hookPath}\\""`,
+      // codex 0.163 rejects a hook entry that lacks the generic `command`
+      // field ("missing field `command` in `hooks`"), even though it is the
+      // `commandWindows` variant that actually runs on this platform — both
+      // must be present, and a bad config kills the run before any JSONL.
+      `command = "node \\"${hookPosix}\\""`,
+      `commandWindows = "node \\"${hookWindows}\\""`,
       "timeout = 15",
       "",
     ].join("\n");
@@ -198,9 +211,21 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
    */
   async function runOne({ session, onEvent, text, threadId, context }) {
     const models = JSON.parse(readFileSync(path.join(engineRoot, "models.json"), "utf8"));
+    // --json / -s / -C are `codex exec` LEVEL options: placed after the
+    // `resume` subcommand they are rejected ("unexpected argument '-s'"), so
+    // the launch flags go first and the subcommand comes last.
+    const launchFlags = [
+      "--json",
+      "--skip-git-repo-check",
+      "--dangerously-bypass-hook-trust",
+      "-s",
+      "danger-full-access",
+      "-C",
+      session.workspaceDir,
+    ];
     const args = threadId
-      ? ["exec", "resume", "--json", "--skip-git-repo-check", "--dangerously-bypass-hook-trust", "-s", "danger-full-access", "-C", session.workspaceDir, threadId, text]
-      : ["exec", "--json", "--skip-git-repo-check", "--dangerously-bypass-hook-trust", "-s", "danger-full-access", "-C", session.workspaceDir, text];
+      ? ["exec", ...launchFlags, "resume", threadId, text]
+      : ["exec", ...launchFlags, text];
 
     const env = {
       ...process.env,
@@ -225,7 +250,23 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
     return await new Promise((resolve, reject) => {
       const normalizer = createCodexNormalizer();
       let stdoutTail = "";
+      let stderrTail = "";
+      let emitted = 0;
       let settled = false;
+
+      /** Forward one normalized event, counting what reached the stream. */
+      /** @param {NormalizedEvent} event */
+      const emit = (event) => {
+        emitted += 1;
+        onEvent(event);
+      };
+
+      /** @param {unknown} chunk */
+      const noteStderr = (chunk) => {
+        // Keep only the tail: it becomes the human-visible reason when codex
+        // dies before its first JSONL line.
+        stderrTail = `${stderrTail}${String(chunk)}`.slice(-STDERR_TAIL_CHARS);
+      };
 
       /** @param {string} chunk */
       const onStdout = (chunk) => {
@@ -247,27 +288,39 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
               // the normalizer counts it as noise
             }
           }
-          normalizer.push(line);
+          // Forward as the line lands: the 工位 animates while codex works.
+          for (const event of normalizer.push(line)) {
+            if (event.type === "session_start") continue; // folded (see above)
+            emit(event);
+          }
         }
       };
 
-      const finish = () => {
+      const finish = (/** @type {number | null} */ exitCode) => {
         if (settled) return;
         settled = true;
+        if (exitCode !== 0 && emitted === 0 && !killedByUs.has(child)) {
+          // codex died before it said anything (a rejected config.toml, a bad
+          // model provider, a missing binary): the run must say why instead of
+          // settling quietly as 'unknown'.
+          emit({
+            type: "error",
+            code: "engine_exec_failed",
+            message: `codex exec 退出码 ${exitCode ?? "?"}，且没有产生任何事件：${stderrTail.trim().slice(0, 400) || "（无 stderr 输出）"}`,
+          });
+        }
         for (const event of normalizer.end()) {
           if (event.type === "session_start") continue; // folded (see above)
-          onEvent(event);
+          emit(event);
         }
         liveChildren.delete(session.id);
+        killedByUs.delete(child);
         if (context.threadId) streamsByThread.delete(context.threadId);
         resolve();
       };
 
       child.stdout?.on("data", onStdout);
-      child.stderr?.on("data", () => {
-        // codex diagnostics: they land in the host log via the supervisor;
-        // the JSONL stdout stream is the contract.
-      });
+      child.stderr?.on("data", noteStderr);
       child.on("close", finish);
       child.on("error", (/** @type {any} */ err) => {
         if (settled) return;
@@ -293,6 +346,9 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
           ? session.sessionFile.slice("thread:".length)
           : null,
     };
+    // A resumed thread is known before its first line lands: map it now, so a
+    // hook verdict can never arrive for a session this run considers foreign.
+    if (context.threadId) streamsByThread.set(context.threadId, onEvent);
 
     return {
       async prompt(text) {
@@ -311,6 +367,7 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
   /** @param {any} child */
   function killChild(child) {
     if (!child) return;
+    killedByUs.add(child);
     if (process.platform === "win32" && child.pid) {
       // The CLI tree (codex + git + shell helpers) must die with the session.
       try {

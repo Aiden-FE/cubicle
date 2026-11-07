@@ -87,6 +87,104 @@ function tempStore() {
   return { store: openStore({ dataDir: dir }), dir };
 }
 
+test("a probe started by the service (which already wrote 运行中) still runs", async () => {
+  // Regression (ticket 11 e2e): the service flips probe_status to "running"
+  // synchronously with its reply, then calls the runner. If the runner read
+  // that same state back and refused, NO probe could ever start.
+  const { store, dir } = tempStore();
+  try {
+    /** @type {((payload: any) => void)[]} */
+    const listeners = [];
+    const scripted = [PROBE_EVENT_A, PROBE_EVENT_B];
+    let next = 300;
+    const runner = createProbeRunner({
+      store,
+      markerFactory: () => "abc123",
+      startRun: ({ employeeId }) => {
+        const runId = ++next;
+        setTimeout(() => {
+          for (const event of scripted.shift() ?? []) for (const l of listeners) l({ runId, employeeId, event });
+        }, 0);
+        return { runId };
+      },
+      subscribeRunEvents: (listener) => {
+        listeners.push(listener);
+        return () => listeners.splice(listeners.indexOf(listener), 1);
+      },
+    });
+
+    store.setEngineProbeResult({ engine: "codex", status: "running" });
+    const result = await runner.startProbe("codex");
+    assert.equal(result.status, "passed");
+    assert.equal(/** @type {any} */ (store.engineState("codex")).enabled, true);
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a probe that dies before its first run lands as failed, not stuck 运行中", async () => {
+  const { store, dir } = tempStore();
+  try {
+    const runner = createProbeRunner({
+      store,
+      startRun: () => {
+        throw new Error("codex 启动失败");
+      },
+      subscribeRunEvents: () => () => {},
+    });
+
+    store.setEngineProbeResult({ engine: "codex", status: "running" });
+    await assert.rejects(() => runner.startProbe("codex"), /codex 启动失败/);
+    const state = /** @type {any} */ (store.engineState("codex"));
+    assert.equal(state.probeStatus, "failed");
+    assert.match(state.probe.error, /codex 启动失败/);
+    assert.equal(state.enabled, false);
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an engine error event explains the failed probe on the card", async () => {
+  const { store, dir } = tempStore();
+  try {
+    const broken = [
+      { type: "session_start" },
+      { type: "turn_start" },
+      { type: "error", code: "engine_exec_failed", message: "codex exec 退出码 1：missing field `command`" },
+      { type: "agent_end", status: "unknown" },
+    ];
+    /** @type {((payload: any) => void)[]} */
+    const listeners = [];
+    let next = 400;
+    const runner = createProbeRunner({
+      store,
+      startRun: ({ employeeId }) => {
+        const runId = ++next;
+        setTimeout(() => {
+          for (const event of broken) for (const l of listeners) l({ runId, employeeId, event });
+        }, 0);
+        return { runId };
+      },
+      subscribeRunEvents: (listener) => {
+        listeners.push(listener);
+        return () => listeners.splice(listeners.indexOf(listener), 1);
+      },
+    });
+
+    const result = await runner.startProbe("codex");
+    assert.equal(result.status, "failed");
+    assert.match(result.verdicts.events.detail, /engine_exec_failed/);
+    const state = /** @type {any} */ (store.engineState("codex"));
+    assert.equal(state.probeStatus, "failed");
+    assert.match(state.probe.error, /missing field/);
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("the runner drives two probe runs through the run-manager seam and records four verdicts", async () => {
   const { store, dir } = tempStore();
   try {

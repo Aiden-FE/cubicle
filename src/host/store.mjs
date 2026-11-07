@@ -471,6 +471,10 @@ export function openStore({ dataDir }) {
   // A host that died (or was killed) mid-run must not leave phantom 'running'
   // rows behind: they become 'interrupted' the moment a host opens the store.
   markInterruptedRuns(db);
+  // Same honesty rule for the admission probe (ticket 11): a probe can never
+  // outlive the host that started it, so a "running" verdict state is stale —
+  // land it as failed instead of wedging the engine card on 运行中… forever.
+  markInterruptedProbes(db);
   seedIfFirstRun(db);
   seedRoles(db);
   seedEngineStates(db);
@@ -904,6 +908,25 @@ function markInterruptedRuns(db) {
   const endedAt = new Date().toISOString();
   const finish = db.prepare("UPDATE run SET status = 'interrupted', ended_at = ? WHERE id = ?");
   for (const row of running) finish.run(endedAt, Number(/** @type {Record<string, unknown>} */ (row).id));
+}
+
+/**
+ * A probe's "running" verdict belongs to a host that is no longer alive: the
+ * probe itself is in-process, so no verdict will ever arrive for it. Land it
+ * as failed (with the reason visible on the engine card) so the engine can be
+ * re-probed or hand-enabled instead of stuck.
+ *
+ * @param {DatabaseSync} db
+ */
+function markInterruptedProbes(db) {
+  const stale = db.prepare("SELECT engine FROM engine_state WHERE probe_status = 'running'").all();
+  if (stale.length === 0) return;
+  const now = new Date().toISOString();
+  const update = db.prepare(
+    "UPDATE engine_state SET probe_status = 'failed', probe_json = ?, probe_at = ?, updated_at = ? WHERE engine = ?",
+  );
+  const reason = JSON.stringify({ verdicts: null, error: "上一次探针随 AgentHost 一起结束，没有拿到结论" });
+  for (const row of stale) update.run(reason, now, now, String(/** @type {Record<string, unknown>} */ (row).engine));
 }
 
 /**

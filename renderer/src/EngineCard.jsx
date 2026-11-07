@@ -135,6 +135,11 @@ export function EngineCard({ employee }) {
                 </div>
               );
             })()}
+            {current.probe?.error ? (
+              <span className="engine-probe-error" data-testid="engine-probe-error" title={current.probe.error}>
+                {current.probe.error}
+              </span>
+            ) : null}
           </div>
 
           <div className="engine-actions">
@@ -159,6 +164,14 @@ export function EngineCard({ employee }) {
           {engine.manualOverride && engine.probeStatus !== "passed" ? (
             <span className="engine-risk" data-testid="engine-risk-flag" data-risk="true">
               ⚠ 带风险启用（探针未通过）
+            </span>
+          ) : null}
+          <span className="engine-probe-chip" data-testid="engine-alt-probe" data-status={engine.probeStatus}>
+            探针：{probeStatusLabel(engine.probeStatus)}
+          </span>
+          {engine.probe?.error ? (
+            <span className="engine-probe-error" data-testid="engine-probe-error" title={engine.probe.error}>
+              {engine.probe.error}
             </span>
           ) : null}
           <div className="engine-actions">

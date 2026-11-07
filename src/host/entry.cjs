@@ -65,10 +65,11 @@ async function main() {
 
   // The admission probe (ticket 11) drives the SAME run-manager seam a real
   // conversation uses, against a hidden probe employee, and listens on the
-  // internal subscribe() rather than the UI topic.
+  // internal subscribe() rather than the UI topic. probe:true bypasses the
+  // admission gate — the probe IS the admission test.
   const probeRunner = createProbeRunner({
     store,
-    startRun: ({ employeeId, text }) => ({ runId: runManager.start({ employeeId, text }).run.id }),
+    startRun: ({ employeeId, text }) => ({ runId: runManager.start({ employeeId, text, probe: true }).run.id }),
     subscribeRunEvents: (listener) => runManager.subscribe(listener),
   });
 
@@ -136,12 +137,21 @@ async function main() {
   piAdapter.warm();
 }
 
-main().catch((err) => {
-  // A GUI-subsystem process may have no console: stderr handles are enough,
-  // and main tees them into <dataDir>/agenthost.log. Exit loudly so the
-  // supervisor can restart — a silent half-start would hang the UI forever.
-  process.stderr.write(
-    `AgentHost failed to start: ${err && err.stack ? err.stack : err}\n`,
-  );
+main().catch(async (err) => {
+  // A GUI-subsystem process may have no console, so stderr alone can vanish:
+  // the failure is also appended next to the data the host could not open
+  // (<dataDir>/agenthost-error.log). Exit loudly so the supervisor restarts —
+  // a silent half-start would hang the UI forever.
+  const line = `AgentHost failed to start: ${err && err.stack ? err.stack : err}\n`;
+  process.stderr.write(line);
+  try {
+    const dataDir = process.env.CUBICLE_DATA_DIR;
+    if (dataDir) {
+      const [{ appendFileSync }, path] = await Promise.all([import("node:fs"), import("node:path")]);
+      appendFileSync(path.join(dataDir, "agenthost-error.log"), line, "utf8");
+    }
+  } catch {
+    // a host that cannot even write its log still exits below
+  }
   process.exit(1);
 });

@@ -102,6 +102,16 @@ test("prompt streams codex JSONL into normalized events and resolves on close", 
     spawned.stdout.write('{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"cmd /c type hello.txt","aggregated_output":"hi\\n","exit_code":0,"status":"completed"}}\n');
     spawned.stdout.write('{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"里面写了 hi"}}\n');
     spawned.stdout.write('{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":3}}\n');
+
+    // Regression (ticket 11 e2e): the events must ride the wire as their lines
+    // land, not in one burst at process exit — a posture that only exists
+    // inside the closing frame never reaches the workstation animation.
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(
+      events.map((e) => e.type),
+      ["turn_start", "tool_execution_start", "tool_execution_end", "text_delta", "turn_end"],
+    );
+
     spawned.stdout.end();
     spawned.stderr.end();
     spawned.emit("close", 0);
@@ -160,6 +170,10 @@ test("the CLI launch keeps the app-private CODEX_HOME, absolute -C, and the hook
     const config = readFileSync(path.join(engineRoot, "config.toml"), "utf8");
     assert.ok(config.includes("cubicle"));
     assert.ok(config.includes("PreToolUse"));
+    // codex 0.163 refuses to start when a hook entry has only the platform
+    // variant ("missing field `command` in `hooks`") — both keys must ship.
+    assert.match(config, /^command = "node /m);
+    assert.match(config, /^commandWindows = "node /m);
     assert.ok(existsSync(path.join(engineRoot, "hooks", "policy-hook.mjs")));
     assert.ok(existsSync(path.join(engineRoot, "hooks", "policy.mjs")));
 
@@ -203,8 +217,15 @@ test("a second prompt continues the same engine thread (exec resume)", async () 
 
     assert.equal(launches[0].args[0], "exec");
     assert.equal(launches[1].args[0], "exec");
-    assert.equal(launches[1].args[1], "resume");
+    assert.ok(launches[1].args.includes("resume"));
     assert.ok(launches[1].args.includes("thread-77"));
+    // codex parses --json / -s / -C as `exec` LEVEL options: they must precede
+    // the `resume` subcommand, or the CLI refuses to start at all.
+    const resumeAt = launches[1].args.indexOf("resume");
+    assert.ok(launches[1].args.indexOf("--json") < resumeAt);
+    assert.ok(launches[1].args.indexOf("-s") < resumeAt);
+    assert.ok(launches[1].args.indexOf("-C") < resumeAt);
+    assert.ok(launches[1].args.indexOf("thread-77") > resumeAt);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -229,7 +250,6 @@ test("abort kills the codex process; the run still ends with exactly one agent_e
       onEvent: (event) => events.push(event),
     });
     const done = live.prompt("慢慢说");
-    spawned.stdout.write('{"type":"turn.started"}\n');
     await live.abort();
     assert.ok(spawned.killCalls.length > 0);
     await done;
@@ -237,6 +257,44 @@ test("abort kills the codex process; the run still ends with exactly one agent_e
     const ends = events.filter((e) => e.type === "agent_end");
     assert.equal(ends.length, 1);
     assert.equal(ends[0].status, "unknown"); // silent settle — honest unknown
+    // A cancel WE started is not an engine failure: no error event noise.
+    assert.equal(events.filter((e) => e.type === "error").length, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("codex dying before its first JSONL line reports why instead of settling quietly", async () => {
+  const dir = tempDir();
+  try {
+    seedModels(dir);
+    const events = /** @type {any[]} */ ([]);
+    const adapter = createCodexAdapter({
+      dataDir: dir,
+      killTree: () => {},
+      spawnProcess: () => {
+        const child = fakeChild();
+        setTimeout(() => {
+          child.stderr.write("Error loading config.toml: missing field `command`\nin `hooks`\n");
+          child.stdout.end();
+          child.stderr.end();
+          child.emit("close", 1);
+        }, 0);
+        return child;
+      },
+    });
+    const live = await adapter.open({
+      employee: { name: "甲", roleSnapshot: { manifest: {} } },
+      session: sessionFixture(dir),
+      onEvent: (event) => events.push(event),
+    });
+    await live.prompt("说一句");
+
+    const failure = events.find((e) => e.type === "error");
+    assert.ok(failure, "a silent non-zero exit must surface an error event");
+    assert.equal(failure.code, "engine_exec_failed");
+    assert.match(failure.message, /missing field .command./);
+    assert.equal(events.filter((e) => e.type === "agent_end").length, 1);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
