@@ -91,17 +91,6 @@ export function createPidLedger({ file }) {
       save(entries);
     },
 
-    /**
-     * Overwrite semantics: the ledger holds exactly this one entry. For the
-     * host ledger — the account always describes the当代 host, never a line
-     * per restart.
-     *
-     * @param {LedgerEntry & { pid: number }} entry
-     */
-    replace(entry) {
-      save([{ pid: entry.pid, name: entry.name, startedAt: entry.startedAt, ...(entry.note ? { note: entry.note } : {}) }]);
-    },
-
     /** @param {number} pid */
     forget(pid) {
       const entries = this.read();
@@ -219,22 +208,71 @@ export function defaultKillProcess(pid) {
 }
 
 /**
- * Sweep one ledger: probe each entry, kill only identity-CONFIRMED survivors,
- * then clear the ledger. Dead pids, recycled pids and wrong-age twins are
- * ledger-cleaned, never killed. A failing kill does not stop the sweep.
+ * List the direct children of a pid (CIM; the app's own taskkill /T needs a
+ * LIVE parent — a DEAD ledger pid's orphans must be enumerated and killed one
+ * by one). Used by the sweep when a ledger entry's process itself already died.
+ *
+ * @param {number} pid
+ * @returns {Promise<{ pid: number, name: string }[]>}
+ */
+export function defaultListChildProcesses(pid) {
+  return new Promise((resolve) => {
+    const ps = spawn(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `Get-CimInstance Win32_Process -Filter "ParentProcessId=${Math.trunc(pid)}" | ForEach-Object { '{0}|{1}' -f $_.Name, $_.ProcessId }`,
+      ],
+      { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] },
+    );
+    let stdout = "";
+    ps.stdout?.on("data", (chunk) => {
+      stdout += String(chunk);
+    });
+    ps.on("error", () => resolve([]));
+    ps.on("close", () => {
+      const kids = [];
+      for (const line of String(stdout).split(/\r?\n/)) {
+        const sep = line.indexOf("|");
+        if (sep === -1) continue;
+        const name = line.slice(0, sep).trim();
+        const childPid = Number(line.slice(sep + 1).trim());
+        if (name.length > 0 && Number.isInteger(childPid) && childPid > 0) kids.push({ pid: childPid, name });
+      }
+      resolve(kids);
+    });
+  });
+}
+
+/**
+ * Sweep one ledger: probe each entry, kill identity-CONFIRMED survivors, and
+ * when an entry's process is already DEAD, sweep the orphans it left behind
+ * (its still-live direct children — a dead pid cannot be taskkill /T'd, the
+ * children would otherwise outlive the sweep). A recycled pid (identity
+ * mismatch while alive) is NEVER touched — not the pid, not its children.
+ * Then the ledger resets. A failing kill does not stop the sweep.
  *
  * @param {{
  *   file: string,
  *   probeProcess?: (pid: number) => Promise<ProcessIdentity | null>,
  *   killProcess?: (pid: number) => Promise<void>,
+ *   listChildren?: (pid: number) => Promise<{ pid: number, name: string }[]>,
  *   log?: (message: string) => void,
  * }} options
- * @returns {Promise<{ checked: number, killed: number, stale: number }>}
+ * @returns {Promise<{ checked: number, killed: number, orphanChildren: number, stale: number }>}
  */
-export async function sweepPidLedger({ file, probeProcess = defaultProbeProcess, killProcess = defaultKillProcess, log }) {
+export async function sweepPidLedger({
+  file,
+  probeProcess = defaultProbeProcess,
+  killProcess = defaultKillProcess,
+  listChildren = defaultListChildProcesses,
+  log,
+}) {
   const ledger = createPidLedger({ file });
   const entries = ledger.read();
-  const outcome = { checked: 0, killed: 0, stale: 0 };
+  const outcome = { checked: 0, killed: 0, orphanChildren: 0, stale: 0 };
   for (const entry of entries) {
     outcome.checked += 1;
     let probed = null;
@@ -243,19 +281,43 @@ export async function sweepPidLedger({ file, probeProcess = defaultProbeProcess,
     } catch (err) {
       log?.(`ledger probe failed pid=${entry.pid}: ${err instanceof Error ? err.message : err}`);
     }
-    if (!identityMatches(entry, probed)) {
-      outcome.stale += 1;
+    if (identityMatches(entry, probed)) {
+      try {
+        await killProcess(entry.pid);
+        outcome.killed += 1;
+        log?.(`swept orphan pid=${entry.pid} (${probed?.name ?? "?"})`);
+      } catch (err) {
+        // a refused kill is still a ledger-cleared entry: the next launch must
+        // not inherit this crash scene forever; the log says what happened.
+        outcome.stale += 1;
+        log?.(`ledger kill failed pid=${entry.pid}: ${err instanceof Error ? err.message : err}`);
+      }
       continue;
     }
+    // Identity did not match. Two very different cases:
+    outcome.stale += 1;
+    if (probed !== null) {
+      // pid reused by ANOTHER live process: hands off — its children are
+      // that other process's business, not our crash scene.
+      continue;
+    }
+    // The ledger pid itself died (killed by the OS/job, or by an earlier
+    // sweep): its direct children, if any still live, are true orphans of the
+    // crash — kill them tree-by-tree. (Windows keeps ParentProcessId of dead
+    // parents queryable, so the enumeration finds exactly the leftovers.)
     try {
-      await killProcess(entry.pid);
-      outcome.killed += 1;
-      log?.(`swept orphan pid=${entry.pid} (${probed?.name ?? "?"})`);
+      const kids = await listChildren(entry.pid);
+      for (const kid of kids) {
+        try {
+          await killProcess(kid.pid);
+          outcome.orphanChildren += 1;
+          log?.(`swept orphan child pid=${kid.pid} (${kid.name}) of dead ledger pid=${entry.pid}`);
+        } catch (err) {
+          log?.(`ledger child kill failed pid=${kid.pid}: ${err instanceof Error ? err.message : err}`);
+        }
+      }
     } catch (err) {
-      // a refused kill is still a ledger-cleared entry: the next launch must
-      // not inherit this crash scene forever; the log says what happened.
-      outcome.stale += 1;
-      log?.(`ledger kill failed pid=${entry.pid}: ${err instanceof Error ? err.message : err}`);
+      log?.(`ledger child list failed pid=${entry.pid}: ${err instanceof Error ? err.message : err}`);
     }
   }
   ledger.clear();

@@ -28,14 +28,17 @@ export function hostPidFile(dataDir) {
 }
 
 /**
- * Record the current host right after fork. Overwrite semantics: the ledger
- * always describes the当代 host, never a history (the sweep is one scene deep).
+ * Record the current host right after fork — APPEND semantics: every host
+ * generation (supervisor restarts included) stays on the ledger until the
+ * next launch sweeps. Overwrite semantics would erase the crashed host's
+ * entry when the supervisor restarts, and the orphans under THAT dead pid
+ * (engine children, pi tool shells) would have no ledger to be swept by.
  *
  * @param {{ dataDir: string, pid: number | undefined, startedAt?: string }} input
  */
 export function recordHostPid({ dataDir, pid, startedAt }) {
   if (!pid) return;
-  createPidLedger({ file: hostPidFile(dataDir) }).replace({
+  createPidLedger({ file: hostPidFile(dataDir) }).record({
     pid,
     name: "electron", // utilityProcess is electron.exe; the identity guard's extension leniency matches it
     startedAt: startedAt ?? new Date().toISOString(),
@@ -52,12 +55,13 @@ export function recordHostPid({ dataDir, pid, startedAt }) {
  *   dataDir: string,
  *   probeProcess?: (pid: number) => Promise<import("../host/engine/child-ledger.mjs").ProcessIdentity | null>,
  *   killProcess?: (pid: number) => Promise<void>,
+ *   listChildren?: (pid: number) => Promise<{ pid: number, name: string }[]>,
  *   log?: (message: string) => void,
  *   engines?: string[],
  * }} options
- * @returns {Promise<{ host: { checked: number, killed: number, stale: number }, engines: Record<string, { checked: number, killed: number, stale: number }> }>}
+ * @returns {Promise<{ host: { checked: number, killed: number, orphanChildren: number, stale: number }, engines: Record<string, { checked: number, killed: number, orphanChildren: number, stale: number }> }>}
  */
-export async function sweepCrashResidue({ dataDir, probeProcess, killProcess, log, engines = ["codex"] }) {
+export async function sweepCrashResidue({ dataDir, probeProcess, killProcess, listChildren, log, engines = ["codex"] }) {
   /** @type {Record<string, any>} */
   const engineOutcomes = {};
   // Engine orphans first: they parent shell trees of their own; taskkill /T
@@ -65,16 +69,16 @@ export async function sweepCrashResidue({ dataDir, probeProcess, killProcess, lo
   // gone if it is still alive, but its WAL handle must be released either way).
   for (const engine of engines) {
     try {
-      engineOutcomes[engine] = await sweepPidLedger({ file: engineLedgerFile(dataDir, engine), probeProcess, killProcess, log });
+      engineOutcomes[engine] = await sweepPidLedger({ file: engineLedgerFile(dataDir, engine), probeProcess, killProcess, listChildren, log });
     } catch (err) {
       log?.(`engine residue sweep (${engine}) failed: ${err instanceof Error ? err.message : err}`);
-      engineOutcomes[engine] = { checked: 0, killed: 0, stale: 0 };
+      engineOutcomes[engine] = { checked: 0, killed: 0, orphanChildren: 0, stale: 0 };
     }
   }
-  /** @type {{ checked: number, killed: number, stale: number }} */
-  let hostOutcome = { checked: 0, killed: 0, stale: 0 };
+  /** @type {{ checked: number, killed: number, orphanChildren: number, stale: number }} */
+  let hostOutcome = { checked: 0, killed: 0, orphanChildren: 0, stale: 0 };
   try {
-    hostOutcome = await sweepPidLedger({ file: hostPidFile(dataDir), probeProcess, killProcess, log });
+    hostOutcome = await sweepPidLedger({ file: hostPidFile(dataDir), probeProcess, killProcess, listChildren, log });
   } catch (err) {
     log?.(`host residue sweep failed: ${err instanceof Error ? err.message : err}`);
   }

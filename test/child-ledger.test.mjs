@@ -101,7 +101,7 @@ test("清扫可容忍：账本文件不存在 = 无事发生；单个 kill 失�
       probeProcess: async () => null,
       killProcess: async () => {},
     });
-    assert.deepEqual(quiet, { checked: 0, killed: 0, stale: 0 });
+    assert.deepEqual(quiet, { checked: 0, killed: 0, orphanChildren: 0, stale: 0 });
 
     const file = LEDGER_FILE(dir);
     const ledger = createPidLedger({ file });
@@ -125,6 +125,35 @@ test("清扫可容忍：账本文件不存在 = 无事发生；单个 kill 失�
   }
 });
 
+test("清扫：账本条目已死时，它名下还活着的孤儿孩子也要杀掉（无主进程不靠自然老死）", async () => {
+  const { dir, dispose } = await withTempDir("dead-parent-children");
+  try {
+    const file = LEDGER_FILE(dir);
+    const ledger = createPidLedger({ file });
+    ledger.record({ pid: 3001, name: "codex", startedAt: "2026-11-07T10:00:00.000Z" }); // 已死
+    ledger.record({ pid: 3002, name: "codex", startedAt: "2026-11-07T10:00:01.000Z" }); // pid 被复用：它的孩子不碰！
+
+    /** @type {number[]} */
+    const killed = [];
+    const outcome = await sweepPidLedger({
+      file,
+      probeProcess: async (pid) => {
+        if (pid === 3001) return null; // 死了
+        return { name: "chrome.exe", createdAt: "2026-11-07T10:00:01.000Z" }; // 3002 被别的程序复用
+      },
+      listChildren: async (pid) => (pid === 3001 ? [{ pid: 3101, name: "powershell.exe" }] : [{ pid: 3201, name: "notepad.exe" }]),
+      killProcess: async (pid) => {
+        killed.push(pid);
+      },
+    });
+    assert.deepEqual(killed, [3101], "死账本条目名下的真孤儿被杀；pid 被复用条目的孩子不动（那是别人的进程）");
+    assert.equal(outcome.orphanChildren, 1);
+    assert.deepEqual(ledger.read(), []);
+  } finally {
+    await dispose();
+  }
+});
+
 test("真机 smoke：默认 CIM 探针 + taskkill 杀掉一个真孤儿进程", async () => {
   if (process.platform !== "win32") {
     return; // 账本机制跨平台，默认探针/杀手是 Windows 实现（taskkill/CIM）
@@ -140,10 +169,15 @@ test("真机 smoke：默认 CIM 探针 + taskkill 杀掉一个真孤儿进程", 
     const ledger = createPidLedger({ file });
     ledger.record({ pid: victimPid, name: "cmd", startedAt });
     try {
+      const { defaultListChildProcesses } = await import("../src/host/engine/child-ledger.mjs");
+      const kidsBefore = await defaultListChildProcesses(victimPid);
+      assert.ok(kidsBefore.length >= 1, "cmd /c ping 名下应有 ping.exe 孩子（CIM 默认可见）");
       const outcome = await sweepPidLedger({ file });
       assert.equal(outcome.checked, 1);
       assert.equal(outcome.killed, 1, "CIM 确认同名同生 → taskkill /T /F 落刀");
       assert.deepEqual(ledger.read(), []);
+      const kidsAfter = await defaultListChildProcesses(victimPid);
+      assert.equal(kidsAfter.length, 0, "/T 连孩子一起清（无主孙进程不留）");
       // 杀干净了吗？再探一次：进程应当已经不在。
       const { defaultProbeProcess } = await import("../src/host/engine/child-ledger.mjs");
       const after = await defaultProbeProcess(victimPid);

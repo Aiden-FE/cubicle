@@ -21,15 +21,6 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(here, "..", "..");
 const bootStartMs = Date.now();
 
-// 票 10: one Cubicle per data dir at a time. A second instance would race the
-// first on the SQLite WAL AND — worse — the crash-residue sweep would read
-// the FIRST instance's live host as an orphan and kill it. The single-
-// instance lock is what makes "a live host in the pid ledger means the app
-// died" a sound conclusion.
-if (!app.requestSingleInstanceLock()) {
-  app.quit();
-}
-
 // The entry lives in src/main; without an explicit userData Electron would
 // call the app "Electron" and use %APPDATA%\Electron. Default data home is
 // %APPDATA%\cubicle. CUBICLE_DATA_DIR also redirects userData (Chromium cache
@@ -62,6 +53,18 @@ function appendFileSyncProbe(file, payload) {
 }
 
 mkdirSync(app.getPath("userData"), { recursive: true });
+
+// 票 10: one Cubicle per data dir at a time. A second instance would race the
+// first on the SQLite WAL AND — worse — the crash-residue sweep would read
+// the FIRST instance's live host as an orphan and kill it. The single-
+// instance lock is what makes "a live host in the pid ledger means the app
+// died" a sound conclusion. (Must run AFTER setPath("userData"): the lock
+// file lives in userData — the M1 security policy rejects writes outside the
+// workspace, and the default location is %APPDATA%.)
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+}
 
 const e2eEnabled = process.argv.includes("--cubicle-e2e");
 const e2ePhase = /** @type {"create" | "verify"} */ (process.env.CUBICLE_E2E_PHASE ?? "create");
@@ -300,6 +303,7 @@ const exitCoordinator = createExitCoordinator({
 });
 
 app.whenReady().then(async () => {
+  if (!hasSingleInstanceLock) return; // second instance: the holder owns the data dir — do NOT sweep, do NOT spawn
   // 票 10: sweep crash residue BEFORE the first host spawns — an orphaned
   // AgentHost from a force-killed launch is a second SQLite writer, and its
   // engine children are the orphan processes the ticket forbids. (The single-

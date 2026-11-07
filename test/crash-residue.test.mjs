@@ -59,23 +59,24 @@ test("crash-residue：下次启动把「孤儿宿主」与「引擎孤儿」两�
   }
 });
 
-test("crash-residue：宿主 pid 记账每次 spawn 覆盖；清扫按 electron 名字守卫", async () => {
+test("crash-residue：宿主 pid 记账每次 spawn 追加（supervisor 重启的每一代宿主都是清扫候选）", async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), `cubicle-residue-pid-`));
   try {
     recordHostPid({ dataDir, pid: 111, startedAt: new Date().toISOString() });
     recordHostPid({ dataDir, pid: 222, startedAt: new Date().toISOString() });
     const ledger = createPidLedger({ file: hostPidFile(dataDir) });
-    assert.deepEqual(ledger.read().map((e) => e.pid), [222], "覆盖式记录：账上永远只有「当代宿主」一条");
+    assert.deepEqual(ledger.read().map((e) => e.pid), [111, 222], "追加式记录：活过又死过的每一代宿主都留账，死宿主名下的工具孤儿才有账可扫");
 
     const outcome = await sweepCrashResidue({
       dataDir,
-      probeProcess: async () => null, // 上代宿主早死了：不杀，只清账
+      probeProcess: async () => null, // 上代宿主都死了：不杀本体，只清账
+      listChildren: async () => [],
       killProcess: async () => {
         throw new Error("must not kill");
       },
     });
     assert.equal(outcome.host.killed, 0);
-    assert.equal(outcome.host.stale, 1);
+    assert.equal(outcome.host.stale, 2);
   } finally {
     await rm(dataDir, { recursive: true, force: true });
   }
