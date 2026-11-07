@@ -47,7 +47,8 @@ if (process.env.CUBICLE_PROBE_USERDATA) {
  */
 function appendFileSyncProbe(file, payload) {
   mkdirSync(path.dirname(file), { recursive: true });
-  appendFileSync(file, JSON.stringify(payload, null, 2) + "\n");
+  // One JSON value per line: append-safe evidence stream.
+  appendFileSync(file, JSON.stringify(payload) + "\n");
 }
 
 mkdirSync(app.getPath("userData"), { recursive: true });
@@ -271,7 +272,9 @@ const exitCoordinator = createExitCoordinator({
   awaitQuiet: () => invokeHost("host.awaitQuiet", {}, 30 * 60 * 1000),
   allowQuit: () => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
-    app.quit();
+    // e2e：runner 自己决定何时以什么码下线（app.exit），窗口销毁本身已证明
+    // 「pauseAll 落库在前」；真实退出才走 app.quit。
+    if (!e2eEnabled) app.quit();
   },
   onNote: (note) => {
     try {
@@ -305,6 +308,8 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
+  if (e2eEnabled) return; // e2e：退出时机与退出码由 runner 的结果统一决定（app.exit），
+  // 这里抢先 quit 会和「落盘证据刚写完」赛跑。
   app.quit();
 });
 

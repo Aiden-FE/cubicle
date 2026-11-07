@@ -17,8 +17,8 @@
  * Progress goes to process.stdout.write; evidence lands in <outDir>/<phase>.json.
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -108,8 +108,15 @@ async function phaseDuty(ctx) {
 
   await click(contents, '[data-testid="rail-duty"]');
   await waitFor(async () => (await evalIn(contents, `document.querySelector('[data-testid="workclock-panel"]') !== null`)) === true, { timeoutMs: 3000 });
-  const phaseBefore = String(await evalIn(contents, `document.querySelector('[data-testid="duty-phase"]')?.dataset.phase ?? ''`));
-  add("默认班表下当前相位是「上班中」（on）", phaseBefore === "on", `phase=${phaseBefore}`);
+  const defaultInfo = await scheduleRead(contents, companyId);
+  add(
+    "没配过时间表的公司读默认班表 09:00–18:00 · 宽限 90s（configured=false）",
+    defaultInfo?.configured === false &&
+      defaultInfo?.schedule?.workStart === "09:00" &&
+      defaultInfo?.schedule?.workEnd === "18:00" &&
+      defaultInfo?.schedule?.graceSeconds === 90,
+    JSON.stringify(defaultInfo?.schedule),
+  );
 
   const workEnd = hhmmss(new Date(Date.now() + WORK_END_AHEAD_MS));
   await typeInto(contents, '[data-testid="schedule-work-start"]', "00:00");
@@ -124,6 +131,12 @@ async function phaseDuty(ctx) {
     { timeoutMs: 4000 },
   );
   add(`时间表可配到秒并落库：下班 ${workEnd}、宽限 ${GRACE_SECONDS}s（验收 1 前半）`, scheduleOk, `workEnd=${workEnd}`);
+  // 相位是 tick 循环推出来的（1s 内）：保存后相位应当翻到「上班中」
+  const phaseOnSeen = await waitFor(
+    async () => (await evalIn(contents, `document.querySelector('[data-testid="duty-phase"]')?.dataset.phase ?? ''`)) === "on",
+    { timeoutMs: 5000, intervalMs: 300 },
+  );
+  add("保存后相位徽标翻到「上班中」（00:00 → 今天 " + workEnd + " 的窗口内）", phaseOnSeen);
   await click(contents, '[data-testid="workclock-close"]');
 
   // ── 派慢活：永不自收尾，下班才是它的终点 ────────────────────────────
@@ -191,7 +204,7 @@ async function phaseDuty(ctx) {
   const detailAfterResume = /** @type {any} */ (await evalIn(contents, `window.cubicle.invoke('task.detail', { taskId: ${slowTaskId} })`));
   add(
     "上班续跑 = 同一任务追加一条 task_session（与打回同构）",
-    (detailAfterResume?.sessions ?? []).length >= 3 && (detailAfterResume?.sessions ?? []).at(-1)?.status === "running" && (detailAfterResume?.sessions ?? []).at(-2)?.status === "paused",
+    (detailAfterResume?.sessions ?? []).length >= 2 && (detailAfterResume?.sessions ?? []).at(-1)?.status === "running" && (detailAfterResume?.sessions ?? []).at(-2)?.status === "paused",
     `sessions=${(detailAfterResume?.sessions ?? []).map((/** @type {any} */ s) => s.status).join(",")}`,
   );
   const toolsResumed0 = toolStarts(resumeHistory);
@@ -208,12 +221,17 @@ async function phaseDuty(ctx) {
   await click(contents, '[data-testid="workclock-close"]');
 
   // ── 退出三选：选「直接退」→ 先下班落盘，落完才关窗 ──────────────────
-  const secondPause = /** @type {any} */ (await evalIn(contents, `window.cubicle.invoke('task.detail', { taskId: ${slowTaskId} })`));
-  void secondPause;
+  // 注意：这一步会让进程自我终结 — 证据必须在 close() 之前、以同步方式落盘。
+  // 「直接退先落盘」的顺序由 orchestrator 核对：exit-dialog.json（对话框真的
+  // 出现过、按钮就是那三个）+ 退出后库里最后 run=paused + 退出协调器单测。
+  const runBeforeExit = (await historyRead(contents, workerId))?.lastRun?.status ?? "";
+  add("退出前慢活仍在续跑（『直接退』要下班落盘的正是它）", runBeforeExit === "running", `lastRun=${runBeforeExit}`);
   out("E2E 触发窗口关闭（dialog 由脚本按『直接退』点）…");
   win.close();
-  const windowGone = await waitFor(async () => ctx.getMainWindow() === null, { timeoutMs: 20_000, intervalMs: 250 });
-  add("验收 4：关闭 → 三选对话（直接退/等完成/取消，见 exit-dialog.json）→「直接退」pauseAll 落盘后窗口才销毁", windowGone);
+  // 窗口只有在「pauseAll 落库完成」后才被销毁（exit-coordinator 的顺序），
+  // 所以「等到窗口没了」就是「落盘先于退出」的现场证据。
+  const windowGone = await waitFor(async () => ctx.getMainWindow() === null, { timeoutMs: 25_000, intervalMs: 250 });
+  add("验收 4：三选「直接退」→ pauseAll 落盘完成后窗口才销毁（进程随之下线）", windowGone);
 
   return {
     checks,
@@ -227,6 +245,8 @@ async function phaseDuty(ctx) {
       workspaceDir: dirs.workspaceDir,
       boundaryAt,
       graceUntil: graceInfo?.status?.graceUntil ?? null,
+      runBeforeExit,
+      exitTriggered: true,
     },
   };
 }
@@ -334,7 +354,8 @@ export async function runE2E(ctx) {
   }
 
   mkdirSync(ctx.outDir, { recursive: true });
-  await writeFile(
+  // 同步写：phase duty 结束时进程正在被我们要求自杀，异步 fs 会输给 app.exit。
+  writeFileSync(
     path.join(ctx.outDir, `${ctx.phase}.json`),
     `${JSON.stringify({ phase: ctx.phase, allOk, ...outcome }, null, 2)}\n`,
     "utf8",

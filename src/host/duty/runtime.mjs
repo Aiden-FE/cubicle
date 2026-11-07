@@ -70,7 +70,10 @@ export function createDutyRuntime({ store, runManager, nowFn = () => Date.now(),
   /**
    * 上班激活：该公司「有未完成任务」的员工各续跑一次。
    *  - 进行中 + 最近一轮 paused → resume 通道（五状态不动，追加会话）；
-   *  - 待办 + 最近一轮 interrupted（崩溃自愈形状）→ 普通开工（open→running）；
+   *  - 进行中 + 最近一轮 interrupted（续跑后崩溃，开库自愈把会话落回
+   *    interrupted 但带 paused 历史的任务留在进行中）→ 也走 resume；
+   *  - 待办 + 最近一轮 interrupted/paused（崩溃自愈回待办的形状）→ 普通
+   *    开工（open→running 合法转移）；
    *  - 待办 + 没有会话 = 老板还没派过单 — 不擅自开工（诚实边界）。
    *
    * @param {number} companyId
@@ -80,7 +83,7 @@ export function createDutyRuntime({ store, runManager, nowFn = () => Date.now(),
     const promptFor = taskPromptFor ?? ((/** @type {any} */ task) => `继续完成任务：${task.title}`);
     for (const task of store.listTasksForCompany({ companyId })) {
       const latest = task.latestSessionStatus ?? null;
-      const resume = task.status === "running" && latest === "paused";
+      const resume = task.status === "running" && (latest === "paused" || latest === "interrupted");
       const revived = task.status === "open" && (latest === "interrupted" || latest === "paused");
       if (!resume && !revived) continue;
       try {

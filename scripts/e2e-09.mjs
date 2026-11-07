@@ -160,6 +160,11 @@ try {
     ok: Number(pausedCount?.n) >= 2,
     detail: `paused sessions=${pausedCount?.n}`,
   });
+  proof.push({
+    name: "runner 触发关闭前慢活确实还在跑（要掐的是活着的 run，不是空场）",
+    ok: evidence.exitTriggered === true && String(evidence.runBeforeExit ?? "") === "running",
+    detail: `exitTriggered=${evidence.exitTriggered} runBeforeExit=${evidence.runBeforeExit}`,
+  });
   db.close();
 } catch (err) {
   proof.push({ name: "db proof crashed", ok: false, detail: String(err) });

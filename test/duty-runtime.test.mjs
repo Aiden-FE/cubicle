@@ -283,6 +283,40 @@ test("手动 override：立即下班（无宽限）+ 立即上班（续跑），
   }
 });
 
+test("上班续跑也认「进行中 + 最近一轮 interrupted」：续跑后崩溃的活不被落下", async () => {
+  const ctx = await withRuntime("resume-interrupted");
+  try {
+    const group = ctx.store.officeSnapshot().groups[0];
+    const company = ctx.store.officeSnapshot().companies[0];
+    const worker = ctx.hireAt(0, "小程", group.id);
+    const task = ctx.store.createTask({
+      groupId: group.id,
+      employeeId: worker.id,
+      workspaceDir: "C:\\nowhere",
+      title: "昨晚续跑过又断了",
+      goal: "g",
+      playbook: "free",
+      acceptance: [],
+      baseHead: "d".repeat(40),
+    });
+    ctx.store.setTaskStatus(task.id, "running");
+    const session = ctx.store.getOrCreateEmployeeSession({ employeeId: worker.id, engine: "pi", agentDir: "a", sessionsDir: "s", workspaceDir: "w" });
+    const pausedFirst = ctx.store.openTaskSession({ taskId: task.id, employeeSessionId: session.id, engine: "pi" });
+    ctx.store.finishTaskSession({ taskSessionId: pausedFirst.id, status: "paused" }); // 下班落盘（自愈会因此不动任务状态）
+    const crashed = ctx.store.openTaskSession({ taskId: task.id, employeeSessionId: session.id, engine: "pi" }); // 上班续跑…
+    ctx.store.finishTaskSession({ taskSessionId: crashed.id, status: "interrupted" }); // …崩溃自愈落 interrupted
+    ctx.store.setDutyStatus({ companyId: company.id, phase: "off", phaseSince: ctx.at(20, 0, 0, 4), graceUntil: null });
+
+    ctx.setNow(ctx.at(9, 0, 1));
+    ctx.runtime.tick();
+    const resumes = ctx.started.filter((s) => s.resume);
+    assert.equal(resumes.length, 1, "进行中 + interrupted 也走 resume 通道续跑");
+    assert.equal(resumes[0].taskId, task.id);
+  } finally {
+    await ctx.dispose();
+  }
+});
+
 test("多公司并行：A 到点下班只掐 A 的 run，B 不受牵连", async () => {
   const ctx = await withRuntime("multi-company");
   try {
