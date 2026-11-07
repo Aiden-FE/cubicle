@@ -1,0 +1,33 @@
+# electron-builder · 票 13 打包（方案 1）
+#
+# 目标 = dir（win-unpacked 便携目录）。本机选 dir 而不是 nsis/portable 的
+# 原因（票 Answer 有完整说明）：nsis 默认装 %LOCALAPPDATA%、portable 解包到
+# %TEMP%，本机的安全策略拒绝 electron.exe 在工作区外写任何文件，装了也起不
+# 来；dir 形态 = 把 win-unpacked 整目录复制到干净目录（tmp/pkg-clean/app）
+# 即「安装」，卸载 = 删目录，语义和验收一致。
+appId: com.cubicle.desktop
+productName: Cubicle
+copyright: Cubicle
+
+directories:
+  output: dist/package
+  buildResources: build
+
+files:
+  - src/**/*
+  - dist/renderer/**/*
+  - scripts/e2e-harness.mjs
+  - scripts/e2e-13-runner.mjs
+  - scripts/sandbox-degrade.mjs
+  - package.json
+
+extraFiles:
+  - from: scripts/Start-Cubicle.ps1
+    to: Start-Cubicle.ps1
+
+asar: true
+
+win:
+  target:
+    - dir
+  executableName: cubicle

@@ -8,13 +8,16 @@
  * sandbox (exit 0x80000003 breakpoint before any JS runs; see AGENTS.md
  * 「M1 骨架环境坑」). A dev launch that dies with that signature is retried
  * once with --no-sandbox, loudly. CUBICLE_ELECTRON_ARGS passes extra flags
- * explicitly (then no auto-retry happens).
+ * explicitly (then no auto-retry happens). The decision itself lives in
+ * scripts/sandbox-degrade.mjs — the packaged launcher mirrors it (ticket 13).
  */
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { decideLaunchOutcome } from "./sandbox-degrade.mjs";
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -61,17 +64,11 @@ function launch(args) {
 }
 
 // Breakpoint before JS runs: the Chromium process sandbox cannot come up
-// under this machine's policy. (STATUS_BREAKPOINT / STATUS_ACCESS_VIOLATION;
-// Node may report these as signed or unsigned 32-bit, so normalize.)
-/** @param {number} code */
-const isSandboxCrash = (code) => {
-  const normalized = code < 0 ? code >>> 0 : code;
-  return normalized === 0x80000003 || normalized === 0xc0000005;
-};
-
+// under this machine's policy. Decision seam: sandbox-degrade.mjs (unit-tested;
+// the packaged Start-Cubicle.ps1 mirrors the same rule — e2e-13 proves it).
 let code = await launch(extraArgs);
 
-if (code !== 0 && extraArgs.length === 0 && isSandboxCrash(code)) {
+if (decideLaunchOutcome({ code, attempt: 0, extraArgs }) === "retry-no-sandbox") {
   console.warn(
     [
       "",
