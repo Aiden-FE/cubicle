@@ -840,3 +840,129 @@ test("an old database (run rows without task columns) gains the task columns on 
     await dispose();
   }
 });
+
+// — 主界面外壳 (ticket 08: 公司活跃数聚合 + 公司范围工单列表) —
+
+/**
+ * Seed two companies; company A gets one group with one employee, company B
+ * gets one group with its own employee. Returns handles for task building.
+ *
+ * @param {ReturnType<typeof openStore>} store
+ */
+function seedTwoCompanies(store) {
+  const a = store.officeSnapshot().companies[0];
+  const aGroup = store.officeSnapshot().groups[0];
+  const b = store.createCompany({ name: "远岸软件" });
+  const bGroup = store.createProjectGroup({ companyId: b.id, name: "看板组" });
+  const programmer = /** @type {any} */ (store.listRoles().find((r) => r.key === "programmer"));
+  const aDesk = store.listDesks({ groupId: aGroup.id })[0];
+  const bDesk = store.listDesks({ groupId: bGroup.id })[0];
+  const aEmployee = store.hireEmployee({ deskId: aDesk.id, roleId: programmer.id, name: "小程" }).employee;
+  const bEmployee = store.hireEmployee({ deskId: bDesk.id, roleId: programmer.id, name: "小岸" }).employee;
+  return { a, aGroup, b, bGroup, aEmployee, bEmployee };
+}
+
+/**
+ * Create a task in a given group and walk it to a wanted status via legal
+ * transitions (open → running → review → done; running → failed for 失败).
+ *
+ * @param {ReturnType<typeof openStore>} store
+ * @param {number} groupId
+ * @param {{ id: number }} employee
+ * @param {"open" | "running" | "review" | "done" | "failed"} status
+ * @param {string} title
+ */
+function taskAtStatus(store, groupId, employee, status, title) {
+  const task = store.createTask({
+    groupId,
+    employeeId: employee.id,
+    workspaceDir: "w",
+    title,
+    goal: title,
+    playbook: "free",
+    acceptance: [],
+    baseHead: "0".repeat(40),
+  });
+  if (status === "open") return task;
+  store.setTaskStatus(task.id, "running");
+  if (status === "running") return /** @type {any} */ (store.taskById(task.id));
+  if (status === "failed") {
+    store.setTaskStatus(task.id, "failed");
+    return /** @type {any} */ (store.taskById(task.id));
+  }
+  store.setTaskStatus(task.id, "review");
+  if (status === "review") return /** @type {any} */ (store.taskById(task.id));
+  store.setTaskStatus(task.id, "done");
+  return /** @type {any} */ (store.taskById(task.id));
+}
+
+test("companyTaskCounts aggregates 进行中/待验收 per company across every group of it", async () => {
+  const { dataDir, dispose } = await withTempDir("task-counts");
+  try {
+    const store = openStore({ dataDir });
+    const { aGroup, bGroup, aEmployee, bEmployee } = seedTwoCompanies(store);
+
+    // company A: 2 running + 1 review + noise that must NOT count (open/done/failed)
+    taskAtStatus(store, aGroup.id, aEmployee, "running", "A1 慢活");
+    taskAtStatus(store, aGroup.id, aEmployee, "running", "A2 慢活");
+    taskAtStatus(store, aGroup.id, aEmployee, "review", "A3 待验收");
+    taskAtStatus(store, aGroup.id, aEmployee, "open", "A4 待办");
+    taskAtStatus(store, aGroup.id, aEmployee, "done", "A5 完成");
+    taskAtStatus(store, aGroup.id, aEmployee, "failed", "A6 失败");
+    // company B: 1 review
+    taskAtStatus(store, bGroup.id, bEmployee, "review", "B1 待验收");
+
+    const counts = /** @type {any} */ (store.companyTaskCounts());
+    const aId = String(store.officeSnapshot().companies[0].id);
+    const bId = String(store.officeSnapshot().companies[1].id);
+    assert.deepEqual(counts[aId], { running: 2, review: 1 }, "只有 进行中/待验收 计入活跃数");
+    assert.deepEqual(counts[bId], { running: 0, review: 1 });
+    store.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("officeSnapshot carries the per-company active counts next to the company list", async () => {
+  const { dataDir, dispose } = await withTempDir("snapshot-counts");
+  try {
+    const store = openStore({ dataDir });
+    const { aGroup, aEmployee } = seedTwoCompanies(store);
+    taskAtStatus(store, aGroup.id, aEmployee, "running", "A1 慢活");
+    const snapshot = /** @type {any} */ (store.officeSnapshot());
+    const aId = String(snapshot.companies[0].id);
+    const bId = String(snapshot.companies[1].id);
+    assert.deepEqual(snapshot.taskCounts[aId], { running: 1, review: 0 });
+    assert.deepEqual(snapshot.taskCounts[bId], { running: 0, review: 0 }, "没有工单的公司也在计数表里（0/0）");
+    store.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("listTasksForCompany lists every group's tasks of one company with employee names", async () => {
+  const { dataDir, dispose } = await withTempDir("company-tasks");
+  try {
+    const store = openStore({ dataDir });
+    const { a, aGroup, b, bGroup, aEmployee, bEmployee } = seedTwoCompanies(store);
+    const a2Group = store.createProjectGroup({ companyId: a.id, name: "第二组" });
+    const a2Desk = store.listDesks({ groupId: a2Group.id })[0];
+    const a2Employee = store.hireEmployee({
+      deskId: a2Desk.id,
+      roleId: /** @type {any} */ (store.listRoles().find((r) => r.key === "tester")).id,
+      name: "小测",
+    }).employee;
+    const t1 = taskAtStatus(store, aGroup.id, aEmployee, "open", "A1");
+    const t2 = taskAtStatus(store, a2Group.id, a2Employee, "review", "A2");
+    taskAtStatus(store, bGroup.id, bEmployee, "running", "B1");
+
+    const listed = store.listTasksForCompany({ companyId: a.id });
+    assert.deepEqual(listed.map((t) => t.id), [t2.id, t1.id], "跨组聚合且最新在前");
+    assert.ok(listed.every((t) => typeof t.employeeName === "string" && t.employeeName.length > 0));
+    const bListed = store.listTasksForCompany({ companyId: b.id });
+    assert.deepEqual(bListed.map((t) => t.title), ["B1"], "别的公司的工单不混进来");
+    store.close();
+  } finally {
+    await dispose();
+  }
+});

@@ -8,7 +8,7 @@
 import { createReply, createErrorReply, createEvent, TOPICS } from "../shared/envelope.mjs";
 import { appError } from "../shared/apperror.mjs";
 import { draftTask, rejectPrompt, taskPrompt } from "./task/playbook.mjs";
-import { enginePaths } from "./engine/paths.mjs";
+import { engineConfigDir, enginePaths } from "./engine/paths.mjs";
 
 /**
  * @typedef {import("../shared/envelope.mjs").InvokeEnvelope} InvokeEnvelope
@@ -258,6 +258,15 @@ export function createService({ store, hostInfo, runManager, git }) {
 
     "task.list"(payload) {
       const record = /** @type {Record<string, unknown>} */ (payload ?? {});
+      // 票 08: 右把手按公司看全量（跨组）；工单台仍按组。两个都走同一扇门。
+      if (typeof record.companyId === "number") {
+        const companyId = requirePositiveId(payload, "companyId");
+        const companyExists = store
+          .officeSnapshot()
+          .companies.some((/** @type {{ id: number }} */ c) => c.id === companyId);
+        if (!companyExists) throw appError("unknown_company", `no company with id ${companyId}`);
+        return { payload: { tasks: store.listTasksForCompany({ companyId }) } };
+      }
       const groupId =
         typeof record.groupId === "number" ? requirePositiveId(payload, "groupId") : store.officeSnapshot().activeGroupId;
       if (groupId === null) return { payload: { tasks: [] } };
@@ -292,6 +301,25 @@ export function createService({ store, hostInfo, runManager, git }) {
      */
     "task.gitAudit"() {
       return { payload: { commands: requireGit().audit() } };
+    },
+
+    /**
+     * 引擎中心（票 08 外壳）：引擎名 + 配置目录路径。引擎卡徽章 / 可用性探针
+     * 属票 11 — 这里只把「有哪些引擎、配置放哪」这条查询立起来，卡片插槽留给
+     * 它。引擎集合从角色 manifest 里出现过的引擎去重（预设全是 pi；将来
+     * 招聘 codex 员工，它的引擎自然进列表）。
+     */
+    "engine.overview"() {
+      /** @type {{ name: string, configDir: string }[]} */
+      const engines = [];
+      const seen = new Set();
+      for (const role of store.listRoles()) {
+        const name = role.manifest.engine && role.manifest.engine.length > 0 ? role.manifest.engine : "pi";
+        if (seen.has(name)) continue;
+        seen.add(name);
+        engines.push({ name, configDir: engineConfigDir(store.dataDir, name) });
+      }
+      return { payload: { engines, dataDir: store.dataDir } };
     },
 
     "office.setActive"(payload) {

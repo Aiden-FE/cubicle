@@ -127,6 +127,12 @@ import { appError } from "../shared/apperror.mjs";
  * @property {GroupRow[]} groups
  * @property {number | null} activeGroupId
  * @property {DeskRow[]} desks
+ * @property {Record<string, CompanyTaskCounts>} taskCounts
+ *   票 08: companyId(字符串键) → 各公司活跃数（进行中/待验收），随快照走。
+ *
+ * @typedef {object} CompanyTaskCounts
+ * @property {number} running 进行中
+ * @property {number} review 待验收
  */
 
 const SCHEMA = `
@@ -850,6 +856,69 @@ export function openStore({ dataDir }) {
     },
 
     /**
+     * Every task across EVERY project group of one company (票 08: 右把手按
+     * 公司看三段列表；工单台仍按组看)。Newest first.
+     *
+     * @param {{ companyId: number }} input @returns {TaskRowWithEmployee[]}
+     */
+    listTasksForCompany({ companyId }) {
+      const rows = db
+        .prepare(
+          `SELECT t.*, e.name AS e_name FROM task t
+           JOIN employee e ON e.id = t.employee_id
+           JOIN project_group g ON g.id = t.group_id
+           WHERE g.company_id = ? ORDER BY t.id DESC`,
+        )
+        .all(companyId);
+      return rows.map((row) => ({
+        ...toTask(/** @type {Record<string, unknown>} */ (row)),
+        employeeName: String(/** @type {Record<string, unknown>} */ (row).e_name),
+      }));
+    },
+
+    /**
+     * Active work-order counts per company — 进行中 + 待验收 — aggregated
+     * across every project group of the company (票 08: 公司切换器显示各公司
+     * 活跃数). Companies without tasks read 0/0, so the UI never guesses.
+     *
+     * @returns {Record<string, CompanyTaskCounts>} keyed by companyId (string
+     *   because JSON map keys are strings; Number() them back at the seam).
+     */
+    companyTaskCounts() {
+      const rows = db
+        .prepare(
+          `SELECT g.company_id AS cid, t.status AS status, COUNT(*) AS n
+           FROM task t JOIN project_group g ON g.id = t.group_id
+           WHERE t.status IN ('running', 'review')
+           GROUP BY g.company_id, t.status`,
+        )
+        .all();
+      /** @type {Map<number, CompanyTaskCounts>} */
+      const byCompany = new Map();
+      const bucket = (/** @type {number} */ companyId) => {
+        let entry = byCompany.get(companyId);
+        if (!entry) {
+          entry = { running: 0, review: 0 };
+          byCompany.set(companyId, entry);
+        }
+        return entry;
+      };
+      for (const raw of rows) {
+        const row = /** @type {Record<string, unknown>} */ (raw);
+        const entry = bucket(Number(row.cid));
+        if (String(row.status) === "running") entry.running += Number(row.n);
+        else entry.review += Number(row.n);
+      }
+      /** @type {Record<string, CompanyTaskCounts>} */
+      const counts = {};
+      for (const company of db.prepare("SELECT id FROM company ORDER BY id").all()) {
+        const companyId = Number(/** @type {Record<string, unknown>} */ (company).id);
+        counts[String(companyId)] = bucket(companyId);
+      }
+      return counts;
+    },
+
+    /**
      * The only door to a task's status: the five-state transition map makes
      * illegal jumps (待办→完成, 完成→任何) impossible at the host, so the UI
      * only ever displays states and triggers legal ones (票 06 验收 5).
@@ -1019,7 +1088,7 @@ export function openStore({ dataDir }) {
         ? chosen
         : (groups.at(-1)?.id ?? null);
       const desks = activeGroupId === null ? [] : this.listDesks({ groupId: activeGroupId });
-      return { companies, activeCompanyId, groups, activeGroupId, desks };
+      return { companies, activeCompanyId, groups, activeGroupId, desks, taskCounts: this.companyTaskCounts() };
     },
 
     close() {

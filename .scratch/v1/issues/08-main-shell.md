@@ -4,7 +4,7 @@
 
 **Blocked by:** 03, 06
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] 左轨四个入口可用，公司切换器显示各公司活跃数
 - [ ] 右把手显示活跃工单数，拉开是「进行中 / 待验收 / 档案」三段

@@ -760,3 +760,119 @@ test("accept / reject / cancel answer unknown_task for tasks that do not exist",
     await dispose();
   }
 });
+
+// — 主界面外壳 (ticket 08: 公司活跃数走类型化信封、切公司只换视图) —
+
+test("office.get answers with per-company active counts (进行中/待验收) in the envelope", async () => {
+  const { service, runManager, store, groupId, employeeId, dispose } = await withTaskService("office-counts");
+  try {
+    const other = service.handle(createInvoke("o1", "company.create", { name: "远岸软件" })).reply;
+    assert.equal(other.ok, true);
+
+    // dispatch one task so company A shows a live 进行中 (stub settles → review)
+    const created = /** @type {any} */ (serviceTaskCreate(service, employeeId, "加个欢迎语").task);
+    const dispatched = service.handle(createInvoke("o2", "task.dispatch", { taskId: created.id }));
+    assert.equal(dispatched.reply.ok, true);
+    const runningSnapshot = /** @type {any} */ (service.handle(createInvoke("o3", "office.get", {})).reply.payload);
+    const aId = String(store.officeSnapshot().companies[0].id);
+    const bId = String(/** @type {any} */ (other.payload).id);
+    assert.deepEqual(runningSnapshot.taskCounts[aId], { running: 1, review: 0 });
+    assert.deepEqual(runningSnapshot.taskCounts[bId], { running: 0, review: 0 });
+    await runManager.whenQuiet();
+    void groupId;
+  } finally {
+    await dispose();
+  }
+});
+
+test("task.list answers company-scoped when asked with companyId (右把手数据源)", async () => {
+  const { service, store, groupId, employeeId, dispose } = await withTaskService("task-list-company");
+  try {
+    const created = /** @type {any} */ (serviceTaskCreate(service, employeeId, "A 公司的工单").task);
+    const company = /** @type {any} */ (service.handle(createInvoke("c1", "company.create", { name: "远岸软件" })).reply.payload);
+    const group = /** @type {any} */ (service.handle(createInvoke("c2", "projectGroup.create", { companyId: company.id, name: "看板组" })).reply.payload);
+    const roles = /** @type {any} */ (service.handle(createInvoke("c3", "role.list", {})).reply.payload);
+    const hired = /** @type {any} */ (
+      service.handle(createInvoke("c4", "employee.hire", { deskId: group.desks[0].id, roleId: roles.roles[0].id, name: "小岸" })).reply.payload
+    );
+    const bTask = /** @type {any} */ (
+      serviceTaskCreate(service, hired.employee.id, "B 公司的工单").task
+    );
+
+    const companyAId = String(store.officeSnapshot().companies[0].id);
+    const aList = /** @type {any} */ (service.handle(createInvoke("c5", "task.list", { companyId: store.officeSnapshot().companies[0].id })).reply.payload);
+    assert.deepEqual(aList.tasks.map((/** @type {any} */ t) => t.id), [created.id]);
+    const bList = /** @type {any} */ (service.handle(createInvoke("c6", "task.list", { companyId: company.id })).reply.payload);
+    assert.deepEqual(bList.tasks.map((/** @type {any} */ t) => t.id), [bTask.id]);
+    void companyAId;
+    void groupId;
+
+    const unknown = service.handle(createInvoke("c7", "task.list", { companyId: 987654 }));
+    assert.equal(unknown.reply.ok, false);
+    assert.equal(unknown.reply.error?.code, "unknown_company");
+  } finally {
+    await dispose();
+  }
+});
+
+test("office.get is a pure read: repeat calls answer identically and emit nothing (浮层不改变快照语义)", async () => {
+  const { service, dispose } = await withService("office-pure");
+  try {
+    const first = service.handle(createInvoke("p1", "office.get", {}));
+    // 浮层交互（开合、切换视图）不写 host；唯一的写是 office.setActive（视图选择本身）。
+    const second = service.handle(createInvoke("p2", "office.get", {}));
+    assert.deepEqual(second.reply.payload, first.reply.payload);
+    assert.deepEqual(first.events, []);
+    assert.deepEqual(second.events, []);
+  } finally {
+    await dispose();
+  }
+});
+
+test("switching company only moves the view: other companies' tasks and counts stay put", async () => {
+  const { service, runManager, store, employeeId, dispose } = await withTaskService("switch-view");
+  try {
+    const created = /** @type {any} */ (serviceTaskCreate(service, employeeId, "A 公司的工单").task);
+    service.handle(createInvoke("v1", "task.dispatch", { taskId: created.id }));
+
+    const companyB = /** @type {any} */ (service.handle(createInvoke("v2", "company.create", { name: "远岸软件" })).reply.payload);
+    const switched = service.handle(createInvoke("v3", "office.setActive", { companyId: companyB.id }));
+    assert.equal(switched.reply.ok, true);
+
+    // company A's task is untouched by the switch (host 不受影响)
+    assert.equal(/** @type {any} */ (store.taskById(created.id)).status, "running");
+    const snapshot = /** @type {any} */ (service.handle(createInvoke("v4", "office.get", {})).reply.payload);
+    assert.equal(snapshot.activeCompanyId, companyB.id);
+    const aId = String(store.officeSnapshot().companies[0].id);
+    assert.deepEqual(snapshot.taskCounts[aId], { running: 1, review: 0 }, "切到 B 之后 A 的活跃数照样可查");
+    const aTasks = /** @type {any} */ (service.handle(createInvoke("v5", "task.list", { companyId: store.officeSnapshot().companies[0].id })).reply.payload);
+    assert.equal(aTasks.tasks[0].status, "running");
+
+    // and switching back finds everything where it was (切回后状态正确)
+    const back = service.handle(createInvoke("v6", "office.setActive", { companyId: store.officeSnapshot().companies[0].id }));
+    assert.equal(back.reply.ok, true);
+    const after = /** @type {any} */ (service.handle(createInvoke("v7", "office.get", {})).reply.payload);
+    assert.notEqual(after.activeCompanyId, companyB.id);
+    assert.equal(after.desks.length, 4, "切回 A 画布回到 A 的四个工位");
+    assert.equal(/** @type {any} */ (store.taskById(created.id)).status, "running");
+    await runManager.whenQuiet();
+  } finally {
+    await dispose();
+  }
+});
+
+test("engine.overview answers with each engine's name and config directory (票 08 引擎中心外壳)", async () => {
+  const { service, dispose } = await withService("engine-overview");
+  try {
+    const { reply, events } = service.handle(createInvoke("e1", "engine.overview", {}));
+    assert.equal(reply.ok, true);
+    assert.deepEqual(events, []);
+    const payload = /** @type {any} */ (reply.payload);
+    const pi = payload.engines.find((/** @type {any} */ e) => e.name === "pi");
+    assert.ok(pi, `engines=${JSON.stringify(payload.engines)}`);
+    assert.ok(pi.configDir.endsWith(path.join("engines", "pi")), pi.configDir);
+    assert.ok(typeof payload.dataDir === "string" && payload.dataDir.length > 0);
+  } finally {
+    await dispose();
+  }
+});

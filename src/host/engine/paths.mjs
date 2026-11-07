@@ -10,13 +10,25 @@
 import path from "node:path";
 
 /**
+ * The engine-level config folder inside the data dir (`engines/<engine>/`):
+ * BYOK models.json / auth live here; per-employee folders hang under it.
+ *
+ * @param {string} dataDir the app data root
+ * @param {string} engine engine key, e.g. "pi"
+ * @returns {string}
+ */
+export function engineConfigDir(dataDir, engine) {
+  return path.join(dataDir, "engines", engine);
+}
+
+/**
  * @param {string} dataDir the app data root
  * @param {string} engine engine key, e.g. "pi"
  * @param {number} employeeId
  * @returns {{ root: string, agentDir: string, sessionsDir: string, workspaceDir: string }}
  */
 export function enginePaths(dataDir, engine, employeeId) {
-  const root = path.join(dataDir, "engines", engine, `employee-${employeeId}`);
+  const root = path.join(engineConfigDir(dataDir, engine), `employee-${employeeId}`);
   return {
     root,
     agentDir: path.join(root, "agent"),
