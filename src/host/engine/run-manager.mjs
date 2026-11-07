@@ -24,6 +24,8 @@ import { mkdirSync } from "node:fs";
 
 import { appError } from "../../shared/apperror.mjs";
 import { enginePaths } from "./paths.mjs";
+import { explainRunFailure } from "./failure.mjs";
+import { budgetState } from "../cost/budget.mjs";
 
 /** Cap for the in-memory tail of engine events kept per employee so a view
  *  reload can re-paint the last run (ticket 05 persists the real history). */
@@ -45,6 +47,9 @@ const HISTORY_CAP = 400;
  * @property {LiveSession | null} live        opened engine session for this run
  * @property {Promise<LiveSession> | null} opening in-flight adapter.open()
  * @property {import("./events.mjs").Usage} usage running fold of every turn_end usage (票 06)
+ * @property {boolean} usageReported 票 12: 引擎报过 usage（哪怕全是 0）— 与「未计量」严格区分
+ * @property {boolean} budgetWarned  票 12: 80% 黄点只报一次
+ * @property {boolean} budgetTripped 票 12: 100% 自动暂停只触发一次
  */
 
 /**
@@ -123,10 +128,13 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
       runId: runRef.run.id,
       employeeId: runRef.run.employeeId,
       sessionId: runRef.run.employeeSessionId,
+      // 票 12: 任务侧边栏要在事件流上认出「这是哪张工单」的预算信号。
+      taskId: runRef.run.taskId,
       at: Date.now(),
       event,
     };
     if (event.type === "turn_end") foldUsage(runRef.usage, event.usage);
+    if (event.type === "turn_end" && event.usage) runRef.usageReported = true;
     const buffer = lastRunEvents.get(runRef.run.employeeId);
     if (buffer && buffer.runId === runRef.run.id) {
       buffer.events.push({ at: payload.at, event });
@@ -134,6 +142,49 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
     }
     emit(payload);
     for (const listener of listeners) listener(payload);
+    // 票 12: 用量一落地就查预算（黄点/自动暂停的判定在 cost/budget 纯函数），
+    // 在引发它的 turn_end 之后才上流 — 信号顺序与因果一致。
+    if (event.type === "turn_end") checkBudget(runRef);
+  }
+
+  /**
+   * 票 12 验收 4 — the per-task soft gate, judged on every usage fold:
+   *  - 80%: one `budget_warning` on the run stream (UI 黄点) — the run keeps running;
+   *  - 100%: one `budget_exhausted`, then pause the run through 票 09 的
+   *    settleCancel(paused) door — run/task_session land 'paused', the task
+   *    stays 进行中 (no sixth task state), and the engine abort means no new
+   *    tool call can follow the cap. 「+50%」 (service) raises THIS task's
+   *    budget and resumes by appending a session (06/09 同构).
+   *
+   * @param {ActiveRun} runRef
+   */
+  function checkBudget(runRef) {
+    if (runRef.run.taskId === null) return;
+    if (runRef.finished || runRef.aborted || runRef.paused) return;
+    const task = store.taskById(runRef.run.taskId);
+    if (!task) return;
+    const past = store.taskTokenSummary(runRef.run.taskId).total;
+    const live = usageTotal(runRef.usage);
+    const state = budgetState(past + live, task.tokenBudget);
+    if (state === "warn" && !runRef.budgetWarned) {
+      runRef.budgetWarned = true;
+      pushEvent(runRef, { type: "budget_warning", tokens: past + live, budget: task.tokenBudget });
+    } else if (state === "exhausted" && !runRef.budgetTripped) {
+      runRef.budgetTripped = true;
+      pushEvent(runRef, { type: "budget_exhausted", tokens: past + live, budget: task.tokenBudget });
+      // The engine must stop NOW — same handshake as 下班, landing 'paused'.
+      settleCancel(runRef.run.employeeId, true).catch(() => {
+        // a failing engine abort still lands: endRunSynthetically closes the run
+      });
+    }
+  }
+
+  /**
+   * @param {import("./events.mjs").Usage} usage
+   * @returns {number}
+   */
+  function usageTotal(usage) {
+    return usage.input + usage.cachedInput + usage.cacheWrite + usage.output + usage.reasoning;
   }
 
   /**
@@ -152,8 +203,15 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
     // 'failed' on purpose: the protocol says every run ends with agent_end,
     // so a silent settle never counts as a clean completion.
     try {
-      const hasUsage = Object.values(runRef.usage).some((n) => n > 0);
-      store.finishRun({ runId: runRef.run.id, status, usage: hasUsage ? runRef.usage : null });
+      // 票 12: 引擎报过 usage 就存（全 0 也是「计量到 0」）；没报过才是 null（未计量）。
+      store.finishRun({
+        runId: runRef.run.id,
+        status,
+        usage: runRef.usageReported ? runRef.usage : null,
+        // 票 12 验收 1: 把 error 事件 code + 引擎最后状态折叠成人话存起来（不是堆栈），
+        // 任务侧边栏读它 + 给「重试」出口。
+        failReason: explainRunFailure({ status, events: runTailEvents(runRef) }),
+      });
       const pointer = runRef.live?.sessionFile() ?? null;
       if (pointer) {
         store.setEmployeeSessionFile({ employeeSessionId: runRef.run.employeeSessionId, sessionFile: pointer });
@@ -182,6 +240,18 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
     }
     active.delete(runRef.run.employeeId);
     signalQuiet();
+  }
+
+  /**
+   * The normalized events streamed for this run so far (its tail buffer) —
+   * the witness explainRunFailure folds into the human failure reason.
+   *
+   * @param {ActiveRun} runRef
+   * @returns {NormalizedEvent[]}
+   */
+  function runTailEvents(runRef) {
+    const buffer = lastRunEvents.get(runRef.run.employeeId);
+    return buffer && buffer.runId === runRef.run.id ? buffer.events.map((entry) => entry.event) : [];
   }
 
   /**
@@ -276,6 +346,9 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
       live: liveSessions.get(session.id) ?? null,
       opening: null,
       usage: zeroUsage(),
+      usageReported: false,
+      budgetWarned: false,
+      budgetTripped: false,
     };
     active.set(employeeId, runRef);
     lastRunEvents.set(employeeId, { runId: run.id, events: [] });

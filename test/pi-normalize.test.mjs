@@ -85,6 +85,32 @@ test("turn boundaries report status and usage", () => {
   );
 });
 
+test("票 12: pi 的全 0 usage 占位（provider 没报）折叠成「没报」，不是 0", () => {
+  // pi's assistant-message shell starts with an all-zero usage placeholder; a
+  // provider that never reports usage leaves it at zero. Folding that as a
+  // real 0 would make 「未计量」 engines lie — 06 principle: never invent.
+  assert.deepEqual(
+    normalizePiEvent({
+      type: "turn_end",
+      message: {
+        stopReason: "stop",
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+      },
+      toolResults: [],
+    }),
+    [{ type: "turn_end", status: "ok" }],
+  );
+  // a single non-zero number is a report — it must survive
+  assert.deepEqual(
+    normalizePiEvent({
+      type: "turn_end",
+      message: { stopReason: "stop", usage: { input: 0, output: 3, cacheRead: 0, cacheWrite: 0, reasoning: 0 } },
+      toolResults: [],
+    }),
+    [{ type: "turn_end", status: "ok", usage: { input: 0, cachedInput: 0, cacheWrite: 0, output: 3, reasoning: 0 } }],
+  );
+});
+
 test("chatty pi bookkeeping events are ignored, unknown ones surface", () => {
   for (const raw of [
     { type: "message_start", message: { role: "assistant" } },

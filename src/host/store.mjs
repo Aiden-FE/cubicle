@@ -12,6 +12,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 
 import { appError } from "../shared/apperror.mjs";
+import { DEFAULT_TASK_TOKEN_BUDGET } from "./cost/budget.mjs";
 
 /**
  * @typedef {object} CompanyRow
@@ -82,12 +83,14 @@ import { appError } from "../shared/apperror.mjs";
  * @property {string} engine
  * @property {"running" | "completed" | "aborted" | "failed" | "interrupted" | "paused"} status
  *   票 09: 'paused' = 下班落盘 — 这一轮收尾合上，任务仍停在「进行中」等上班续跑。
+ *   票 12: 预算到顶的自动暂停也落 paused（复用同层，不新增任务第六态）。
  * @property {string} prompt
  * @property {string} startedAt
  * @property {string | null} endedAt
  * @property {number | null} taskId
  * @property {number | null} taskSessionId
  * @property {import("./engine/events.mjs").Usage | null} usage engine-reported tokens, folded at finish (票 06: 本任务 token)
+ * @property {string | null} failReason 票 12: 失败的人话原因（折叠自 error 事件 + 引擎最后状态），不是堆栈
  *
  * @typedef {object} TaskRow
  * @property {number} id
@@ -100,6 +103,7 @@ import { appError } from "../shared/apperror.mjs";
  * @property {string[]} acceptance
  * @property {string} baseHead
  * @property {TaskStatus} status
+ * @property {number} tokenBudget 票 12: 这张工单的 token 预算（创建时从角色 cost 落库，+50% 就地提高）
  * @property {string} createdAt
  *
  * @typedef {TaskRow & { employeeName: string, latestSessionStatus?: string | null }} TaskRowWithEmployee
@@ -160,10 +164,18 @@ import { appError } from "../shared/apperror.mjs";
  * @property {DeskRow[]} desks
  * @property {Record<string, CompanyTaskCounts>} taskCounts
  *   票 08: companyId(字符串键) → 各公司活跃数（进行中/待验收），随快照走。
+ * @property {Record<string, TokenTotal>} employeeTokens
+ *   票 12: employeeId(字符串键) → 员工级 token 聚合（名牌数据源）。
+ * @property {Record<string, TokenTotal>} companyTokens
+ *   票 12: companyId(字符串键) → 公司级 token 聚合（左轨公司面板数据源）。
  *
  * @typedef {object} CompanyTaskCounts
  * @property {number} running 进行中
  * @property {number} review 待验收
+ *
+ * @typedef {object} TokenTotal
+ * @property {number} total 已计量的 token 总数（只有 measured=false 时 0 才意味着「没数」）
+ * @property {boolean} measured false = 未计量（没有一轮引擎报过用量），显示为「未计量」而非 0
  */
 
 const SCHEMA = `
@@ -228,7 +240,8 @@ CREATE TABLE IF NOT EXISTS run (
   ended_at TEXT,
   usage TEXT,
   task_id INTEGER REFERENCES task(id),
-  task_session_id INTEGER REFERENCES task_session(id)
+  task_session_id INTEGER REFERENCES task_session(id),
+  fail_reason TEXT
 );
 CREATE TABLE IF NOT EXISTS task (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -241,6 +254,7 @@ CREATE TABLE IF NOT EXISTS task (
   acceptance TEXT NOT NULL,
   base_head TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('open', 'running', 'review', 'done', 'failed')) DEFAULT 'open',
+  token_budget INTEGER NOT NULL DEFAULT 500000,
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS task_session (
@@ -486,6 +500,7 @@ function toRun(row) {
     taskSessionId:
       row.task_session_id === null || row.task_session_id === undefined ? null : Number(row.task_session_id),
     usage: parseUsage(row.usage),
+    failReason: row.fail_reason === null || row.fail_reason === undefined ? null : String(row.fail_reason),
   };
 }
 
@@ -540,6 +555,9 @@ function toTask(row) {
     acceptance,
     baseHead: String(row.base_head),
     status: /** @type {TaskRow["status"]} */ (String(row.status)),
+    // 票 12: 预算落在任务行上（角色 cost 建单时抄进来，+50% 就地改这一行）。
+    tokenBudget:
+      typeof row.token_budget === "number" && row.token_budget > 0 ? row.token_budget : DEFAULT_TASK_TOKEN_BUDGET,
     createdAt: String(row.created_at),
     ...(row.latest_session_status === undefined
       ? {}
@@ -742,6 +760,7 @@ export function openStore({ dataDir }) {
   // Databases built before that carry the UNIQUE on the column itself —
   // rebuild them in place, ids first (run rows reference those ids).
   migrateEmployeeSessionPerEngine(db);
+  migrateCostColumns(db);
   // A host that died (or was killed) mid-run must not leave phantom 'running'
   // rows behind: they become 'interrupted' the moment a host opens the store.
   markInterruptedRuns(db);
@@ -961,18 +980,21 @@ export function openStore({ dataDir }) {
     },
 
     /**
-     * @param {{ runId: number, status: "completed" | "aborted" | "failed" | "interrupted" | "paused", usage?: import("./engine/events.mjs").Usage | null }} input
+     * @param {{ runId: number, status: "completed" | "aborted" | "failed" | "interrupted" | "paused", usage?: import("./engine/events.mjs").Usage | null, failReason?: string | null }} input
      * @returns {RunRow}
      */
-    finishRun({ runId, status, usage }) {
+    finishRun({ runId, status, usage, failReason }) {
       if (!TERMINAL_RUN_STATUSES.has(status)) {
         throw appError("invalid_payload", `run cannot finish with status ${status}`);
       }
-      const usageJson = usage && Object.values(usage).some((n) => n > 0) ? JSON.stringify(usage) : null;
-      db.prepare("UPDATE run SET status = ?, ended_at = ?, usage = ? WHERE id = ? AND status = 'running'").run(
+      // 票 12: usage 的三态在这里定型 —— 引擎报了什么就存什么（全 0 也是「计量到 0」），
+      // 只有「从没报过」才留 null（未计量）。把 0 塌回 null 会毁掉缺失/0 的区分。
+      const usageJson = usage ? JSON.stringify(usage) : null;
+      db.prepare("UPDATE run SET status = ?, ended_at = ?, usage = ?, fail_reason = ? WHERE id = ? AND status = 'running'").run(
         status,
         new Date().toISOString(),
         usageJson,
+        failReason ?? null,
         runId,
       );
       const row = db.prepare("SELECT * FROM run WHERE id = ?").get(runId);
@@ -1012,20 +1034,24 @@ export function openStore({ dataDir }) {
      * approved, the employee that owns it, and the git start HEAD recorded
      * at creation (every later diff is relative to this point).
      *
-     * @param {{ groupId: number, employeeId: number, workspaceDir: string, title: string, goal: string, playbook: string, acceptance: string[], baseHead: string }} input
+     * @param {{ groupId: number, employeeId: number, workspaceDir: string, title: string, goal: string, playbook: string, acceptance: string[], baseHead: string, tokenBudget?: number }} input
      * @returns {TaskRow}
      */
-    createTask({ groupId, employeeId, workspaceDir, title, goal, playbook, acceptance, baseHead }) {
+    createTask({ groupId, employeeId, workspaceDir, title, goal, playbook, acceptance, baseHead, tokenBudget }) {
       if (!db.prepare("SELECT id FROM project_group WHERE id = ?").get(groupId)) {
         throw appError("unknown_group", `no project group with id ${groupId}`);
       }
       if (!db.prepare("SELECT id FROM employee WHERE id = ?").get(employeeId)) {
         throw appError("unknown_employee", `no employee with id ${employeeId}`);
       }
+      const budget =
+        typeof tokenBudget === "number" && Number.isInteger(tokenBudget) && tokenBudget > 0
+          ? tokenBudget
+          : DEFAULT_TASK_TOKEN_BUDGET;
       const createdAt = new Date().toISOString();
       const info = db
         .prepare(
-          "INSERT INTO task (group_id, employee_id, workspace_dir, title, goal, playbook, acceptance, base_head, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)",
+          "INSERT INTO task (group_id, employee_id, workspace_dir, title, goal, playbook, acceptance, base_head, status, token_budget, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)",
         )
         .run(
           groupId,
@@ -1036,6 +1062,7 @@ export function openStore({ dataDir }) {
           playbook,
           JSON.stringify(Array.isArray(acceptance) ? acceptance.map(String) : []),
           baseHead,
+          budget,
           createdAt,
         );
       return toTask(/** @type {Record<string, unknown>} */ (db.prepare("SELECT * FROM task WHERE id = ?").get(Number(info.lastInsertRowid))));
@@ -1238,20 +1265,23 @@ export function openStore({ dataDir }) {
     },
 
     /**
-     * The task's token bill (票 06: 侧边栏展示本任务 token): every run of
-     * every iteration of the task, with its engine-reported usage summed.
+     * The task's token bill (票 06: 侧边栏展示本任务 token; 票 12: + 未计量三态):
+     * every run of every iteration of the task, with its engine-reported usage
+     * summed. `measured=false` means no run of this task ever reported usage —
+     * the UI must show 「未计量」, not 0 (验收 5: 缺失与 0 严格区分).
      *
      * @param {number} taskId
-     * @returns {{ input: number, cachedInput: number, cacheWrite: number, output: number, reasoning: number, total: number }}
+     * @returns {{ input: number, cachedInput: number, cacheWrite: number, output: number, reasoning: number, total: number, measured: boolean }}
      */
     taskTokenSummary(taskId) {
       const rows = db
-        .prepare("SELECT usage FROM run WHERE task_id = ? AND usage IS NOT NULL")
+        .prepare("SELECT usage FROM run WHERE task_id = ?")
         .all(taskId);
-      const summary = { input: 0, cachedInput: 0, cacheWrite: 0, output: 0, reasoning: 0, total: 0 };
+      const summary = { input: 0, cachedInput: 0, cacheWrite: 0, output: 0, reasoning: 0, total: 0, measured: false };
       for (const row of rows) {
         const usage = parseUsage(/** @type {Record<string, unknown>} */ (row).usage);
         if (!usage) continue;
+        summary.measured = true;
         summary.input += usage.input;
         summary.cachedInput += usage.cachedInput;
         summary.cacheWrite += usage.cacheWrite;
@@ -1260,6 +1290,71 @@ export function openStore({ dataDir }) {
       }
       summary.total = summary.input + summary.cachedInput + summary.cacheWrite + summary.output + summary.reasoning;
       return summary;
+    },
+
+    // — 失败与成本 (ticket 12: 人话失败原因 / 任务预算 / 三层 token 聚合) —
+
+    /**
+     * 票 12 验收 1: the human reason of the task's LATEST failed/aborted session's
+     * run. Reads back through the session (one owner of the run lifecycle: the
+     * run manager), so the UI never re-derives anything.
+     *
+     * @param {number} taskId
+     * @returns {string | null}
+     */
+    latestFailReasonForTask(taskId) {
+      const row = db
+        .prepare(
+          `SELECT r.fail_reason AS fr
+           FROM task_session ts LEFT JOIN run r ON r.task_session_id = ts.id
+           WHERE ts.task_id = ? ORDER BY ts.id DESC LIMIT 1`,
+        )
+        .get(taskId);
+      if (!row) return null;
+      const reason = /** @type {Record<string, unknown>} */ (row).fr;
+      return reason === null || reason === undefined ? null : String(reason);
+    },
+
+    /**
+     * 「+50%」 lands here: raise THIS task's budget (落库、可再审). Validation of
+     * the 1.5× step lives in cost/budget.mjs (pure); this is the write.
+     *
+     * @param {number} taskId
+     * @param {number} tokenBudget
+     * @returns {TaskRow}
+     */
+    setTaskTokenBudget(taskId, tokenBudget) {
+      if (typeof tokenBudget !== "number" || !Number.isInteger(tokenBudget) || tokenBudget <= 0) {
+        throw appError("invalid_payload", "tokenBudget must be a positive integer");
+      }
+      const changes = db.prepare("UPDATE task SET token_budget = ? WHERE id = ?").run(tokenBudget, taskId).changes;
+      if (changes !== 1) throw appError("unknown_task", `no task with id ${taskId}`);
+      return /** @type {TaskRow} */ (this.taskById(taskId));
+    },
+
+    /**
+     * 票 12 验收 3: employee-level token aggregation (员工名牌数据源).
+     * Employees who never ran — or only ran on unmeasured engines — read
+     * measured=false: 「未计量」, never a fake 0.
+     *
+     * @returns {Record<string, TokenTotal>} keyed by employeeId (string keys at the envelope)
+     */
+    employeeTokenTotals() {
+      const rows = db.prepare("SELECT employee_id AS bucket_id, usage FROM run").all();
+      return foldTokenTotals(db, "employee", rows, (row) => Number(/** @type {Record<string, unknown>} */ (row).bucket_id));
+    },
+
+    /**
+     * 票 12 验收 3: company-level token aggregation (公司面板数据源) — every run
+     * under every employee of the company.
+     *
+     * @returns {Record<string, TokenTotal>} keyed by companyId (string keys at the envelope)
+     */
+    companyTokenTotals() {
+      const rows = db
+        .prepare("SELECT e.company_id AS bucket_id, r.usage AS usage FROM run r JOIN employee e ON e.id = r.employee_id")
+        .all();
+      return foldTokenTotals(db, "company", rows, (row) => Number(/** @type {Record<string, unknown>} */ (row).bucket_id));
     },
 
     // — 上下班 (ticket 09: 时间表落库可改 / override 独立 / 相位可恢复) —
@@ -1538,7 +1633,17 @@ export function openStore({ dataDir }) {
         ? chosen
         : (groups.at(-1)?.id ?? null);
       const desks = activeGroupId === null ? [] : this.listDesks({ groupId: activeGroupId });
-      return { companies, activeCompanyId, groups, activeGroupId, desks, taskCounts: this.companyTaskCounts() };
+      return {
+        companies,
+        activeCompanyId,
+        groups,
+        activeGroupId,
+        desks,
+        taskCounts: this.companyTaskCounts(),
+        // 票 12: 员工级/公司级 token 聚合随快照走（host 聚合走信封，视图只读）。
+        employeeTokens: this.employeeTokenTotals(),
+        companyTokens: this.companyTokenTotals(),
+      };
     },
 
     close() {
@@ -1731,6 +1836,72 @@ function markInterruptedProbes(db) {
   );
   const reason = JSON.stringify({ verdicts: null, error: "上一次探针随 AgentHost 一起结束，没有拿到结论" });
   for (const row of stale) update.run(reason, now, now, String(/** @type {Record<string, unknown>} */ (row).engine));
+}
+
+/**
+ * Fold usage rows into { entity id → { total, measured } }. The entity table
+ * is walked too, so a never-run employee / company still reads measured=false
+ * (「未计量」) instead of vanishing or faking a 0. `entityTable` is a fixed
+ * internal literal at both call sites ("employee" / "company") — never input.
+ *
+ * @param {DatabaseSync} db
+ * @param {"employee" | "company"} entityTable
+ * @param {unknown[]} usageRows rows carrying bucket_id + usage
+ * @param {(row: unknown) => number} keyOf
+ * @returns {Record<string, TokenTotal>}
+ */
+function foldTokenTotals(db, entityTable, usageRows, keyOf) {
+  /** @type {Map<number, TokenTotal>} */
+  const byId = new Map();
+  /** @param {number} id @returns {TokenTotal} */
+  const bucket = (id) => {
+    let entry = byId.get(id);
+    if (!entry) {
+      entry = { total: 0, measured: false };
+      byId.set(id, entry);
+    }
+    return entry;
+  };
+  for (const row of usageRows) {
+    const entry = bucket(keyOf(row));
+    const usage = parseUsage(/** @type {Record<string, unknown>} */ (row).usage);
+    if (!usage) continue;
+    entry.measured = true;
+    entry.total += usage.input + usage.cachedInput + usage.cacheWrite + usage.output + usage.reasoning;
+  }
+  /** @type {Record<string, TokenTotal>} */
+  const totals = {};
+  for (const row of db.prepare(`SELECT id FROM ${entityTable} ORDER BY id`).all()) {
+    const id = Number(/** @type {Record<string, unknown>} */ (row).id);
+    totals[String(id)] = bucket(id);
+  }
+  return totals;
+}
+
+/**
+ * Ticket 12 gives an existing database its cost columns (票 06 的 usage 列先例):
+ * `run.fail_reason`（人话失败原因）and `task.token_budget`（工单自己的预算）.
+ * Old tasks land on the preset default budget; old runs honestly have no reason.
+ *
+ * @param {DatabaseSync} db
+ */
+function migrateCostColumns(db) {
+  const taskColumns = new Set(
+    db
+      .prepare("PRAGMA table_info(task)")
+      .all()
+      .map((row) => String(/** @type {Record<string, unknown>} */ (row).name)),
+  );
+  if (!taskColumns.has("token_budget")) {
+    db.exec(`ALTER TABLE task ADD COLUMN token_budget INTEGER NOT NULL DEFAULT ${DEFAULT_TASK_TOKEN_BUDGET}`);
+  }
+  const runColumns = new Set(
+    db
+      .prepare("PRAGMA table_info(run)")
+      .all()
+      .map((row) => String(/** @type {Record<string, unknown>} */ (row).name)),
+  );
+  if (!runColumns.has("fail_reason")) db.exec("ALTER TABLE run ADD COLUMN fail_reason TEXT");
 }
 
 /**
