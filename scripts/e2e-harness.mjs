@@ -4,6 +4,7 @@
  * trunk artifacts, so the shape gets extracted, not copy-pasted a third time.
  */
 import { readFile, readdir, stat } from "node:fs/promises";
+import { mkdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -94,6 +95,29 @@ export async function readJson(file) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Seed an employee workspace as a git repo (fixture setup, never the app:
+ * the app never writes to git). git spawns fine from the runner process on
+ * this machine — proven by the ticket-05 spike; the app's OWN git door
+ * stays read-only (src/host/git/reader.mjs).
+ *
+ * @param {string} workspaceDir
+ * @param {typeof import("node:child_process").execFileSync} execFileSync
+ * @returns {{ headBefore: string }}
+ */
+export function seedGitWorkspace(workspaceDir, execFileSync) {
+  const git = (/** @type {string[]} */ args) =>
+    execFileSync("git", ["-C", workspaceDir, ...args], { encoding: "utf8" });
+  mkdirSync(workspaceDir, { recursive: true });
+  git(["init", "-q", "-b", "main"]);
+  git(["config", "user.name", "pi-employee"]);
+  git(["config", "user.email", "pi-employee@cubicle.test"]);
+  writeFileSync(path.join(workspaceDir, "greet.txt"), "hello\n", "utf8");
+  git(["add", "-A"]);
+  git(["commit", "-q", "-m", "initial greeting"]);
+  return { headBefore: git(["rev-parse", "HEAD"]).trim() };
 }
 
 /**

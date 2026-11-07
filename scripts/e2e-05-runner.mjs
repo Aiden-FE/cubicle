@@ -31,6 +31,7 @@ import {
   setSelect,
   bootAndShowOffice,
   hireThroughWizard,
+  seedGitWorkspace,
 } from "./e2e-harness.mjs";
 import { enginePaths } from "../src/host/engine/paths.mjs";
 
@@ -39,28 +40,6 @@ const PM_NAME = "E2E 产品经理乙";
 const SENTENCE = "给 greet.txt 加一行欢迎语，并保证测试通过";
 const EDITED_GOAL = "给 greet.txt 加一行英文欢迎语，测试必须全绿";
 const EXTRA_CRITERION = "欢迎语必须全小写";
-
-/**
- * Seed the employee's workspace as a git repo (fixture setup, not the app:
- * the app never writes to git). git spawns fine from this process on this
- * machine — proven by the ticket-05 spike; the app's OWN git door stays
- * read-only (src/host/git/reader.mjs).
- *
- * @param {string} workspaceDir
- * @returns {{ headBefore: string }}
- */
-function seedGitWorkspace(workspaceDir) {
-  const git = (/** @type {string[]} */ args) =>
-    execFileSync("git", ["-C", workspaceDir, ...args], { encoding: "utf8" });
-  mkdirSync(workspaceDir, { recursive: true });
-  git(["init", "-q", "-b", "main"]);
-  git(["config", "user.name", "pi-employee"]);
-  git(["config", "user.email", "pi-employee@cubicle.test"]);
-  writeFileSync(path.join(workspaceDir, "greet.txt"), "hello\n", "utf8");
-  git(["add", "-A"]);
-  git(["commit", "-q", "-m", "initial greeting"]);
-  return { headBefore: git(["rev-parse", "HEAD"]).trim() };
-}
 
 const BENCH_OPEN_JS = `document.querySelector('[data-testid="task-bench"]') !== null`;
 const PLAYBOOK_JS = `document.querySelector('[data-testid="task-playbook"]')?.textContent ?? ''`;
@@ -126,7 +105,7 @@ async function phaseWorkorder(ctx) {
 
   // Fixture: the programmer's workspace becomes a git repo (PM's stays plain).
   const dirs = enginePaths(ctx.dataDir, "pi", programmerId);
-  const { headBefore } = seedGitWorkspace(dirs.workspaceDir);
+  const { headBefore } = seedGitWorkspace(dirs.workspaceDir, execFileSync);
   add("程序员工作区被种成 git 仓库（fixture，非应用行为）", /^[0-9a-f]{40}$/.test(headBefore), `head=${headBefore.slice(0, 7)}`);
 
   // — open the 工单台 (left rail drawer; the office stays the canvas) —
