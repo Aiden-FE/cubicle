@@ -72,15 +72,74 @@ import { appError } from "../shared/apperror.mjs";
  * @property {string | null} sessionFile
  * @property {string} updatedAt
  *
+ * @typedef {"open" | "running" | "review" | "done" | "failed"} TaskStatus
+ *   待办 / 进行中 / 待验收 / 完成 / 失败 (ticket 06: 五个状态不可跳过).
+ *
  * @typedef {object} RunRow
  * @property {number} id
  * @property {number} employeeSessionId
  * @property {number} employeeId
  * @property {string} engine
- * @property {"running" | "completed" | "aborted" | "failed" | "interrupted"} status
+ * @property {"running" | "completed" | "aborted" | "failed" | "interrupted" | "paused"} status
+ *   票 09: 'paused' = 下班落盘 — 这一轮收尾合上，任务仍停在「进行中」等上班续跑。
  * @property {string} prompt
  * @property {string} startedAt
  * @property {string | null} endedAt
+ * @property {number | null} taskId
+ * @property {number | null} taskSessionId
+ * @property {import("./engine/events.mjs").Usage | null} usage engine-reported tokens, folded at finish (票 06: 本任务 token)
+ *
+ * @typedef {object} TaskRow
+ * @property {number} id
+ * @property {number} groupId
+ * @property {number} employeeId
+ * @property {string} workspaceDir
+ * @property {string} title
+ * @property {string} goal
+ * @property {"feature" | "bugfix" | "docs" | "free"} playbook
+ * @property {string[]} acceptance
+ * @property {string} baseHead
+ * @property {TaskStatus} status
+ * @property {string} createdAt
+ *
+ * @typedef {TaskRow & { employeeName: string, latestSessionStatus?: string | null }} TaskRowWithEmployee
+ *   latestSessionStatus 只在列表查询里携带（票 09: 暂停徽标）；taskById 不带。
+ *
+ * @typedef {object} TaskSessionRow
+ * @property {number} id
+ * @property {number} taskId
+ * @property {number} employeeSessionId
+ * @property {string} engine
+ * @property {"running" | "completed" | "aborted" | "failed" | "interrupted" | "paused"} status
+ * @property {string} startedAt
+ * @property {string | null} endedAt
+ * @property {string | null} [sessionFile] employee session's resume pointer (list reads only)
+ *
+ * @typedef {object} ScheduleRow 票 09: 每公司一份上下班时间表（配置行）
+ * @property {number} companyId
+ * @property {string} workStart  "HH:MM" 或 "HH:MM:SS"（本地时间）
+ * @property {string} workEnd    同上
+ * @property {number} graceSeconds 下班宽限（默认 90，可配）
+ * @property {string} updatedAt
+ *
+ * @typedef {object} DutyOverrideRow 票 09: 手动上下班的 override 记录（独立于时间表）
+ * @property {number} companyId
+ * @property {"on" | "off"} mode
+ * @property {number} at epoch ms — 用于「越过下一个排班界点自动失效」判定
+ *
+ * @typedef {object} DutyStatusRow 票 09: 当前相位（视图显示 + 重启后不撒谎）
+ * @property {number} companyId
+ * @property {"on" | "grace" | "off"} phase
+ * @property {number} phaseSince epoch ms
+ * @property {number | null} graceUntil epoch ms（仅宽限相位）
+ *
+ * @typedef {object} ArtifactRow
+ * @property {number} id
+ * @property {number} taskId
+ * @property {number | null} runId
+ * @property {"diff_summary" | "changed_files" | "command_output" | "report"} kind
+ * @property {string} content
+ * @property {string} createdAt
  *
  * @typedef {object} EngineStateRow
  * @property {string} engine
@@ -99,6 +158,12 @@ import { appError } from "../shared/apperror.mjs";
  * @property {GroupRow[]} groups
  * @property {number | null} activeGroupId
  * @property {DeskRow[]} desks
+ * @property {Record<string, CompanyTaskCounts>} taskCounts
+ *   票 08: companyId(字符串键) → 各公司活跃数（进行中/待验收），随快照走。
+ *
+ * @typedef {object} CompanyTaskCounts
+ * @property {number} running 进行中
+ * @property {number} review 待验收
  */
 
 const SCHEMA = `
@@ -157,10 +222,61 @@ CREATE TABLE IF NOT EXISTS run (
   employee_session_id INTEGER NOT NULL REFERENCES employee_session(id),
   employee_id INTEGER NOT NULL REFERENCES employee(id),
   engine TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'aborted', 'failed', 'interrupted')),
+  status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'aborted', 'failed', 'interrupted', 'paused')),
   prompt TEXT NOT NULL,
   started_at TEXT NOT NULL,
+  ended_at TEXT,
+  usage TEXT,
+  task_id INTEGER REFERENCES task(id),
+  task_session_id INTEGER REFERENCES task_session(id)
+);
+CREATE TABLE IF NOT EXISTS task (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  group_id INTEGER NOT NULL REFERENCES project_group(id),
+  employee_id INTEGER NOT NULL REFERENCES employee(id),
+  workspace_dir TEXT NOT NULL,
+  title TEXT NOT NULL,
+  goal TEXT NOT NULL,
+  playbook TEXT NOT NULL CHECK (playbook IN ('feature', 'bugfix', 'docs', 'free')),
+  acceptance TEXT NOT NULL,
+  base_head TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('open', 'running', 'review', 'done', 'failed')) DEFAULT 'open',
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS task_session (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id INTEGER NOT NULL REFERENCES task(id),
+  employee_session_id INTEGER NOT NULL REFERENCES employee_session(id),
+  engine TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'aborted', 'failed', 'interrupted', 'paused')),
+  started_at TEXT NOT NULL,
   ended_at TEXT
+);
+CREATE TABLE IF NOT EXISTS company_schedule (
+  company_id INTEGER PRIMARY KEY REFERENCES company(id),
+  work_start TEXT NOT NULL,
+  work_end TEXT NOT NULL,
+  grace_seconds INTEGER NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS duty_override (
+  company_id INTEGER PRIMARY KEY REFERENCES company(id),
+  mode TEXT NOT NULL CHECK (mode IN ('on', 'off')),
+  at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS duty_status (
+  company_id INTEGER PRIMARY KEY REFERENCES company(id),
+  phase TEXT NOT NULL CHECK (phase IN ('on', 'grace', 'off')),
+  phase_since INTEGER NOT NULL,
+  grace_until INTEGER
+);
+CREATE TABLE IF NOT EXISTS artifact (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id INTEGER NOT NULL REFERENCES task(id),
+  run_id INTEGER REFERENCES run(id),
+  kind TEXT NOT NULL CHECK (kind IN ('diff_summary', 'changed_files', 'command_output', 'report')),
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS engine_state (
   engine TEXT PRIMARY KEY,
@@ -177,11 +293,34 @@ CREATE TABLE IF NOT EXISTS engine_state (
 
 /**
  * Run outcomes. 'running' is set by createRun; finishRun moves a run to one
- * of the terminal states. A run still 'running' when the store opens (host
+ * of the closed states. A run still 'running' when the store opens (host
  * restart / crash) is marked 'interrupted' — ticket 10 builds recovery on
- * top of that fact.
+ * top of that fact. Ticket 09 adds 'paused': 下班落盘 closes the row too
+ * (ended_at set) — the task keeps its 进行中 status, and 上班 appends a NEW
+ * run/task_session instead of reopening this one.
  */
-const TERMINAL_RUN_STATUSES = new Set(["completed", "aborted", "failed", "interrupted"]);
+const TERMINAL_RUN_STATUSES = new Set(["completed", "aborted", "failed", "interrupted", "paused"]);
+
+/**
+ * Task status machine (ticket 06: 五个状态在界面上可见且不可跳过). The host —
+ * not the view — owns legality: every status change funnels through
+ * setTaskStatus, which refuses anything the map below does not name.
+ *
+ *   open ──派单──▶ running ──跑完──▶ review ──通过──▶ done (终态)
+ *     ▲    ▲         │  └──取消/失败──▶ failed          │
+ *     │    └──打回────┘                        打回 ────┤ (review → running)
+ *     └──崩溃自愈                                       │
+ *          failed ──重试──▶ running                    │
+ */
+const TASK_TRANSITIONS = Object.freeze(
+  /** @type {Record<TaskStatus, readonly TaskStatus[]>} */ ({
+    open: ["running"],
+    running: ["review", "failed"],
+    review: ["done", "running"],
+    done: [],
+    failed: ["running"],
+  }),
+);
 
 /**
  * The v1 preset roster (decision 05: 程序员 / 测试 / 产品经理, default
@@ -343,6 +482,138 @@ function toRun(row) {
     prompt: String(row.prompt),
     startedAt: String(row.started_at),
     endedAt: row.ended_at === null || row.ended_at === undefined ? null : String(row.ended_at),
+    taskId: row.task_id === null || row.task_id === undefined ? null : Number(row.task_id),
+    taskSessionId:
+      row.task_session_id === null || row.task_session_id === undefined ? null : Number(row.task_session_id),
+    usage: parseUsage(row.usage),
+  };
+}
+
+/**
+ * Stored run usage is a JSON blob of the neutral Usage shape; anything
+ * unreadable reads as “no usage reported”, never a crash.
+ *
+ * @param {unknown} raw
+ * @returns {import("./engine/events.mjs").Usage | null}
+ */
+function parseUsage(raw) {
+  if (raw === null || raw === undefined) return null;
+  try {
+    const parsed = JSON.parse(String(raw));
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const usage = /** @type {Record<string, unknown>} */ (parsed);
+    const count = (/** @type {unknown} */ value) =>
+      typeof value === "number" && Number.isFinite(value) ? value : 0;
+    return {
+      input: count(usage.input),
+      cachedInput: count(usage.cachedInput),
+      cacheWrite: count(usage.cacheWrite),
+      output: count(usage.output),
+      reasoning: count(usage.reasoning),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {Record<string, unknown>} row
+ * @returns {TaskRow}
+ */
+function toTask(row) {
+  /** @type {string[]} */
+  let acceptance = [];
+  try {
+    const parsed = JSON.parse(String(row.acceptance));
+    if (Array.isArray(parsed)) acceptance = parsed.map((line) => String(line));
+  } catch {
+    // a corrupted acceptance column reads as "no criteria", never a crash
+  }
+  return {
+    id: Number(row.id),
+    groupId: Number(row.group_id),
+    employeeId: Number(row.employee_id),
+    workspaceDir: String(row.workspace_dir),
+    title: String(row.title),
+    goal: String(row.goal),
+    playbook: /** @type {TaskRow["playbook"]} */ (String(row.playbook)),
+    acceptance,
+    baseHead: String(row.base_head),
+    status: /** @type {TaskRow["status"]} */ (String(row.status)),
+    createdAt: String(row.created_at),
+    ...(row.latest_session_status === undefined
+      ? {}
+      : {
+          // 票 09: 暂停徽标的数据源 — 最近一轮 task_session 的状态（列表查询携带）
+          latestSessionStatus:
+            row.latest_session_status === null || row.latest_session_status === undefined
+              ? null
+              : String(row.latest_session_status),
+        }),
+  };
+}
+
+/**
+ * @param {Record<string, unknown>} row
+ * @returns {TaskSessionRow}
+ */
+function toTaskSession(row) {
+  return {
+    id: Number(row.id),
+    taskId: Number(row.task_id),
+    employeeSessionId: Number(row.employee_session_id),
+    engine: String(row.engine),
+    status: /** @type {TaskSessionRow["status"]} */ (String(row.status)),
+    startedAt: String(row.started_at),
+    endedAt: row.ended_at === null || row.ended_at === undefined ? null : String(row.ended_at),
+    ...(row.session_file === undefined
+      ? {}
+      : {
+          sessionFile:
+            row.session_file === null || row.session_file === undefined ? null : String(row.session_file),
+        }),
+  };
+}
+
+/**
+ * @param {Record<string, unknown>} row
+ * @returns {ArtifactRow}
+ */
+function toArtifact(row) {
+  return {
+    id: Number(row.id),
+    taskId: Number(row.task_id),
+    runId: row.run_id === null || row.run_id === undefined ? null : Number(row.run_id),
+    kind: /** @type {ArtifactRow["kind"]} */ (String(row.kind)),
+    content: String(row.content),
+    createdAt: String(row.created_at),
+  };
+}
+
+/**
+ * @param {Record<string, unknown>} row
+ * @returns {ScheduleRow}
+ */
+function toSchedule(row) {
+  return {
+    companyId: Number(row.company_id),
+    workStart: String(row.work_start),
+    workEnd: String(row.work_end),
+    graceSeconds: Number(row.grace_seconds),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+/**
+ * @param {Record<string, unknown>} row
+ * @returns {DutyStatusRow}
+ */
+function toDutyStatus(row) {
+  return {
+    companyId: Number(row.company_id),
+    phase: /** @type {DutyStatusRow["phase"]} */ (String(row.phase)),
+    phaseSince: Number(row.phase_since),
+    graceUntil: row.grace_until === null || row.grace_until === undefined ? null : Number(row.grace_until),
   };
 }
 
@@ -463,6 +734,9 @@ export function openStore({ dataDir }) {
   const db = new DatabaseSync(dbPath);
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec(SCHEMA);
+  migrateRunTaskColumns(db);
+  migrateTaskStateMachine(db);
+  migrateRunPauseState(db);
   // Ticket 11 widens employee_session from one-per-employee to one-per
   // employee × engine (switching engines keeps each engine's resume story).
   // Databases built before that carry the UNIQUE on the column itself —
@@ -673,30 +947,32 @@ export function openStore({ dataDir }) {
     },
 
     /**
-     * @param {{ employeeId: number, employeeSessionId: number, engine: string, prompt: string }} input
+     * @param {{ employeeId: number, employeeSessionId: number, engine: string, prompt: string, taskId?: number | null, taskSessionId?: number | null }} input
      * @returns {RunRow}
      */
-    createRun({ employeeId, employeeSessionId, engine, prompt }) {
+    createRun({ employeeId, employeeSessionId, engine, prompt, taskId, taskSessionId }) {
       const startedAt = new Date().toISOString();
       const info = db
         .prepare(
-          "INSERT INTO run (employee_session_id, employee_id, engine, status, prompt, started_at) VALUES (?, ?, ?, 'running', ?, ?)",
+          "INSERT INTO run (employee_session_id, employee_id, engine, status, prompt, started_at, task_id, task_session_id) VALUES (?, ?, ?, 'running', ?, ?, ?, ?)",
         )
-        .run(employeeSessionId, employeeId, engine, prompt, startedAt);
+        .run(employeeSessionId, employeeId, engine, prompt, startedAt, taskId ?? null, taskSessionId ?? null);
       return toRun(/** @type {Record<string, unknown>} */ (db.prepare("SELECT * FROM run WHERE id = ?").get(Number(info.lastInsertRowid))));
     },
 
     /**
-     * @param {{ runId: number, status: "completed" | "aborted" | "failed" | "interrupted" }} input
+     * @param {{ runId: number, status: "completed" | "aborted" | "failed" | "interrupted" | "paused", usage?: import("./engine/events.mjs").Usage | null }} input
      * @returns {RunRow}
      */
-    finishRun({ runId, status }) {
+    finishRun({ runId, status, usage }) {
       if (!TERMINAL_RUN_STATUSES.has(status)) {
         throw appError("invalid_payload", `run cannot finish with status ${status}`);
       }
-      db.prepare("UPDATE run SET status = ?, ended_at = ? WHERE id = ? AND status = 'running'").run(
+      const usageJson = usage && Object.values(usage).some((n) => n > 0) ? JSON.stringify(usage) : null;
+      db.prepare("UPDATE run SET status = ?, ended_at = ?, usage = ? WHERE id = ? AND status = 'running'").run(
         status,
         new Date().toISOString(),
+        usageJson,
         runId,
       );
       const row = db.prepare("SELECT * FROM run WHERE id = ?").get(runId);
@@ -708,6 +984,332 @@ export function openStore({ dataDir }) {
     latestRunForEmployee(employeeId) {
       const row = db.prepare("SELECT * FROM run WHERE employee_id = ? ORDER BY id DESC LIMIT 1").get(employeeId);
       return row ? toRun(/** @type {Record<string, unknown>} */ (row)) : null;
+    },
+
+    /** @param {number} runId @returns {RunRow | null} */
+    runById(runId) {
+      const row = db.prepare("SELECT * FROM run WHERE id = ?").get(runId);
+      return row ? toRun(/** @type {Record<string, unknown>} */ (row)) : null;
+    },
+
+    /**
+     * The project group an employee sits in (their tasks live there).
+     *
+     * @param {number} employeeId
+     * @returns {number | null}
+     */
+    groupOfEmployee(employeeId) {
+      const row = db
+        .prepare("SELECT d.group_id AS g FROM employee e JOIN desk d ON d.employee_id = e.id WHERE e.id = ?")
+        .get(employeeId);
+      return row ? Number(/** @type {Record<string, unknown>} */ (row).g) : null;
+    },
+
+    // — tasks (ticket 05: 工单与产出) —
+
+    /**
+     * A work order: the goal + editable acceptance criteria the boss
+     * approved, the employee that owns it, and the git start HEAD recorded
+     * at creation (every later diff is relative to this point).
+     *
+     * @param {{ groupId: number, employeeId: number, workspaceDir: string, title: string, goal: string, playbook: string, acceptance: string[], baseHead: string }} input
+     * @returns {TaskRow}
+     */
+    createTask({ groupId, employeeId, workspaceDir, title, goal, playbook, acceptance, baseHead }) {
+      if (!db.prepare("SELECT id FROM project_group WHERE id = ?").get(groupId)) {
+        throw appError("unknown_group", `no project group with id ${groupId}`);
+      }
+      if (!db.prepare("SELECT id FROM employee WHERE id = ?").get(employeeId)) {
+        throw appError("unknown_employee", `no employee with id ${employeeId}`);
+      }
+      const createdAt = new Date().toISOString();
+      const info = db
+        .prepare(
+          "INSERT INTO task (group_id, employee_id, workspace_dir, title, goal, playbook, acceptance, base_head, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)",
+        )
+        .run(
+          groupId,
+          employeeId,
+          workspaceDir,
+          title,
+          goal,
+          playbook,
+          JSON.stringify(Array.isArray(acceptance) ? acceptance.map(String) : []),
+          baseHead,
+          createdAt,
+        );
+      return toTask(/** @type {Record<string, unknown>} */ (db.prepare("SELECT * FROM task WHERE id = ?").get(Number(info.lastInsertRowid))));
+    },
+
+    /** @param {number} taskId @returns {TaskRow | null} */
+    taskById(taskId) {
+      const row = db.prepare("SELECT * FROM task WHERE id = ?").get(taskId);
+      return row ? toTask(/** @type {Record<string, unknown>} */ (row)) : null;
+    },
+
+    /** @param {{ groupId: number }} input @returns {TaskRowWithEmployee[]} newest first */
+    listTasks({ groupId }) {
+      const rows = db
+        .prepare(
+          `SELECT t.*, e.name AS e_name,
+            (SELECT ts.status FROM task_session ts WHERE ts.task_id = t.id ORDER BY ts.id DESC LIMIT 1) AS latest_session_status
+           FROM task t JOIN employee e ON e.id = t.employee_id
+           WHERE t.group_id = ? ORDER BY t.id DESC`,
+        )
+        .all(groupId);
+      return rows.map((row) => ({
+        ...toTask(/** @type {Record<string, unknown>} */ (row)),
+        employeeName: String(/** @type {Record<string, unknown>} */ (row).e_name),
+      }));
+    },
+
+    /**
+     * Every task across EVERY project group of one company (票 08: 右把手按
+     * 公司看三段列表；工单台仍按组看)。Newest first.
+     *
+     * @param {{ companyId: number }} input @returns {TaskRowWithEmployee[]}
+     */
+    listTasksForCompany({ companyId }) {
+      const rows = db
+        .prepare(
+          `SELECT t.*, e.name AS e_name,
+            (SELECT ts.status FROM task_session ts WHERE ts.task_id = t.id ORDER BY ts.id DESC LIMIT 1) AS latest_session_status
+           FROM task t
+           JOIN employee e ON e.id = t.employee_id
+           JOIN project_group g ON g.id = t.group_id
+           WHERE g.company_id = ? ORDER BY t.id DESC`,
+        )
+        .all(companyId);
+      return rows.map((row) => ({
+        ...toTask(/** @type {Record<string, unknown>} */ (row)),
+        employeeName: String(/** @type {Record<string, unknown>} */ (row).e_name),
+      }));
+    },
+
+    /**
+     * Active work-order counts per company — 进行中 + 待验收 — aggregated
+     * across every project group of the company (票 08: 公司切换器显示各公司
+     * 活跃数). Companies without tasks read 0/0, so the UI never guesses.
+     *
+     * @returns {Record<string, CompanyTaskCounts>} keyed by companyId (string
+     *   because JSON map keys are strings; Number() them back at the seam).
+     */
+    companyTaskCounts() {
+      const rows = db
+        .prepare(
+          `SELECT g.company_id AS cid, t.status AS status, COUNT(*) AS n
+           FROM task t JOIN project_group g ON g.id = t.group_id
+           WHERE t.status IN ('running', 'review')
+           GROUP BY g.company_id, t.status`,
+        )
+        .all();
+      /** @type {Map<number, CompanyTaskCounts>} */
+      const byCompany = new Map();
+      const bucket = (/** @type {number} */ companyId) => {
+        let entry = byCompany.get(companyId);
+        if (!entry) {
+          entry = { running: 0, review: 0 };
+          byCompany.set(companyId, entry);
+        }
+        return entry;
+      };
+      for (const raw of rows) {
+        const row = /** @type {Record<string, unknown>} */ (raw);
+        const entry = bucket(Number(row.cid));
+        if (String(row.status) === "running") entry.running += Number(row.n);
+        else entry.review += Number(row.n);
+      }
+      /** @type {Record<string, CompanyTaskCounts>} */
+      const counts = {};
+      for (const company of db.prepare("SELECT id FROM company ORDER BY id").all()) {
+        const companyId = Number(/** @type {Record<string, unknown>} */ (company).id);
+        counts[String(companyId)] = bucket(companyId);
+      }
+      return counts;
+    },
+
+    /**
+     * The only door to a task's status: the five-state transition map makes
+     * illegal jumps (待办→完成, 完成→任何) impossible at the host, so the UI
+     * only ever displays states and triggers legal ones (票 06 验收 5).
+     *
+     * @param {number} taskId
+     * @param {TaskStatus} status
+     * @returns {TaskRow}
+     */
+    setTaskStatus(taskId, status) {
+      if (!Object.hasOwn(TASK_TRANSITIONS, status)) {
+        throw appError("invalid_payload", `task cannot have status ${status}`);
+      }
+      const row = db.prepare("SELECT * FROM task WHERE id = ?").get(taskId);
+      if (!row) throw appError("unknown_task", `no task with id ${taskId}`);
+      const current = toTask(/** @type {Record<string, unknown>} */ (row)).status;
+      if (!TASK_TRANSITIONS[current].includes(status)) {
+        throw appError("invalid_transition", `任务状态不能从 ${current} 直接跳到 ${status}`);
+      }
+      db.prepare("UPDATE task SET status = ? WHERE id = ?").run(status, taskId);
+      return toTask(/** @type {Record<string, unknown>} */ (db.prepare("SELECT * FROM task WHERE id = ?").get(taskId)));
+    },
+
+    /**
+     * The task-level Session entity (GLOSSARY: 会话挂在任务下，可多条):
+     * one per dispatch/retry, wrapping the engine run and its outcome.
+     *
+     * @param {{ taskId: number, employeeSessionId: number, engine: string }} input
+     * @returns {TaskSessionRow}
+     */
+    openTaskSession({ taskId, employeeSessionId, engine }) {
+      const startedAt = new Date().toISOString();
+      const info = db
+        .prepare(
+          "INSERT INTO task_session (task_id, employee_session_id, engine, status, started_at) VALUES (?, ?, ?, 'running', ?)",
+        )
+        .run(taskId, employeeSessionId, engine, startedAt);
+      return toTaskSession(
+        /** @type {Record<string, unknown>} */ (db.prepare("SELECT * FROM task_session WHERE id = ?").get(Number(info.lastInsertRowid))),
+      );
+    },
+
+    /**
+     * @param {{ taskSessionId: number, status: "completed" | "aborted" | "failed" | "interrupted" | "paused" }} input
+     * @returns {TaskSessionRow}
+     */
+    finishTaskSession({ taskSessionId, status }) {
+      if (!TERMINAL_RUN_STATUSES.has(status)) {
+        throw appError("invalid_payload", `task session cannot finish with status ${status}`);
+      }
+      db.prepare("UPDATE task_session SET status = ?, ended_at = ? WHERE id = ? AND status = 'running'").run(
+        status,
+        new Date().toISOString(),
+        taskSessionId,
+      );
+      const row = db.prepare("SELECT * FROM task_session WHERE id = ?").get(taskSessionId);
+      if (!row) throw appError("unknown_task_session", `no task session with id ${taskSessionId}`);
+      return toTaskSession(/** @type {Record<string, unknown>} */ (row));
+    },
+
+    /** @param {number} taskId @returns {TaskSessionRow | null} */
+    latestTaskSessionForTask(taskId) {
+      const row = db.prepare("SELECT * FROM task_session WHERE task_id = ? ORDER BY id DESC LIMIT 1").get(taskId);
+      return row ? toTaskSession(/** @type {Record<string, unknown>} */ (row)) : null;
+    },
+
+    /**
+     * All sessions of a task (oldest first), each carrying the employee
+     * session's current resume pointer so the UI can show 恢复指针.
+     *
+     * @param {number} taskId
+     * @returns {TaskSessionRow[]}
+     */
+    listTaskSessions(taskId) {
+      const rows = db
+        .prepare(
+          `SELECT ts.*, es.session_file AS session_file FROM task_session ts
+           LEFT JOIN employee_session es ON es.id = ts.employee_session_id
+           WHERE ts.task_id = ? ORDER BY ts.id`,
+        )
+        .all(taskId);
+      return rows.map((row) => toTaskSession(/** @type {Record<string, unknown>} */ (row)));
+    },
+
+    /**
+     * One of the four deliverables a finished task run leaves behind.
+     *
+     * @param {{ taskId: number, runId: number | null, kind: "diff_summary" | "changed_files" | "command_output" | "report", content: string }} input
+     * @returns {ArtifactRow}
+     */
+    createArtifact({ taskId, runId, kind, content }) {
+      if (!["diff_summary", "changed_files", "command_output", "report"].includes(kind)) {
+        throw appError("invalid_payload", `unknown artifact kind ${kind}`);
+      }
+      const createdAt = new Date().toISOString();
+      const info = db
+        .prepare("INSERT INTO artifact (task_id, run_id, kind, content, created_at) VALUES (?, ?, ?, ?, ?)")
+        .run(taskId, runId ?? null, kind, content, createdAt);
+      return toArtifact(
+        /** @type {Record<string, unknown>} */ (db.prepare("SELECT * FROM artifact WHERE id = ?").get(Number(info.lastInsertRowid))),
+      );
+    },
+
+    /** @param {{ taskId: number }} input @returns {ArtifactRow[]} creation order */
+    listArtifacts({ taskId }) {
+      const rows = db.prepare("SELECT * FROM artifact WHERE task_id = ? ORDER BY id").all(taskId);
+      return rows.map((row) => toArtifact(/** @type {Record<string, unknown>} */ (row)));
+    },
+
+    /**
+     * The task's token bill (票 06: 侧边栏展示本任务 token): every run of
+     * every iteration of the task, with its engine-reported usage summed.
+     *
+     * @param {number} taskId
+     * @returns {{ input: number, cachedInput: number, cacheWrite: number, output: number, reasoning: number, total: number }}
+     */
+    taskTokenSummary(taskId) {
+      const rows = db
+        .prepare("SELECT usage FROM run WHERE task_id = ? AND usage IS NOT NULL")
+        .all(taskId);
+      const summary = { input: 0, cachedInput: 0, cacheWrite: 0, output: 0, reasoning: 0, total: 0 };
+      for (const row of rows) {
+        const usage = parseUsage(/** @type {Record<string, unknown>} */ (row).usage);
+        if (!usage) continue;
+        summary.input += usage.input;
+        summary.cachedInput += usage.cachedInput;
+        summary.cacheWrite += usage.cacheWrite;
+        summary.output += usage.output;
+        summary.reasoning += usage.reasoning;
+      }
+      summary.total = summary.input + summary.cachedInput + summary.cacheWrite + summary.output + summary.reasoning;
+      return summary;
+    },
+
+    // — 上下班 (ticket 09: 时间表落库可改 / override 独立 / 相位可恢复) —
+
+    /**
+     * The company's 上下班 timetable row, or null when nobody configured one
+     * (the duty layer supplies the default; the store never invents rows).
+     *
+     * @param {number} companyId
+     * @returns {ScheduleRow | null}
+     */
+    getCompanySchedule(companyId) {
+      const row = db.prepare("SELECT * FROM company_schedule WHERE company_id = ?").get(companyId);
+      return row ? toSchedule(/** @type {Record<string, unknown>} */ (row)) : null;
+    },
+
+    /**
+     * Upsert: one timetable row per company, edited in place (票 09 验收 1:
+     * 可配上下班时刻，落库可改). Validation lives in the duty layer.
+     *
+     * @param {{ companyId: number, workStart: string, workEnd: string, graceSeconds: number }} input
+     * @returns {ScheduleRow}
+     */
+    upsertCompanySchedule({ companyId, workStart, workEnd, graceSeconds }) {
+      if (!db.prepare("SELECT id FROM company WHERE id = ?").get(companyId)) {
+        throw appError("unknown_company", `no company with id ${companyId}`);
+      }
+      const updatedAt = new Date().toISOString();
+      db
+        .prepare(
+          `INSERT INTO company_schedule (company_id, work_start, work_end, grace_seconds, updated_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(company_id) DO UPDATE SET
+             work_start = excluded.work_start, work_end = excluded.work_end,
+             grace_seconds = excluded.grace_seconds, updated_at = excluded.updated_at`,
+        )
+        .run(companyId, workStart, workEnd, graceSeconds, updatedAt);
+      return /** @type {ScheduleRow} */ (this.getCompanySchedule(companyId));
+    },
+
+    /** @param {number} companyId @returns {DutyOverrideRow | null} */
+    getDutyOverride(companyId) {
+      const row = db.prepare("SELECT * FROM duty_override WHERE company_id = ?").get(companyId);
+      if (!row) return null;
+      const record = /** @type {Record<string, unknown>} */ (row);
+      return {
+        companyId: Number(record.company_id),
+        mode: /** @type {"on" | "off"} */ (String(record.mode)),
+        at: Number(record.at),
+      };
     },
 
     // — engine admission state (ticket 11: 徽章三态 + 准入探针 + 风险启用) —
@@ -800,6 +1402,56 @@ export function openStore({ dataDir }) {
     },
 
     /**
+     * The manual override record (票 09 验收 2). Deliberately a different
+     * table from the timetable: overriding never touches the schedule rows.
+     *
+     * @param {{ companyId: number, mode: "on" | "off", at: number }} input
+     * @returns {DutyOverrideRow}
+     */
+    setDutyOverride({ companyId, mode, at }) {
+      if (mode !== "on" && mode !== "off") throw appError("invalid_payload", `duty override mode must be on/off, got ${mode}`);
+      db
+        .prepare(
+          `INSERT INTO duty_override (company_id, mode, at) VALUES (?, ?, ?)
+           ON CONFLICT(company_id) DO UPDATE SET mode = excluded.mode, at = excluded.at`,
+        )
+        .run(companyId, mode, at);
+      return /** @type {DutyOverrideRow} */ (this.getDutyOverride(companyId));
+    },
+
+    /** @param {number} companyId */
+    clearDutyOverride(companyId) {
+      db.prepare("DELETE FROM duty_override WHERE company_id = ?").run(companyId);
+    },
+
+    /** @param {number} companyId @returns {DutyStatusRow | null} */
+    getDutyStatus(companyId) {
+      const row = db.prepare("SELECT * FROM duty_status WHERE company_id = ?").get(companyId);
+      return row ? toDutyStatus(/** @type {Record<string, unknown>} */ (row)) : null;
+    },
+
+    /**
+     * The current duty phase, persisted so the view (and a restarting host)
+     * never claims 上班中 while the schedule says otherwise.
+     *
+     * @param {{ companyId: number, phase: "on" | "grace" | "off", phaseSince: number, graceUntil?: number | null }} input
+     * @returns {DutyStatusRow}
+     */
+    setDutyStatus({ companyId, phase, phaseSince, graceUntil }) {
+      if (!["on", "grace", "off"].includes(phase)) {
+        throw appError("invalid_payload", `duty phase must be on/grace/off, got ${phase}`);
+      }
+      db
+        .prepare(
+          `INSERT INTO duty_status (company_id, phase, phase_since, grace_until) VALUES (?, ?, ?, ?)
+           ON CONFLICT(company_id) DO UPDATE SET
+             phase = excluded.phase, phase_since = excluded.phase_since, grace_until = excluded.grace_until`,
+        )
+        .run(companyId, phase, phaseSince, graceUntil ?? null);
+      return /** @type {DutyStatusRow} */ (this.getDutyStatus(companyId));
+    },
+
+    /**
      * Hidden desk-less employee used by the admission probe (ticket 11):
      * conversation plumbing works for it (run-manager only needs an
      * employee row) while the office view — driven by desks — never sees it.
@@ -886,7 +1538,7 @@ export function openStore({ dataDir }) {
         ? chosen
         : (groups.at(-1)?.id ?? null);
       const desks = activeGroupId === null ? [] : this.listDesks({ groupId: activeGroupId });
-      return { companies, activeCompanyId, groups, activeGroupId, desks };
+      return { companies, activeCompanyId, groups, activeGroupId, desks, taskCounts: this.companyTaskCounts() };
     },
 
     close() {
@@ -898,16 +1550,168 @@ export function openStore({ dataDir }) {
 /**
  * Runs left 'running' belong to a host that is no longer alive: close that
  * chapter before any new host starts. Ticket 10 (crash recovery) builds the
- * resume story on top of this marker.
+ * resume story on top of this marker. Task sessions follow their runs, and
+ * a task whose session was interrupted goes back to 'open' so the boss can
+ * dispatch it again (ticket 06 will add the richer retry story).
+ *
+ * 票 09: a task parked by 下班 (its latest task_session is 'paused') is NOT
+ * a crash leftover — it deliberately stays 进行中 with a 暂停 badge, and
+ * 上班续跑 appends the next session. Only never-paused 进行中 tasks fall
+ * back to 待办.
  *
  * @param {DatabaseSync} db
  */
 function markInterruptedRuns(db) {
   const running = db.prepare("SELECT id FROM run WHERE status = 'running'").all();
-  if (running.length === 0) return;
+  const interruptSessions = db.prepare("UPDATE task_session SET status = 'interrupted', ended_at = ? WHERE status = 'running'");
+  const reopenTasks = db.prepare(
+    `UPDATE task SET status = 'open'
+     WHERE status = 'running'
+       AND id NOT IN (SELECT task_id FROM task_session WHERE status = 'paused')`,
+  );
+  if (running.length === 0) {
+    // No orphan runs — task sessions/tasks can still be orphaned if the host
+    // died between opening a session and creating its run; heal those too.
+    interruptSessions.run(new Date().toISOString());
+    reopenTasks.run();
+    return;
+  }
   const endedAt = new Date().toISOString();
   const finish = db.prepare("UPDATE run SET status = 'interrupted', ended_at = ? WHERE id = ?");
   for (const row of running) finish.run(endedAt, Number(/** @type {Record<string, unknown>} */ (row).id));
+  interruptSessions.run(endedAt);
+  reopenTasks.run();
+}
+
+/**
+ * Ticket 05 adds task columns to a `run` table that older databases already
+ * created (CREATE IF NOT EXISTS never touches them). Heal them in place.
+ * (SQLite cannot attach FK clauses via ALTER, so migrated databases carry
+ * these two columns without the REFERENCES the fresh schema declares — the
+ * only writers (service / run manager) always pass ids that exist.)
+ *
+ * @param {DatabaseSync} db
+ */
+function migrateRunTaskColumns(db) {
+  const columns = new Set(
+    db
+      .prepare("PRAGMA table_info(run)")
+      .all()
+      .map((row) => String(/** @type {Record<string, unknown>} */ (row).name)),
+  );
+  if (!columns.has("task_id")) db.exec("ALTER TABLE run ADD COLUMN task_id INTEGER");
+  if (!columns.has("task_session_id")) db.exec("ALTER TABLE run ADD COLUMN task_session_id INTEGER");
+  if (!columns.has("usage")) db.exec("ALTER TABLE run ADD COLUMN usage TEXT");
+}
+
+/**
+ * Ticket 06 gives the task table a new status CHECK (five states). SQLite
+ * cannot relax a CHECK in place, and `CREATE TABLE IF NOT EXISTS` never
+ * touches a pre-existing table — so a database still carrying the ticket-05
+ * CHECK (open/running/finished) is rebuilt here, mapping 已交产出 rows onto
+ * 待验收 (the boss still owes them a decision). References from run /
+ * task_session / artifact follow the table by name; foreign keys are not
+ * enforced in this store (single writer), so the swap is safe inside a
+ * transaction.
+ *
+ * @param {DatabaseSync} db
+ */
+function migrateTaskStateMachine(db) {
+  const current = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'task'").get();
+  const sql = current ? String(/** @type {Record<string, unknown>} */ (current).sql ?? "") : "";
+  if (sql.length === 0 || !sql.includes("'finished'")) return;
+
+  db.exec("BEGIN");
+  try {
+    db.exec(`
+      CREATE TABLE task_v6 (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        group_id INTEGER NOT NULL REFERENCES project_group(id),
+        employee_id INTEGER NOT NULL REFERENCES employee(id),
+        workspace_dir TEXT NOT NULL,
+        title TEXT NOT NULL,
+        goal TEXT NOT NULL,
+        playbook TEXT NOT NULL CHECK (playbook IN ('feature', 'bugfix', 'docs', 'free')),
+        acceptance TEXT NOT NULL,
+        base_head TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('open', 'running', 'review', 'done', 'failed')) DEFAULT 'open',
+        created_at TEXT NOT NULL
+      );
+      INSERT INTO task_v6 (id, group_id, employee_id, workspace_dir, title, goal, playbook, acceptance, base_head, status, created_at)
+      SELECT id, group_id, employee_id, workspace_dir, title, goal, playbook, acceptance, base_head,
+        CASE status WHEN 'finished' THEN 'review' ELSE status END,
+        created_at
+      FROM task;
+      DROP TABLE task;
+      ALTER TABLE task_v6 RENAME TO task;
+    `);
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+}
+
+/**
+ * Ticket 09 widens the run / task_session status CHECK with 'paused'
+ * (下班落盘). Same table-swap dance as migrateTaskStateMachine: CREATE IF
+ * NOT EXISTS never relaxes a pre-existing CHECK, so a database still
+ * missing 'paused' is rebuilt in place. Rows carry over unchanged — the
+ * statuses they hold are a subset of the new set.
+ *
+ * @param {DatabaseSync} db
+ */
+function migrateRunPauseState(db) {
+  for (const table of ["run", "task_session"]) {
+    const current = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+    const sql = current ? String(/** @type {Record<string, unknown>} */ (current).sql ?? "") : "";
+    if (sql.length === 0 || sql.includes("'paused'")) continue;
+
+    db.exec("BEGIN");
+    try {
+      if (table === "run") {
+        db.exec(`
+          CREATE TABLE run_v9 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_session_id INTEGER NOT NULL REFERENCES employee_session(id),
+            employee_id INTEGER NOT NULL REFERENCES employee(id),
+            engine TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'aborted', 'failed', 'interrupted', 'paused')),
+            prompt TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            ended_at TEXT,
+            usage TEXT,
+            task_id INTEGER,
+            task_session_id INTEGER
+          );
+          INSERT INTO run_v9 (id, employee_session_id, employee_id, engine, status, prompt, started_at, ended_at, usage, task_id, task_session_id)
+          SELECT id, employee_session_id, employee_id, engine, status, prompt, started_at, ended_at, usage, task_id, task_session_id FROM run;
+          DROP TABLE run;
+          ALTER TABLE run_v9 RENAME TO run;
+        `);
+      } else {
+        db.exec(`
+          CREATE TABLE task_session_v9 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id INTEGER NOT NULL REFERENCES task(id),
+            employee_session_id INTEGER NOT NULL REFERENCES employee_session(id),
+            engine TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'aborted', 'failed', 'interrupted', 'paused')),
+            started_at TEXT NOT NULL,
+            ended_at TEXT
+          );
+          INSERT INTO task_session_v9 (id, task_id, employee_session_id, engine, status, started_at, ended_at)
+          SELECT id, task_id, employee_session_id, engine, status, started_at, ended_at FROM task_session;
+          DROP TABLE task_session;
+          ALTER TABLE task_session_v9 RENAME TO task_session;
+        `);
+      }
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+  }
 }
 
 /**

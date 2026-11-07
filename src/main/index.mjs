@@ -9,11 +9,12 @@
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { appendFileSync, mkdirSync } from "node:fs";
-import { app, BrowserWindow, Menu, ipcMain, utilityProcess } from "electron";
+import { app, BrowserWindow, Menu, ipcMain, utilityProcess, dialog } from "electron";
 
 import { createHostSupervisor } from "./supervisor.mjs";
 import { createEventCoalescer } from "./coalescer.mjs";
-import { createEvent, createErrorReply, parseEnvelope, TOPICS } from "../shared/envelope.mjs";
+import { createExitCoordinator } from "./exit-coordinator.mjs";
+import { createInvoke, createEvent, createErrorReply, parseEnvelope, TOPICS } from "../shared/envelope.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(here, "..", "..");
@@ -46,7 +47,8 @@ if (process.env.CUBICLE_PROBE_USERDATA) {
  */
 function appendFileSyncProbe(file, payload) {
   mkdirSync(path.dirname(file), { recursive: true });
-  appendFileSync(file, JSON.stringify(payload, null, 2) + "\n");
+  // One JSON value per line: append-safe evidence stream.
+  appendFileSync(file, JSON.stringify(payload) + "\n");
 }
 
 mkdirSync(app.getPath("userData"), { recursive: true });
@@ -122,6 +124,14 @@ const supervisor = createHostSupervisor({
       return;
     }
     if (envelope.kind === "reply") {
+      const pending = hostInvocations.get(envelope.id);
+      if (pending) {
+        clearTimeout(pending.timer);
+        hostInvocations.delete(envelope.id);
+        if (envelope.ok) pending.resolve(envelope.payload);
+        else pending.reject(new Error(`${envelope.error?.code ?? "host_error"}: ${envelope.error?.message ?? ""}`));
+        return;
+      }
       sendToRenderer("cubicle:reply", envelope);
     }
   },
@@ -161,6 +171,13 @@ function createMainWindow() {
     }
   });
   mainWindow.loadFile(path.join(rootDir, "dist", "renderer", "index.html"));
+  // 票 09: 关窗先过三选（直接退 / 等完成 / 取消）。「直接退」在销毁窗口前
+  // 等 AgentHost 把下班落盘（paused）写进库；「取消」窗口照开。
+  mainWindow.on("close", (event) => {
+    if (exitCoordinator.exiting) return;
+    event.preventDefault();
+    void exitCoordinator.requestClose();
+  });
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
@@ -175,6 +192,97 @@ ipcMain.on("cubicle:invoke", (_event, raw) => {
       createErrorReply(envelope, { code: "host_offline", message: "后台服务未运行，正在自动重启" }),
     );
   }
+});
+
+// — 退出三选 (ticket 09) — 主进程自己也要敲 AgentHost 的门（下班落盘 /
+//   等完成），按回包 id 关联；渲染进程的 reply 转发不受影响。
+
+/** @type {Map<string, { resolve: (payload: unknown) => void, reject: (err: Error) => void, timer: NodeJS.Timeout }>} */
+const hostInvocations = new Map();
+let hostInvokeSeq = 0;
+
+/**
+ * @param {string} method
+ * @param {Record<string, unknown>} [payload]
+ * @param {number} [timeoutMs]
+ * @returns {Promise<unknown>}
+ */
+function invokeHost(method, payload = {}, timeoutMs = 15_000) {
+  return new Promise((resolve, reject) => {
+    hostInvokeSeq += 1;
+    const id = `m${hostInvokeSeq}-${Date.now().toString(36)}`;
+    const envelope = createInvoke(id, method, payload);
+    const timer = setTimeout(() => {
+      hostInvocations.delete(id);
+      reject(new Error(`host_timeout (${method})`));
+    }, timeoutMs);
+    hostInvocations.set(id, {
+      resolve,
+      reject,
+      timer,
+    });
+    if (!supervisor.send(envelope)) {
+      clearTimeout(timer);
+      hostInvocations.delete(id);
+      reject(new Error("host_offline"));
+    }
+  });
+}
+
+/**
+ * 退出决策：三选对话 + 「直接退先下班落盘」的顺序（exit-coordinator seam，
+ * 单测钉死）。e2e 用 CUBICLE_E2E_EXIT_CHOICE 模拟人手点击：先把实际展示的
+ * 三选记录到证据文件，再按指定序号选择 — 对话框本身是真的，只是手指是脚本。
+ *
+ * @param {{ buttons: string[], detail: string }} spec
+ */
+async function askExitChoice(spec) {
+  const scripted = e2eEnabled && process.env.CUBICLE_E2E_EXIT_CHOICE !== undefined;
+  if (scripted) {
+    try {
+      const outDir = process.env.CUBICLE_E2E_OUT_DIR ?? path.join(rootDir, "tmp", "e2e");
+      appendFileSyncProbe(path.join(outDir, "exit-dialog.json"), {
+        buttons: spec.buttons,
+        detail: spec.detail,
+        choice: Number(process.env.CUBICLE_E2E_EXIT_CHOICE),
+      });
+    } catch {
+      // 证据写不进去也不该卡退出
+    }
+    return Number(process.env.CUBICLE_E2E_EXIT_CHOICE);
+  }
+  /** @type {import("electron").MessageBoxOptions} */
+  const options = {
+    type: "question",
+    buttons: spec.buttons,
+    defaultId: 1,
+    cancelId: 2,
+    message: "要退出 Cubicle 吗？",
+    detail: spec.detail,
+  };
+  const result = mainWindow && !mainWindow.isDestroyed()
+    ? await dialog.showMessageBox(mainWindow, options)
+    : await dialog.showMessageBox(options);
+  return result.response;
+}
+
+const exitCoordinator = createExitCoordinator({
+  showMessageBox: askExitChoice,
+  pauseAll: () => invokeHost("host.pauseAll", {}, 15_000),
+  awaitQuiet: () => invokeHost("host.awaitQuiet", {}, 30 * 60 * 1000),
+  allowQuit: () => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
+    // e2e：runner 自己决定何时以什么码下线（app.exit），窗口销毁本身已证明
+    // 「pauseAll 落库在前」；真实退出才走 app.quit。
+    if (!e2eEnabled) app.quit();
+  },
+  onNote: (note) => {
+    try {
+      appendFileSync(path.join(resolveDataDir(), "agenthost.log"), `exit flow: ${note}\n`);
+    } catch {
+      // 备注尽力而为
+    }
+  },
 });
 
 app.whenReady().then(async () => {
@@ -200,6 +308,8 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
+  if (e2eEnabled) return; // e2e：退出时机与退出码由 runner 的结果统一决定（app.exit），
+  // 这里抢先 quit 会和「落盘证据刚写完」赛跑。
   app.quit();
 });
 

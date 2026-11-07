@@ -33,14 +33,14 @@ export function OfficeFloor({ snapshot, status, bridgeError, onHireAt, onTalkTo,
   const ready = status.state === "online" && snapshot;
 
   return (
-    <div className="office-floor">
+    <div className="office-floor" data-testid="office-floor">
       {!ready ? (
         <div className="scene-caption" data-testid="scene-caption">
           <span>{bridgeError ? "后台服务未连接，正在自动重试…" : "正在准备办公室…"}</span>
         </div>
       ) : null}
 
-      <div className="room">
+      <div className="room" data-testid="room">
         <div className="room-floor" />
         {snapshot?.desks.map((desk) => (
           <DeskCard

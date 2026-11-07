@@ -19,6 +19,10 @@ async function main() {
     { createPiAdapter },
     { createCodexAdapter },
     { createProbeRunner },
+    { createGitReader },
+    { createTaskRunHook },
+    { createDutyRuntime },
+    { taskPrompt },
     { existsSync },
     path,
     { parseEnvelope, createEvent, TOPICS },
@@ -29,6 +33,10 @@ async function main() {
     import("./engine/pi/adapter.mjs"),
     import("./engine/codex/adapter.mjs"),
     import("./engine/probe.mjs"),
+    import("./git/reader.mjs"),
+    import("./task/artifacts.mjs"),
+    import("./duty/runtime.mjs"),
+    import("./task/playbook.mjs"),
     import("node:fs"),
     import("node:path"),
     import("../shared/envelope.mjs"),
@@ -42,6 +50,8 @@ async function main() {
     dbPath: store.dbPath,
   };
 
+  // The app's git door: read-only commands only, everything audited.
+  const git = createGitReader();
   const port = process.parentPort;
   /** @param {unknown} envelope */
   const send = (envelope) => port.postMessage(envelope);
@@ -61,6 +71,16 @@ async function main() {
     // Engine events ride the run.event topic; the main process coalesces and
     // the view subscribes per topic. (Payloads stay envelope-shaped.)
     emit: (payload) => send(createEvent(TOPICS.runEvent, payload)),
+    // Work-order runs collect their 四件套 (ticket 05).
+    onTaskRunFinished: createTaskRunHook({ store, git }),
+  });
+
+  // 票 09: 上下班调度 — 到点自动上班（激活有未完成任务的员工自动续跑）、
+  // 下班 90 秒宽限（可配）后落盘 paused；override 走 service 的立即通道。
+  const duty = createDutyRuntime({
+    store,
+    runManager,
+    taskPromptFor: (/** @type {any} */ task) => taskPrompt(task),
   });
 
   // The admission probe (ticket 11) drives the SAME run-manager seam a real
@@ -82,6 +102,8 @@ async function main() {
     store,
     hostInfo,
     runManager,
+    git,
+    duty,
     engineProbe: probeRunner,
     engineFacts,
     notifyDomain: (payload) => send(createEvent(TOPICS.domainChanged, payload)),
@@ -102,9 +124,12 @@ async function main() {
         });
       return;
     }
-    const { reply, events } = service.handle(envelope);
-    send(reply);
-    for (const domainEvent of events) send(domainEvent);
+    // 同步方法立刻回；异步方法（host.pauseAll / host.awaitQuiet — 退出流程
+    // 的两扇门）等引擎收尾 promise 落定再回，回包顺序不敏感（按 id 关联）。
+    service.handleEnvelope(envelope).then(({ reply, events }) => {
+      send(reply);
+      for (const domainEvent of events) send(domainEvent);
+    });
   });
 
   /** @param {{ id: string, v: number, ts: number }} invoke @param {unknown} payload */
@@ -131,6 +156,9 @@ async function main() {
   const heartbeat = () => send(createEvent(TOPICS.hostStatus, { state: "online", ...hostInfo }));
   heartbeat();
   setInterval(heartbeat, 2000);
+
+  // 上下班滴答循环（unref：不钉住宿主进程）
+  duty.start();
 
   // Pay pi's module-import cost while the office settles in, so the first
   // sentence an employee hears doesn't also wait for the engine's cold start.

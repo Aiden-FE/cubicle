@@ -4,6 +4,7 @@
  * trunk artifacts, so the shape gets extracted, not copy-pasted a third time.
  */
 import { readFile, readdir, stat } from "node:fs/promises";
+import { mkdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -68,6 +69,25 @@ export async function typeInto(contents, selector, value) {
   );
 }
 
+/**
+ * Drive a controlled React <select> to a value.
+ *
+ * @param {import("electron").WebContents} contents
+ * @param {string} selector
+ * @param {string} value
+ */
+export async function setSelect(contents, selector, value) {
+  await evalIn(
+    contents,
+    `(() => {
+      const el = document.querySelector(${JSON.stringify(selector)});
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set;
+      setter.call(el, ${JSON.stringify(value)});
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    })()`,
+  );
+}
+
 /** @param {string} file */
 export async function readJson(file) {
   try {
@@ -75,6 +95,29 @@ export async function readJson(file) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Seed an employee workspace as a git repo (fixture setup, never the app:
+ * the app never writes to git). git spawns fine from the runner process on
+ * this machine — proven by the ticket-05 spike; the app's OWN git door
+ * stays read-only (src/host/git/reader.mjs).
+ *
+ * @param {string} workspaceDir
+ * @param {typeof import("node:child_process").execFileSync} execFileSync
+ * @returns {{ headBefore: string }}
+ */
+export function seedGitWorkspace(workspaceDir, execFileSync) {
+  const git = (/** @type {string[]} */ args) =>
+    execFileSync("git", ["-C", workspaceDir, ...args], { encoding: "utf8" });
+  mkdirSync(workspaceDir, { recursive: true });
+  git(["init", "-q", "-b", "main"]);
+  git(["config", "user.name", "pi-employee"]);
+  git(["config", "user.email", "pi-employee@cubicle.test"]);
+  writeFileSync(path.join(workspaceDir, "greet.txt"), "hello\n", "utf8");
+  git(["add", "-A"]);
+  git(["commit", "-q", "-m", "initial greeting"]);
+  return { headBefore: git(["rev-parse", "HEAD"]).trim() };
 }
 
 /**
@@ -193,6 +236,24 @@ export async function bootAndShowOffice(ctx, add) {
   add("界面显示 AgentHost 在线", onlineBadge);
 
   return { win, checks };
+}
+
+/**
+ * 票 09 的行为同步：默认班表 09:00–18:00，下班中的公司不再开新的引擎运行
+ * （off_duty 闸 —— 验收 5「暂停期间不再产生新的工具调用」的严格读法）。
+ * 早于 09 的票在任意钟点跑 e2e，都要把每公司班表配成全天，才能继续派单。
+ * （先例：06 票改了 05 的 runner 判据措辞。）
+ *
+ * @param {import("electron").WebContents} contents
+ */
+export async function ensureAllDaySchedule(contents) {
+  const snapshot = /** @type {any} */ (await evalIn(contents, `window.cubicle.invoke('office.get')`));
+  for (const company of snapshot?.companies ?? []) {
+    await evalIn(
+      contents,
+      `(async () => await window.cubicle.invoke('schedule.set', { companyId: ${Number(company.id)}, workStart: "00:00", workEnd: "23:59:59", graceSeconds: 90 }))()`,
+    );
+  }
 }
 
 /**

@@ -7,6 +7,9 @@
  */
 import { createReply, createErrorReply, createEvent, TOPICS } from "../shared/envelope.mjs";
 import { appError } from "../shared/apperror.mjs";
+import { draftTask, rejectPrompt, taskPrompt } from "./task/playbook.mjs";
+import { engineConfigDir, enginePaths } from "./engine/paths.mjs";
+import { DEFAULT_SCHEDULE, validateSchedule } from "./duty/schedule.mjs";
 import { deriveEngineBadge, installGuide } from "./engine/badge.mjs";
 
 /**
@@ -49,24 +52,58 @@ function requirePositiveId(payload, field) {
 }
 
 /**
+ * @typedef {object} DutyDoor 票 09: duty runtime 暴露给 service 的三条门。
+ * @property {(employeeId: number) => "on" | "grace" | "off"} phaseForEmployee
+ * @property {(companyId: number, mode: "on" | "off") => { phase: "on" | "grace" | "off" }} applyOverride
+ * @property {() => Promise<number>} pauseAll
+ *
  * @param {{
  *   store: ReturnType<import("./store.mjs").openStore>,
  *   hostInfo: { pid: number, startedAt: string },
  *   runManager?: ReturnType<import("./engine/run-manager.mjs").createRunManager>,
+ *   git?: Pick<import("./git/reader.mjs").GitReader, "head" | "audit">,
+ *   duty?: DutyDoor,
  *   engineProbe?: { startProbe(engine: string): Promise<{ status: string }> },
  *   engineFacts?: (engine: string) => { configured: boolean },
  *   notifyDomain?: (payload: Record<string, unknown>) => void,
  * }} deps
  */
-export function createService({ store, hostInfo, runManager, engineProbe, engineFacts, notifyDomain }) {
+export function createService({ store, hostInfo, runManager, git, duty, engineProbe, engineFacts, notifyDomain }) {
   /** 引擎运行方法共用同一道闸门：没有 run manager 就没有 run.*。 */
   function requireRunManager() {
     if (!runManager) throw appError("engine_unavailable", "引擎运行时未启动");
     return runManager;
   }
 
+  /** 工单方法共用同一道闸门：没有 git 门就没有 task.*。 */
+  function requireGit() {
+    if (!git) throw appError("git_unavailable", "git 访问未配置：工单需要 git 工作区才能记录起点。");
+    return git;
+  }
+
   /**
-   * @type {Record<string, (payload: unknown) => { payload: unknown, event?: Record<string, unknown> }>}
+   * 下班闸门（票 09）：下班中的公司不开新的引擎运行 — 「暂停期间不再产生
+   * 新的工具调用」的另一半（前一半是引擎 abort）。宽限相位允许：那是给
+   * 收尾的窗口。没有接 duty（老测试/降级宿主）时闸门不存在。
+   *
+   * @param {number} employeeId
+   */
+  function gateOffDuty(employeeId) {
+    if (duty && duty.phaseForEmployee(employeeId) === "off") {
+      throw appError("off_duty", "公司正在下班中：先在「上下班」面板点「立即上班」，或等时间表到点自动上班。");
+    }
+  }
+
+  /** @param {number} companyId */
+  function requireCompany(companyId) {
+    const exists = store
+      .officeSnapshot()
+      .companies.some((/** @type {{ id: number }} */ c) => c.id === companyId);
+    if (!exists) throw appError("unknown_company", `no company with id ${companyId}`);
+  }
+
+  /**
+   * @type {Record<string, (payload: unknown) => { payload: unknown, event?: Record<string, unknown> } | Promise<{ payload: unknown, event?: Record<string, unknown> }>>}
    */
   const methods = {
     "office.get"(payload) {
@@ -180,6 +217,7 @@ export function createService({ store, hostInfo, runManager, engineProbe, engine
     "run.start"(payload) {
       const employeeId = requirePositiveId(payload, "employeeId");
       const text = requireName(payload, "text");
+      gateOffDuty(employeeId);
       const { run, session } = requireRunManager().start({ employeeId, text });
       return { payload: { run, session } };
     },
@@ -194,6 +232,197 @@ export function createService({ store, hostInfo, runManager, engineProbe, engine
     "run.history"(payload) {
       const employeeId = requirePositiveId(payload, "employeeId");
       return { payload: requireRunManager().history({ employeeId }) };
+    },
+
+    // — work orders (ticket 05: 工单与产出) —
+
+    /**
+     * One sentence in, an editable contract out: which playbook, what the
+     * goal is, which acceptance criteria — the 工单台 prefills its form
+     * from this and the boss edits anything before dispatch.
+     */
+    "task.draft"(payload) {
+      const text = requireName(payload, "text");
+      return { payload: draftTask(text) };
+    },
+
+    "task.create"(payload) {
+      const employeeId = requirePositiveId(payload, "employeeId");
+      const text = requireName(payload, "text");
+      const employee = store.employeeById(employeeId);
+      if (!employee) throw appError("unknown_employee", `no employee with id ${employeeId}`);
+      const groupId = store.groupOfEmployee(employeeId);
+      if (groupId === null) throw appError("no_desk", `employee ${employeeId} has no desk — seat them first`);
+
+      const draft = draftTask(text);
+      const record = /** @type {Record<string, unknown>} */ (payload ?? {});
+      const goal = typeof record.goal === "string" && record.goal.trim().length > 0 ? record.goal.trim() : draft.goal;
+      const playbook =
+        typeof record.playbook === "string" && ["feature", "bugfix", "docs", "free"].includes(record.playbook)
+          ? record.playbook
+          : draft.playbook;
+      const acceptance = Array.isArray(record.acceptance)
+        ? record.acceptance.map((line) => String(line).trim()).filter((line) => line.length > 0)
+        : draft.acceptance;
+
+      // The git door decides usability BEFORE a task exists: an
+      // unversioned workspace cannot record a start HEAD (票 05 验收 5).
+      const workspaceDir = enginePaths(store.dataDir, employee.roleSnapshot.manifest.engine || "pi", employeeId)
+        .workspaceDir;
+      const head = requireGit().head(workspaceDir);
+      if (!head.ok) throw appError(head.code, head.message);
+
+      const task = store.createTask({
+        groupId,
+        employeeId,
+        workspaceDir,
+        title: text,
+        goal,
+        playbook,
+        acceptance,
+        baseHead: head.sha,
+      });
+      return { payload: { task }, event: { reason: "task.create", taskId: task.id } };
+    },
+
+    "task.dispatch"(payload) {
+      const taskId = requirePositiveId(payload, "taskId");
+      const task = store.taskById(taskId);
+      if (!task) throw appError("unknown_task", `no task with id ${taskId}`);
+      if (task.status === "running") throw appError("task_running", `task ${taskId} is already being worked on`);
+      // 待验收/完成 are not dispatch entry points (票 06: 不可跳过): a review
+      // task goes through task.reject, a done task is closed for good.
+      if (task.status === "review" || task.status === "done") {
+        throw appError("invalid_transition", `这张工单当前是「${task.status === "review" ? "待验收" : "完成"}」：${task.status === "review" ? "请点通过或打回。" : "已完成的工单不再开工。"}`);
+      }
+      gateOffDuty(task.employeeId);
+      // open may be dispatched; failed may retry (retry = a fresh task session)
+      const { run, session } = requireRunManager().start({
+        employeeId: task.employeeId,
+        text: taskPrompt(task),
+        task: { id: task.id },
+      });
+      return { payload: { run, session }, event: { reason: "task.dispatch", taskId } };
+    },
+
+    /**
+     * 验收通过: the only way a task reaches 完成 (票 06 验收 2). Legality is
+     * the store's transition map — review → done, nothing else.
+     */
+    "task.accept"(payload) {
+      const taskId = requirePositiveId(payload, "taskId");
+      if (!store.taskById(taskId)) throw appError("unknown_task", `no task with id ${taskId}`);
+      const task = store.setTaskStatus(taskId, "done");
+      return { payload: { task }, event: { reason: "task.accept", taskId } };
+    },
+
+    /**
+     * 打回: NOT a new task — the same task gets one more iteration session,
+     * on the same employee session (history stays continuous), and the
+     * boss's 打回意见 rides into the engine prompt (票 06 验收 3).
+     */
+    "task.reject"(payload) {
+      const taskId = requirePositiveId(payload, "taskId");
+      const task = store.taskById(taskId);
+      if (!task) throw appError("unknown_task", `no task with id ${taskId}`);
+      // Check before opening anything: a refused 打回 must not leave a
+      // dangling task_session row behind.
+      if (task.status !== "review") {
+        throw appError("invalid_transition", "只有「待验收」的工单能打回。");
+      }
+      gateOffDuty(task.employeeId);
+      const rawReason = /** @type {Record<string, unknown>} */ (payload ?? {}).reason;
+      if (rawReason !== undefined && rawReason !== null && typeof rawReason !== "string") {
+        throw appError("invalid_payload", "reason must be a string");
+      }
+      const { run, session } = requireRunManager().start({
+        employeeId: task.employeeId,
+        text: rejectPrompt(task, /** @type {string | undefined} */ (rawReason ?? undefined)),
+        task: { id: task.id },
+      });
+      return { payload: { run, session }, event: { reason: "task.reject", taskId } };
+    },
+
+    /**
+     * 取消: terminate the live engine run; the run settles as 'aborted',
+     * its task session follows, and the task lands at 失败 (票 06 验收 4).
+     */
+    "task.cancel"(payload) {
+      const taskId = requirePositiveId(payload, "taskId");
+      const task = store.taskById(taskId);
+      if (!task) throw appError("unknown_task", `no task with id ${taskId}`);
+      if (task.status !== "running") {
+        throw appError("invalid_transition", "只有「进行中」的工单能取消。");
+      }
+      // validation is synchronous; the engine cancel handshake settles later
+      void requireRunManager().abort({ employeeId: task.employeeId });
+      return { payload: { ok: true, taskId }, event: { reason: "task.cancel", taskId } };
+    },
+
+    "task.list"(payload) {
+      const record = /** @type {Record<string, unknown>} */ (payload ?? {});
+      // 票 08: 右把手按公司看全量（跨组）；工单台仍按组。两个都走同一扇门。
+      if (typeof record.companyId === "number") {
+        const companyId = requirePositiveId(payload, "companyId");
+        const companyExists = store
+          .officeSnapshot()
+          .companies.some((/** @type {{ id: number }} */ c) => c.id === companyId);
+        if (!companyExists) throw appError("unknown_company", `no company with id ${companyId}`);
+        return { payload: { tasks: store.listTasksForCompany({ companyId }) } };
+      }
+      const groupId =
+        typeof record.groupId === "number" ? requirePositiveId(payload, "groupId") : store.officeSnapshot().activeGroupId;
+      if (groupId === null) return { payload: { tasks: [] } };
+      return { payload: { tasks: store.listTasks({ groupId }) } };
+    },
+
+    "task.detail"(payload) {
+      const taskId = requirePositiveId(payload, "taskId");
+      const task = store.taskById(taskId);
+      if (!task) throw appError("unknown_task", `no task with id ${taskId}`);
+      // iteration = position in the task's session history (票 06 验收 3:
+      // 历史连续且迭代次数可见); tokens = every run's usage, summed (验收 2).
+      const sessions = store.listTaskSessions(taskId).map((session, index) => ({
+        ...session,
+        iteration: index + 1,
+      }));
+      return {
+        payload: {
+          task,
+          sessions,
+          artifacts: store.listArtifacts({ taskId }),
+          tokens: store.taskTokenSummary(taskId),
+          iterations: sessions.length,
+        },
+      };
+    },
+
+    /**
+     * Evidence for "应用全程未执行 git 写操作": every git command this host
+     * process ran, in order — the git door only ever executes its read-only
+     * allow-list (test/git-reader.test.mjs).
+     */
+    "task.gitAudit"() {
+      return { payload: { commands: requireGit().audit() } };
+    },
+
+    /**
+     * 引擎中心（票 08 外壳）：引擎名 + 配置目录路径。引擎卡徽章 / 可用性探针
+     * 属票 11 — 这里只把「有哪些引擎、配置放哪」这条查询立起来，卡片插槽留给
+     * 它。引擎集合从角色 manifest 里出现过的引擎去重（预设全是 pi；将来
+     * 招聘 codex 员工，它的引擎自然进列表）。
+     */
+    "engine.overview"() {
+      /** @type {{ name: string, configDir: string }[]} */
+      const engines = [];
+      const seen = new Set();
+      for (const role of store.listRoles()) {
+        const name = role.manifest.engine && role.manifest.engine.length > 0 ? role.manifest.engine : "pi";
+        if (seen.has(name)) continue;
+        seen.add(name);
+        engines.push({ name, configDir: engineConfigDir(store.dataDir, name) });
+      }
+      return { payload: { engines, dataDir: store.dataDir } };
     },
 
     "office.setActive"(payload) {
@@ -217,33 +446,150 @@ export function createService({ store, hostInfo, runManager, engineProbe, engine
       }
       return { payload: { ok: true }, event: { reason: "office.setActive", companyId } };
     },
+
+    // — 上下班 (ticket 09) — 配置行 vs override 记录 vs 相位，三条独立状态。
+
+    /**
+     * The company's timetable (defaulted when never configured), its manual
+     * override record, and the current duty phase — everything 上下班面板
+     * shows, from the store (single writer).
+     */
+    "schedule.get"(payload) {
+      const companyId = requirePositiveId(payload, "companyId");
+      requireCompany(companyId);
+      const row = store.getCompanySchedule(companyId);
+      const status = store.getDutyStatus(companyId);
+      return {
+        payload: {
+          schedule: row
+            ? { workStart: row.workStart, workEnd: row.workEnd, graceSeconds: row.graceSeconds }
+            : { workStart: DEFAULT_SCHEDULE.workStart, workEnd: DEFAULT_SCHEDULE.workEnd, graceSeconds: DEFAULT_SCHEDULE.graceSeconds },
+          configured: row !== null,
+          override: store.getDutyOverride(companyId),
+          status: status ?? { phase: "on", phaseSince: null, graceUntil: null },
+        },
+      };
+    },
+
+    /**
+     * 可配上下班时刻（验收 1）：每公司一份配置行，落库可改。合法性由
+     * duty/schedule 的 validateSchedule 定；被拒不动已存配置。
+     */
+    "schedule.set"(payload) {
+      const companyId = requirePositiveId(payload, "companyId");
+      requireCompany(companyId);
+      const record = /** @type {Record<string, unknown>} */ (payload ?? {});
+      const stored = store.getCompanySchedule(companyId);
+      const graceSeconds =
+        record.graceSeconds === undefined ? (stored?.graceSeconds ?? DEFAULT_SCHEDULE.graceSeconds) : record.graceSeconds;
+      const checked = validateSchedule({ workStart: record.workStart, workEnd: record.workEnd, graceSeconds });
+      if (!checked.ok) throw appError("invalid_payload", checked.reason);
+      const row = store.upsertCompanySchedule({ companyId, ...checked.schedule });
+      return { payload: { schedule: row }, event: { reason: "schedule.set", companyId } };
+    },
+
+    /**
+     * 手动上下班（验收 2）：写 override 记录 + 立即生效（duty runtime 的
+     * 立即通道），时间表一个字节不动。
+     */
+    "duty.override"(payload) {
+      const companyId = requirePositiveId(payload, "companyId");
+      const record = /** @type {Record<string, unknown>} */ (payload ?? {});
+      const mode = record.mode;
+      if (mode !== "on" && mode !== "off") throw appError("invalid_payload", "mode must be on/off");
+      if (!duty) throw appError("duty_unavailable", "上下班调度未启动");
+      const { phase } = duty.applyOverride(companyId, mode);
+      return { payload: { phase }, event: { reason: "duty.override", companyId } };
+    },
+
+    /**
+     * 退出「直接退」的地基：把全部在跑的 run 下班落盘（paused），等每一
+     * 个引擎收尾 promise 回来才回答 — main 据此才 kill host，重启后这些
+     * paused 行还在（store seam 钉死）。
+     */
+    async "host.pauseAll"() {
+      if (!duty) throw appError("duty_unavailable", "上下班调度未启动");
+      const paused = await duty.pauseAll();
+      return { payload: { paused } };
+    },
+
+    /** 退出「等完成」的地基：等 run 池安静再回答。 */
+    async "host.awaitQuiet"() {
+      await requireRunManager().whenQuiet();
+      return { payload: { ok: true } };
+    },
   };
+
+  /**
+   * 内部：跑一个 handler；同步方法给结果对象，异步方法（host.pauseAll /
+   * host.awaitQuiet — 退出流程的两扇门）给结果 promise。
+   *
+   * @param {InvokeEnvelope} invoke
+   * @returns {HandleResult | Promise<HandleResult>}
+   */
+  function run(invoke) {
+    const method = methods[invoke.method];
+    if (!method) {
+      return {
+        reply: createErrorReply(invoke, {
+          code: "unknown_method",
+          message: `AgentHost has no handler for ${invoke.method}`,
+        }),
+        events: [],
+      };
+    }
+    const toResult = (/** @type {{ payload: unknown, event?: Record<string, unknown> }} */ outcome) => {
+      const events = outcome.event ? [createEvent(TOPICS.domainChanged, outcome.event)] : [];
+      return { reply: createReply(invoke, outcome.payload), events };
+    };
+    const failure = (/** @type {unknown} */ err) => {
+      const code = /** @type {{ code?: string }} */ (err ?? {}).code ?? "internal";
+      const message = err instanceof Error ? err.message : String(err);
+      return { reply: createErrorReply(invoke, { code, message }), events: [] };
+    };
+    let outcome;
+    try {
+      outcome = method(invoke.payload);
+    } catch (err) {
+      return failure(err);
+    }
+    if (outcome && typeof /** @type {unknown} */ (/** @type {Promise<unknown>} */ (outcome).then) === "function") {
+      return Promise.resolve(/** @type {Promise<{ payload: unknown, event?: Record<string, unknown> }>} */ (outcome)).then(toResult, failure);
+    }
+    return toResult(/** @type {{ payload: unknown, event?: Record<string, unknown> }} */ (outcome));
+  }
 
   return {
     /**
+     * 同步门面（测试与所有同步方法的正门）：如果撞上异步 handler，
+     * 诚实报 async_required — 宿主入口走 handleEnvelope，不会撞。
+     *
      * @param {InvokeEnvelope} invoke
      * @returns {HandleResult}
      */
     handle(invoke) {
-      const method = methods[invoke.method];
-      if (!method) {
+      const result = run(invoke);
+      if (typeof /** @type {unknown} */ (/** @type {Promise<HandleResult>} */ (result).then) === "function") {
         return {
           reply: createErrorReply(invoke, {
-            code: "unknown_method",
-            message: `AgentHost has no handler for ${invoke.method}`,
+            code: "async_required",
+            message: `${invoke.method} 是异步方法，请走 handleEnvelope`,
           }),
           events: [],
         };
       }
-      try {
-        const { payload, event } = method(invoke.payload);
-        const events = event ? [createEvent(TOPICS.domainChanged, event)] : [];
-        return { reply: createReply(invoke, payload), events };
-      } catch (err) {
-        const code = /** @type {{ code?: string }} */ (err ?? {}).code ?? "internal";
-        const message = err instanceof Error ? err.message : String(err);
-        return { reply: createErrorReply(invoke, { code, message }), events: [] };
-      }
+      return /** @type {HandleResult} */ (result);
+    },
+
+    /**
+     * 异步门面（entry.cjs 的唯一门）：无论同步异步都包成 promise，
+     * 错误照样装进错误信封（contextBridge 纯对象规矩）。
+     *
+     * @param {InvokeEnvelope} invoke
+     * @returns {Promise<HandleResult>}
+     */
+    handleEnvelope(invoke) {
+      return Promise.resolve(run(invoke));
     },
   };
 }

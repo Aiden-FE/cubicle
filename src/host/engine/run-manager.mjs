@@ -40,9 +40,18 @@ const HISTORY_CAP = 400;
  * @typedef {object} ActiveRun
  * @property {RunRow} run
  * @property {boolean} aborted
+ * @property {boolean} paused      票 09: 下班落盘 — 收尾写 paused 而非 aborted
  * @property {boolean} finished
  * @property {LiveSession | null} live        opened engine session for this run
  * @property {Promise<LiveSession> | null} opening in-flight adapter.open()
+ * @property {import("./events.mjs").Usage} usage running fold of every turn_end usage (票 06)
+ */
+
+/**
+ * @typedef {object} TaskRunFinished
+ * @property {RunRow} run
+ * @property {"completed" | "aborted" | "failed" | "paused"} status
+ * @property {{ at: number, event: NormalizedEvent }[]} events the full run tail
  */
 
 /**
@@ -52,8 +61,9 @@ const HISTORY_CAP = 400;
  *   open(input: { employee: unknown, session: EmployeeSessionRow, onEvent: (event: NormalizedEvent) => void }): Promise<LiveSession>,
  * } | null} options.getAdapter
  * @param {(payload: { runId: number, employeeId: number, sessionId: number, at: number, event: NormalizedEvent }) => void} options.emit
+ * @param {(finished: TaskRunFinished) => void} [options.onTaskRunFinished] task-runs-only hook (ticket 05 artifact collection)
  */
-export function createRunManager({ store, getAdapter, emit }) {
+export function createRunManager({ store, getAdapter, emit, onTaskRunFinished }) {
   /** @type {Map<number, ActiveRun>} */
   const active = new Map();
   /** live engine sessions keyed by employeeSessionId — ticket 11 widened
@@ -75,6 +85,28 @@ export function createRunManager({ store, getAdapter, emit }) {
     return new Promise((resolve) => quietWaiters.push(resolve));
   }
 
+  /** @returns {import("./events.mjs").Usage} */
+  function zeroUsage() {
+    return { input: 0, cachedInput: 0, cacheWrite: 0, output: 0, reasoning: 0 };
+  }
+
+  /**
+   * Token accounting rides the event stream itself (票 06: token 来自 run 的
+   * usage): every `turn_end` usage the engine reports is folded into the
+   * run's running total — never invented when the engine stays silent.
+   *
+   * @param {import("./events.mjs").Usage} total
+   * @param {import("./events.mjs").Usage | undefined} usage
+   */
+  function foldUsage(total, usage) {
+    if (!usage) return;
+    total.input += usage.input;
+    total.cachedInput += usage.cachedInput;
+    total.cacheWrite += usage.cacheWrite;
+    total.output += usage.output;
+    total.reasoning += usage.reasoning;
+  }
+
   function signalQuiet() {
     if (active.size !== 0) return;
     const waiters = quietWaiters;
@@ -94,6 +126,7 @@ export function createRunManager({ store, getAdapter, emit }) {
       at: Date.now(),
       event,
     };
+    if (event.type === "turn_end") foldUsage(runRef.usage, event.usage);
     const buffer = lastRunEvents.get(runRef.run.employeeId);
     if (buffer && buffer.runId === runRef.run.id) {
       buffer.events.push({ at: payload.at, event });
@@ -110,20 +143,42 @@ export function createRunManager({ store, getAdapter, emit }) {
   function finishRun(runRef, endEvent) {
     if (runRef.finished) return;
     runRef.finished = true;
-    const status = runRef.aborted
-      ? "aborted"
-      : /** @type {"completed" | "failed"} */ (endEvent.status === "ok" ? "completed" : "failed");
+    const status = runRef.paused
+      ? "paused"
+      : runRef.aborted
+        ? "aborted"
+        : /** @type {"completed" | "failed"} */ (endEvent.status === "ok" ? "completed" : "failed");
     // "unknown" (the engine settled without an agent_end) is recorded as
     // 'failed' on purpose: the protocol says every run ends with agent_end,
     // so a silent settle never counts as a clean completion.
     try {
-      store.finishRun({ runId: runRef.run.id, status });
+      const hasUsage = Object.values(runRef.usage).some((n) => n > 0);
+      store.finishRun({ runId: runRef.run.id, status, usage: hasUsage ? runRef.usage : null });
       const pointer = runRef.live?.sessionFile() ?? null;
       if (pointer) {
         store.setEmployeeSessionFile({ employeeSessionId: runRef.run.employeeSessionId, sessionFile: pointer });
       }
+      // The task session follows its run's outcome — one owner (this
+      // manager) so it can never disagree with the run row.
+      if (runRef.run.taskSessionId !== null) {
+        store.finishTaskSession({ taskSessionId: runRef.run.taskSessionId, status });
+      }
     } catch {
       // the store closing under a settling run (host shutdown) must not throw
+    }
+    if (runRef.run.taskId !== null && onTaskRunFinished) {
+      try {
+        const buffer = lastRunEvents.get(runRef.run.employeeId);
+        onTaskRunFinished({
+          run: runRef.run,
+          status,
+          events: buffer && buffer.runId === runRef.run.id ? buffer.events : [],
+        });
+      } catch (err) {
+        // artifact collection must never take the run loop down; stderr is
+        // teed into <dataDir>/agenthost.log by the main process
+        process.stderr.write(`task artifact hook failed: ${err instanceof Error ? err.stack : err}\n`);
+      }
     }
     active.delete(runRef.run.employeeId);
     signalQuiet();
@@ -144,10 +199,10 @@ export function createRunManager({ store, getAdapter, emit }) {
   }
 
   /**
-   * @param {{ employeeId: number, text: string, probe?: boolean }} input
+   * @param {{ employeeId: number, text: string, task?: { id: number } | null, resume?: boolean, probe?: boolean }} input
    * @returns {{ run: RunRow, session: EmployeeSessionRow }}
    */
-  function start({ employeeId, text, probe = false }) {
+  function start({ employeeId, text, task, resume, probe = false }) {
     if (typeof employeeId !== "number" || !Number.isInteger(employeeId) || employeeId <= 0) {
       throw appError("invalid_payload", "employeeId must be a positive integer");
     }
@@ -157,6 +212,18 @@ export function createRunManager({ store, getAdapter, emit }) {
     const employee = store.employeeById(employeeId);
     if (!employee) throw appError("unknown_employee", `no employee with id ${employeeId}`);
     if (active.has(employeeId)) throw appError("employee_busy", `employee ${employeeId} is already working`);
+
+    // 票 09: 上班续跑 = 在「进行中」的任务上追加一轮会话（与打回同构）。
+    // 五状态转移表会拒绝 running→running，所以续跑走 resume 通道、跳过状态
+    // 门 — 但门必须先验：非「进行中」的任务误用 resume 一律拒绝，且不留
+    // 悬挂会话行（06 评审的同一条规矩）。
+    if (task && resume) {
+      const current = store.taskById(task.id);
+      if (!current) throw appError("unknown_task", `no task with id ${task.id}`);
+      if (current.status !== "running") {
+        throw appError("invalid_transition", `只有「进行中」（含下班暂停）的任务能续跑，这张是 ${current.status}`);
+      }
+    }
 
     const engine = employee.roleSnapshot.manifest.engine || "pi";
 
@@ -185,10 +252,31 @@ export function createRunManager({ store, getAdapter, emit }) {
       sessionsDir: dirs.sessionsDir,
       workspaceDir: dirs.workspaceDir,
     });
-    const run = store.createRun({ employeeId, employeeSessionId: session.id, engine, prompt: text.trim() });
+    // A dispatched work order runs inside its own task session (GLOSSARY:
+    // 会话挂在任务下，可多条 — retry/打回 gets a fresh one). The status
+    // gate comes FIRST: an illegal dispatch must not leave a session row
+    // behind (the store's five-state map decides, ticket 06).
+    if (task && !resume) store.setTaskStatus(task.id, "running");
+    const taskSession = task ? store.openTaskSession({ taskId: task.id, employeeSessionId: session.id, engine }) : null;
+    const run = store.createRun({
+      employeeId,
+      employeeSessionId: session.id,
+      engine,
+      prompt: text.trim(),
+      taskId: task?.id ?? null,
+      taskSessionId: taskSession?.id ?? null,
+    });
 
     /** @type {ActiveRun} */
-    const runRef = { run, aborted: false, finished: false, live: liveSessions.get(session.id) ?? null, opening: null };
+    const runRef = {
+      run,
+      aborted: false,
+      paused: false,
+      finished: false,
+      live: liveSessions.get(session.id) ?? null,
+      opening: null,
+      usage: zeroUsage(),
+    };
     active.set(employeeId, runRef);
     lastRunEvents.set(employeeId, { runId: run.id, events: [] });
     // The first event lands synchronously: the UI always sees life on the
@@ -250,14 +338,35 @@ export function createRunManager({ store, getAdapter, emit }) {
   /**
    * Synchronous validation (the service answers error codes on the reply
    * envelope), then a promise for the cancel handshake with the engine.
+   * `pause` (票 09) is the same handshake with a different landing status:
+   * the engine aborts, the run closes as 'paused' — and because the prompt
+   * is aborted, NO new tool call can follow the pause.
    *
    * @param {{ employeeId: number }} input
    * @returns {Promise<void>}
    */
   function abort({ employeeId }) {
+    return settleCancel(employeeId, false);
+  }
+
+  /**
+   * @param {{ employeeId: number }} input
+   * @returns {Promise<void>}
+   */
+  function pause({ employeeId }) {
+    return settleCancel(employeeId, true);
+  }
+
+  /**
+   * @param {number} employeeId
+   * @param {boolean} paused
+   * @returns {Promise<void>}
+   */
+  function settleCancel(employeeId, paused) {
     const runRef = active.get(employeeId);
     if (!runRef) throw appError("no_active_run", `employee ${employeeId} has no running job`);
-    runRef.aborted = true;
+    if (paused) runRef.paused = true;
+    else runRef.aborted = true;
     return (async () => {
       if (runRef.opening) {
         // cancel arrives mid-open: wait for the session, then cancel that
@@ -287,6 +396,16 @@ export function createRunManager({ store, getAdapter, emit }) {
   }
 
   /**
+   * Live runs right now — the iteration door 下班 (pause per company) and
+   * host.pauseAll walk. Callers only ever read the returned RunRows.
+   *
+   * @returns {RunRow[]}
+   */
+  function activeRuns() {
+    return Array.from(active.values(), (runRef) => runRef.run);
+  }
+
+  /**
    * Ride every run event (the same payload the transport emits) from inside
    * the host — used by the admission probe to observe its own runs without
    * touching the UI topic.
@@ -299,5 +418,5 @@ export function createRunManager({ store, getAdapter, emit }) {
     return () => listeners.delete(listener);
   }
 
-  return { start, abort, history, whenQuiet, subscribe };
+  return { start, abort, pause, history, whenQuiet, activeRuns, subscribe };
 }

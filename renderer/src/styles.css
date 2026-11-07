@@ -1195,6 +1195,370 @@ body {
   gap: 6px;
 }
 
+/* ── 左轨 (left rail, ticket 08): 公司切换 / 工单台 / 花名册 / 引擎中心 ──
+   全部是把手：浮层展开时画布尺寸不让路（硬约束）。 */
+
+.left-rail {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 28;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 14px 10px;
+  width: 104px;
+}
+
+.left-rail .rail-switcher {
+  margin-bottom: 10px;
+}
+
+/* Switcher 收进左轨：触发器竖排，面板向右弹出 */
+.left-rail .switcher {
+  position: relative;
+  top: auto;
+  left: auto;
+  z-index: auto;
+  align-items: stretch;
+}
+
+.left-rail .switcher-bar {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+}
+
+.left-rail .switcher .dot-sep {
+  display: none;
+}
+
+.left-rail .switcher-panel {
+  position: absolute;
+  left: calc(100% + 6px);
+  top: 0;
+  z-index: 31;
+}
+
+.rail-button {
+  writing-mode: vertical-rl;
+  letter-spacing: 0.35em;
+  padding: 14px 9px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--paper-raised);
+  border: 1px solid var(--line);
+  border-left: none;
+  border-radius: 0 12px 12px 0;
+  box-shadow: 8px 0 22px rgba(43, 38, 32, 0.1);
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.rail-button:hover {
+  background: #fff;
+}
+
+/* 左轨入口共用的抽屉浮层（花名册 / 引擎中心） */
+.rail-drawer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 30;
+  width: 360px;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper-raised);
+  border-right: 1px solid var(--line);
+  box-shadow: 12px 0 30px rgba(43, 38, 32, 0.12);
+  overflow-y: auto;
+}
+
+/* 花名册 */
+.roster-body {
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.roster-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 12px;
+}
+
+.roster-name {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.roster-role {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.roster-seat {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--ok);
+}
+
+.roster-row-empty .roster-seat {
+  color: var(--ink-soft);
+}
+
+/* 引擎中心 */
+.engine-body {
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.engine-item {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.engine-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.engine-config,
+.engine-data-dir {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.engine-config code,
+.engine-data-dir code {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  color: var(--ink);
+  word-break: break-all;
+}
+
+/* 票 11 插槽：引擎卡徽章/探针将来挂在这里，外壳不再长大 */
+.engine-card-slot {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+}
+
+/* ── 右缘任务把手 (right handle, ticket 08) ─────────────────────── */
+
+.task-handle {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 29;
+  writing-mode: vertical-rl;
+  letter-spacing: 0.35em;
+  padding: 14px 9px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--paper-raised);
+  border: 1px solid var(--line);
+  border-right: none;
+  border-radius: 12px 0 0 12px;
+  box-shadow: -8px 0 22px rgba(43, 38, 32, 0.1);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.task-handle:hover {
+  background: #fff;
+}
+
+.handle-badge {
+  writing-mode: horizontal-tb;
+  letter-spacing: 0;
+  min-width: 18px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--paper-raised);
+  font-size: 11px;
+  padding: 1px 6px;
+}
+
+.handle-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  width: 380px;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper-raised);
+  border-left: 1px solid var(--line);
+  box-shadow: -12px 0 30px rgba(43, 38, 32, 0.12);
+  overflow-y: auto;
+}
+
+.handle-section {
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.handle-section-title {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+}
+
+.handle-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+
+.handle-row[data-status="running"] .task-row-meta {
+  color: var(--warn);
+}
+
+.handle-row[data-status="review"] .task-row-meta {
+  color: #7a5cc4;
+}
+
+.handle-row[data-status="done"] .task-row-meta {
+  color: var(--ok);
+}
+
+.handle-row[data-status="failed"] .task-row-meta {
+  color: var(--bad);
+}
+
+/* ── 工单台 (task bench, left drawer) ──────────────────────────── */
+
+.task-drawer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 30;
+  width: 420px;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper-raised);
+  border-right: 1px solid var(--line);
+  box-shadow: 12px 0 30px rgba(43, 38, 32, 0.12);
+  overflow-y: auto;
+}
+
+.task-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px 10px;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  background: var(--paper-raised);
+}
+
+.task-title {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.task-close {
+  font: inherit;
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 4px 8px;
+}
+
+.task-close:hover {
+  background: rgba(43, 38, 32, 0.06);
+}
+
+.task-form {
+  padding: 12px 18px 14px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.task-field-label {
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  letter-spacing: 0.05em;
+  margin-top: 4px;
+}
+
+.task-sentence,
+.task-goal {
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.task-playbook {
+  font-size: 12.5px;
+  color: var(--accent);
+  background: var(--wood);
+  border-radius: 999px;
+  padding: 4px 12px;
+  width: fit-content;
+}
+
+.task-playbook-hint {
+  color: var(--ink-soft);
+  font-size: 11.5px;
+}
+
+.task-acceptance-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.task-acceptance-row {
+  display: flex;
+  gap: 6px;
+}
+
 .view-toggle {
   display: inline-flex;
   align-items: center;
@@ -1212,6 +1576,459 @@ body {
 .view-toggle input {
   accent-color: var(--accent);
   cursor: pointer;
+}
+
+.task-acceptance-input {
+  flex: 1;
+  font: inherit;
+  font-size: 12.5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.task-acceptance-remove,
+.task-acceptance-add {
+  font: inherit;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+  padding: 5px 9px;
+}
+
+.task-acceptance-add {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
+.task-employee {
+  font: inherit;
+  font-size: 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.task-dispatch {
+  margin-top: 8px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: 10px;
+  padding: 9px 0;
+  cursor: pointer;
+}
+
+.task-dispatch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.task-note {
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--bad);
+  background: rgba(180, 72, 47, 0.08);
+  border: 1px solid rgba(180, 72, 47, 0.35);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.task-list {
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.task-row {
+  font: inherit;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+}
+
+.task-row:hover {
+  background: #fff;
+}
+
+.task-row-title {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.task-row-meta {
+  font-size: 11.5px;
+  color: var(--ink-soft);
+}
+
+.task-row[data-status="running"] .task-row-meta {
+  color: var(--warn);
+}
+
+.task-row[data-status="review"] .task-row-meta {
+  color: #7a5cc4;
+}
+
+.task-row[data-status="done"] .task-row-meta {
+  color: var(--ok);
+}
+
+.task-row[data-status="failed"] .task-row-meta {
+  color: var(--bad);
+}
+
+.task-detail {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.task-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.task-chip {
+  font-size: 12px;
+  border-radius: 999px;
+  padding: 2px 10px;
+  background: var(--wood);
+  color: var(--accent);
+}
+
+.task-state {
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 10px;
+  color: var(--ink-soft);
+}
+
+.task-state[data-status="running"] {
+  color: var(--warn);
+  border-color: rgba(201, 138, 44, 0.45);
+}
+
+.task-state[data-status="review"] {
+  color: #7a5cc4;
+  border-color: rgba(122, 92, 196, 0.45);
+}
+
+.task-state[data-status="done"] {
+  color: var(--ok);
+  border-color: rgba(61, 138, 95, 0.4);
+}
+
+.task-state[data-status="failed"] {
+  color: var(--bad);
+  border-color: rgba(180, 72, 47, 0.4);
+}
+
+/* — 票 06: token 账单 + 迭代历史 + 验收动作 — */
+
+.task-tokens {
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.task-tokens code {
+  background: var(--wood);
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: var(--ink);
+}
+
+.task-tokens-detail {
+  margin-left: 4px;
+  color: var(--ink-soft);
+}
+
+.task-sessions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.task-iterations {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.task-session {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 9px;
+  background: var(--paper);
+}
+
+.task-review {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper-raised);
+  padding: 10px 12px;
+}
+
+.task-reject-reason {
+  font: inherit;
+  font-size: 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: var(--paper);
+  color: var(--ink);
+  resize: vertical;
+}
+
+.task-review-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.task-accept,
+.task-reject,
+.task-cancel,
+.task-retry {
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  border: none;
+  border-radius: 9px;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+.task-accept {
+  background: var(--ok);
+  color: #fff;
+  flex: 1;
+}
+
+.task-reject {
+  background: var(--warn);
+  color: #fff;
+  flex: 1;
+}
+
+.task-cancel {
+  align-self: flex-start;
+  background: transparent;
+  color: var(--bad);
+  border: 1px solid rgba(180, 72, 47, 0.4);
+}
+
+.task-retry {
+  align-self: flex-start;
+  background: var(--accent);
+  color: #fff;
+}
+
+.task-back {
+  margin-left: auto;
+  font: inherit;
+  font-size: 12.5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+  padding: 4px 10px;
+}
+
+.task-detail-goal {
+  font-size: 13.5px;
+}
+
+.task-detail-acceptance {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.task-base-head {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.task-base-head code {
+  background: var(--wood);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.task-artifacts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.task-artifact {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  padding: 8px 12px;
+}
+
+.task-artifact summary {
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.task-artifact pre {
+  margin: 8px 0 2px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--ink);
+}
+
+.task-empty {
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  padding: 6px 2px;
+}
+
+/* — 上下班（票 09）：左轨面板 + 相位徽标 — */
+
+.workclock-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.workclock-phase-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.duty-phase {
+  font-size: 13px;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+}
+
+.chip-phase-on {
+  color: var(--ok);
+  background: rgba(61, 138, 95, 0.1);
+}
+
+.chip-phase-grace {
+  color: var(--warn);
+  background: rgba(201, 138, 44, 0.12);
+}
+
+.chip-phase-off {
+  color: var(--bad);
+  background: rgba(180, 72, 47, 0.1);
+}
+
+.duty-override-note {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.workclock-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.duty-on,
+.duty-off {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--wood);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.duty-on:hover {
+  border-color: var(--ok);
+}
+
+.duty-off:hover {
+  border-color: var(--bad);
+}
+
+.workclock-hint {
+  font-size: 11.5px;
+  color: var(--ink-soft);
+}
+
+.schedule-form {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-top: 1px dashed var(--line);
+  padding-top: 10px;
+}
+
+.schedule-input {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.schedule-save {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--accent);
+  color: var(--paper);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* 暂停徽标：工单仍停在「进行中」，最近一轮会话 paused 时挂上（票 09） */
+
+.task-paused-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--warn);
+  color: var(--warn);
+  background: rgba(201, 138, 44, 0.12);
+  font-size: 11px;
+  font-weight: 700;
 }
 
 /* ticket 11: engine-card */
@@ -1240,4 +2057,3 @@ body {
 .engine-note { color: var(--warn); padding: 4px 0; }
 .engine-probe-chip { color: var(--ink-soft); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; }
 .engine-probe-error { color: var(--bad); font-style: italic; max-width: 100%; overflow-wrap: anywhere; }
-

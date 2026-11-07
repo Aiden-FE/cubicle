@@ -46,12 +46,24 @@ async function withManager(name, options = {}) {
  * keeps prompt open until endPrompt()/abort(). Mirrors the contract the pi
  * adapter must satisfy: open → live session { prompt, abort, sessionFile }.
  *
+ * Pending prompts and event subscriptions are keyed per employee, so two
+ * employees can be open at once without their handles overwriting each
+ * other (ticket 09 pause/pauseAll tests run two live runs side by side).
+ *
  * @param {{ events?: any[], pending?: boolean, openThrows?: { code: string } | null, sessionFile?: string | null }} [options]
  */
 function makeStub({ events = [], pending = false, openThrows = null, sessionFile = path.join("E:", "engine", "session.jsonl") } = {}) {
   const state = { opens: 0, prompts: /** @type {string[]} */ ([]), aborts: 0, employee: /** @type {any} */ (null), session: /** @type {any} */ (null) };
-  let endPrompt = /** @type {((value?: unknown) => void) | null} */ (null);
-  let emit = /** @type {((event: any) => void) | null} */ (null);
+  /** @type {Map<number, { endPrompt: ((value?: unknown) => void) | null, emit: ((event: any) => void) | null }>} */
+  const perEmployee = new Map();
+  const handleFor = (/** @type {number} */ employeeId) => {
+    let entry = perEmployee.get(employeeId);
+    if (!entry) {
+      entry = { endPrompt: null, emit: null };
+      perEmployee.set(employeeId, entry);
+    }
+    return entry;
+  };
   return {
     state,
     forAll: true,
@@ -62,32 +74,37 @@ function makeStub({ events = [], pending = false, openThrows = null, sessionFile
       state.opens += 1;
       state.employee = employee;
       state.session = session;
-      emit = onEvent;
+      const entry = handleFor(Number(session.employeeId));
+      entry.emit = onEvent;
       if (openThrows) throw appError(openThrows.code, "stub engine cannot start");
       return {
         /** @param {string} text */
         async prompt(text) {
           state.prompts.push(text);
           for (const event of events) onEvent(event);
-          if (pending) await new Promise((resolve) => (endPrompt = resolve));
+          if (pending) await new Promise((resolve) => (entry.endPrompt = resolve));
         },
         async abort() {
           state.aborts += 1;
           if (pending) {
             onEvent({ type: "agent_end", status: "failed" });
-            endPrompt?.();
+            entry.endPrompt?.();
           }
         },
         sessionFile: () => sessionFile,
       };
     },
-    /** let a pending prompt finish */
-    settle() {
-      endPrompt?.();
+    /** let pending prompts finish (all employees, or one by id) */
+    settle(/** @type {number | undefined} */ employeeId = undefined) {
+      const targets = employeeId === undefined ? [...perEmployee.values()] : [handleFor(employeeId)];
+      for (const entry of targets) entry.endPrompt?.();
     },
-    /** push one more normalized event through the open subscription */
-    push(/** @type {any} */ event) {
-      emit?.(event);
+    /** push one more normalized event through an employee's open subscription */
+    push(/** @type {any} */ event, /** @type {number | undefined} */ employeeId = undefined) {
+      const target = employeeId === undefined
+        ? [...perEmployee.values()].at(-1)
+        : handleFor(employeeId);
+      target?.emit?.(event);
     },
   };
 }
@@ -353,3 +370,307 @@ test("start rejects unknown employees and empty text", async () => {
     await ctx.dispose();
   }
 });
+
+test("a task run folds turn_end usage onto its run row (票 06: 本任务 token 的来源)", async () => {
+  const stub = makeStub({
+    events: [
+      { type: "turn_start" },
+      { type: "turn_end", status: "ok", usage: { input: 100, cachedInput: 10, cacheWrite: 2, output: 20, reasoning: 5 } },
+      { type: "turn_start" },
+      { type: "turn_end", status: "ok", usage: { input: 50, cachedInput: 0, cacheWrite: 0, output: 30, reasoning: 0 } },
+      AGENT_END,
+    ],
+  });
+  const ctx = await withManager("task-usage", { adapter: stub });
+  try {
+    const group = ctx.store.officeSnapshot().groups[0];
+    const task = ctx.store.createTask({
+      groupId: group.id,
+      employeeId: ctx.employeeId,
+      workspaceDir: "C:\\nowhere",
+      title: "t",
+      goal: "g",
+      playbook: "free",
+      acceptance: [],
+      baseHead: "d".repeat(40),
+    });
+    const started = ctx.manager.start({ employeeId: ctx.employeeId, text: "干活", task: { id: task.id } });
+    await ctx.manager.whenQuiet();
+
+    const run = /** @type {any} */ (ctx.store.runById(started.run.id));
+    assert.deepEqual(run.usage, { input: 150, cachedInput: 10, cacheWrite: 2, output: 50, reasoning: 5 });
+    assert.equal(ctx.store.taskTokenSummary(task.id).total, 150 + 10 + 2 + 50 + 5);
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("runs with no reported usage keep the run row honest (usage stays null)", async () => {
+  const stub = makeStub({ events: [AGENT_END] });
+  const ctx = await withManager("task-usage-none", { adapter: stub });
+  try {
+    const started = ctx.manager.start({ employeeId: ctx.employeeId, text: "干活" });
+    await ctx.manager.whenQuiet();
+    assert.equal(/** @type {any} */ (ctx.store.runById(started.run.id)).usage, null);
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("打回后再开工: the same task grows a second task session on the SAME employee session, one live engine session", async () => {
+  const stub = makeStub({ events: [AGENT_END] });
+  const ctx = await withManager("task-iteration", { adapter: stub });
+  try {
+    const group = ctx.store.officeSnapshot().groups[0];
+    const task = ctx.store.createTask({
+      groupId: group.id,
+      employeeId: ctx.employeeId,
+      workspaceDir: "C:\\nowhere",
+      title: "t",
+      goal: "g",
+      playbook: "free",
+      acceptance: [],
+      baseHead: "d".repeat(40),
+    });
+
+    const first = ctx.manager.start({ employeeId: ctx.employeeId, text: "第一轮", task: { id: task.id } });
+    await ctx.manager.whenQuiet();
+    ctx.store.setTaskStatus(task.id, "review"); // 跑完自动待验收（hook 语义，这里直接落状态）
+
+    const second = ctx.manager.start({ employeeId: ctx.employeeId, text: "打回后重来", task: { id: task.id } });
+    await ctx.manager.whenQuiet();
+
+    const sessions = ctx.store.listTaskSessions(task.id);
+    assert.equal(sessions.length, 2, "迭代次数 = 任务下的会话条数");
+    assert.ok(/** @type {number} */ (second.run.taskSessionId) > /** @type {number} */ (first.run.taskSessionId), "新迭代是追加，不是改写");
+    assert.equal(sessions[0].employeeSessionId, sessions[1].employeeSessionId, "历史连续：同一员工会话实体");
+    assert.equal(stub.state.opens, 1, "引擎会话跨迭代复用 — 对话历史延续");
+    assert.deepEqual(stub.state.prompts, ["第一轮", "打回后重来"]);
+    const total = ctx.store.taskTokenSummary(task.id);
+    assert.equal(total.total, 0);
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("a task run opens a task session, marks the task running, and hands the run tail to the task hook", async () => {
+  const stub = makeStub({ events: [{ type: "text_delta", text: "好的" }, AGENT_END] });
+  const ctx = await withManager("task-hook", { adapter: stub });
+  try {
+    const group = ctx.store.officeSnapshot().groups[0];
+    const task = ctx.store.createTask({
+      groupId: group.id,
+      employeeId: ctx.employeeId,
+      workspaceDir: "C:\\nowhere",
+      title: "t",
+      goal: "g",
+      playbook: "free",
+      acceptance: [],
+      baseHead: "d".repeat(40),
+    });
+    /** @type {any[]} */
+    const hookCalls = [];
+    const manager = createRunManager({
+      store: ctx.store,
+      getAdapter: () => stub,
+      emit: () => {},
+      onTaskRunFinished: (/** @type {any} */ call) => hookCalls.push(call),
+    });
+
+    const started = manager.start({ employeeId: ctx.employeeId, text: "干活", task: { id: task.id } });
+    assert.equal(started.run.taskId, task.id);
+    assert.notEqual(started.run.taskSessionId, null);
+    assert.equal(/** @type {any} */ (ctx.store.taskById(task.id)).status, "running");
+
+    await manager.whenQuiet();
+    assert.equal(hookCalls.length, 1);
+    assert.equal(hookCalls[0].run.id, started.run.id);
+    assert.equal(hookCalls[0].status, "completed");
+    assert.deepEqual(
+      hookCalls[0].events.map((/** @type {any} */ e) => e.event.type),
+      ["session_start", "text_delta", "agent_end"],
+    );
+    const taskSession = /** @type {any} */ (ctx.store.latestTaskSessionForTask(task.id));
+    assert.equal(taskSession.id, started.run.taskSessionId);
+    assert.equal(taskSession.status, "completed");
+
+    // a plain chat run never enters the task story
+    manager.start({ employeeId: ctx.employeeId, text: "闲聊" });
+    await manager.whenQuiet();
+    assert.equal(hookCalls.length, 1);
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+// — 上下班 (ticket 09: 宽限后落盘 paused / 上班续跑追加会话) —
+
+test("下班落盘：pause 把 run 与 task_session 合上为 paused，任务保持进行中，hook 收到 paused", async () => {
+  const stub = makeStub({ pending: true });
+  const ctx = await withManager("pause-landing", { adapter: stub });
+  try {
+    const group = ctx.store.officeSnapshot().groups[0];
+    const task = ctx.store.createTask({
+      groupId: group.id,
+      employeeId: ctx.employeeId,
+      workspaceDir: "C:\\nowhere",
+      title: "慢活",
+      goal: "g",
+      playbook: "free",
+      acceptance: [],
+      baseHead: "d".repeat(40),
+    });
+    /** @type {any[]} */
+    const hookCalls = [];
+    const manager = createRunManager({
+      store: ctx.store,
+      getAdapter: () => stub,
+      emit: () => {},
+      onTaskRunFinished: (/** @type {any} */ call) => hookCalls.push(call),
+    });
+
+    const started = manager.start({ employeeId: ctx.employeeId, text: "慢慢干", task: { id: task.id } });
+    assert.equal(/** @type {any} */ (ctx.store.taskById(task.id)).status, "running");
+
+    await manager.pause({ employeeId: ctx.employeeId });
+    await manager.whenQuiet();
+
+    assert.equal(stub.state.aborts, 1, "下班收尾走引擎 abort — 之后不再产生新的工具调用");
+    const run = /** @type {any} */ (ctx.store.runById(started.run.id));
+    assert.equal(run.status, "paused");
+    assert.notEqual(run.endedAt, null);
+    const taskSession = /** @type {any} */ (ctx.store.latestTaskSessionForTask(task.id));
+    assert.equal(taskSession.status, "paused");
+    assert.equal(/** @type {any} */ (ctx.store.taskById(task.id)).status, "running", "五状态不新增第六态：任务还在「进行中」");
+    assert.equal(hookCalls.length, 1);
+    assert.equal(hookCalls[0].status, "paused", "task hook 认得 paused：不落四件套、不搬任务状态");
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("pause 无在跑的员工作报告 no_active_run（宽限内 run 已自己收尾就是这条路）", async () => {
+  const stub = makeStub({ events: [AGENT_END] });
+  const ctx = await withManager("pause-noop", { adapter: stub });
+  try {
+    ctx.manager.start({ employeeId: ctx.employeeId, text: "快活" });
+    await ctx.manager.whenQuiet();
+    assert.throws(
+      () => ctx.manager.pause({ employeeId: ctx.employeeId }),
+      (err) => /** @type {{ code?: string }} */ (err).code === "no_active_run",
+    );
+    assert.equal(/** @type {any} */ (ctx.store.latestRunForEmployee(ctx.employeeId)).status, "completed", "先收尾的 run 不会被事后 pause 改写");
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("上班续跑：resume 在同一任务上追加 task_session，不动任务状态、复用引擎会话", async () => {
+  const stub = makeStub({ pending: true });
+  const ctx = await withManager("resume-append", { adapter: stub });
+  try {
+    const group = ctx.store.officeSnapshot().groups[0];
+    const task = ctx.store.createTask({
+      groupId: group.id,
+      employeeId: ctx.employeeId,
+      workspaceDir: "C:\\nowhere",
+      title: "跨夜慢活",
+      goal: "g",
+      playbook: "free",
+      acceptance: [],
+      baseHead: "d".repeat(40),
+    });
+
+    const first = ctx.manager.start({ employeeId: ctx.employeeId, text: "上班干活", task: { id: task.id } });
+    await ctx.manager.pause({ employeeId: ctx.employeeId }); // 下班落盘
+    await ctx.manager.whenQuiet();
+    assert.equal(/** @type {any} */ (ctx.store.latestTaskSessionForTask(task.id)).status, "paused");
+    assert.equal(/** @type {any} */ (ctx.store.taskById(task.id)).status, "running");
+
+    // 五状态转移表会拒绝 running→running —— resume 跳过状态门（任务本就在进行中）
+    const second = ctx.manager.start({ employeeId: ctx.employeeId, text: "上班续跑", task: { id: task.id }, resume: true });
+    assert.notEqual(second.run.taskSessionId, null);
+    assert.ok(/** @type {number} */ (second.run.taskSessionId) > /** @type {number} */ (first.run.taskSessionId), "续跑 = 追加一条 task_session（与打回同构）");
+
+    stub.push(AGENT_END, ctx.employeeId); // 续跑那轮照常跑完
+    stub.settle(ctx.employeeId);
+    await ctx.manager.whenQuiet();
+
+    const sessions = ctx.store.listTaskSessions(task.id);
+    assert.deepEqual(sessions.map((s) => s.status), ["paused", "completed"]);
+    assert.equal(/** @type {any} */ (ctx.store.runById(second.run.id)).status, "completed", "续跑那轮是正常的一轮 run（hook 会照常把它搬进待验收）");
+    assert.equal(sessions[0].employeeSessionId, sessions[1].employeeSessionId, "同一员工会话实体：历史连续");
+    assert.equal(stub.state.opens, 1, "引擎会话跨暂停续跑复用：对话记忆延续");
+    assert.equal(/** @type {any} */ (ctx.store.taskById(task.id)).status, "running", "任务状态搬运归 task hook（artifacts seam 钉），manager 只管会话与 run");
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("resume 只给「进行中」的任务续跑：待办/待验收误用被拒", async () => {
+  const stub = makeStub({ events: [AGENT_END] });
+  const ctx = await withManager("resume-guard", { adapter: stub });
+  try {
+    const group = ctx.store.officeSnapshot().groups[0];
+    const task = ctx.store.createTask({
+      groupId: group.id,
+      employeeId: ctx.employeeId,
+      workspaceDir: "C:\\nowhere",
+      title: "t",
+      goal: "g",
+      playbook: "free",
+      acceptance: [],
+      baseHead: "d".repeat(40),
+    });
+    // 待办：走 resume 是误用（待办续跑应走普通派单，open→running 合法）
+    assert.throws(
+      () => ctx.manager.start({ employeeId: ctx.employeeId, text: "续跑", task: { id: task.id }, resume: true }),
+      (err) => /** @type {{ code?: string }} */ (err).code === "invalid_transition",
+    );
+    assert.equal(ctx.store.listTaskSessions(task.id).length, 0, "被拒的 resume 不留悬挂会话行");
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("activeRuns 列出在跑的 run（下班 pauseAll 的迭代入口），多员工互不牵连", async () => {
+  const stub = makeStub({ pending: true });
+  const ctx = await withManager("active-runs", { adapter: stub });
+  try {
+    const group = ctx.store.officeSnapshot().groups[0];
+    const desks = ctx.store.listDesks({ groupId: group.id });
+    const programmer = /** @type {any} */ (ctx.store.listRoles().find((r) => r.key === "programmer"));
+    const other = ctx.store.hireEmployee({ deskId: desks[1].id, roleId: programmer.id, name: "小程二" }).employee;
+
+    ctx.manager.start({ employeeId: ctx.employeeId, text: "活一" });
+    ctx.manager.start({ employeeId: other.id, text: "活二" });
+    const actives = ctx.manager.activeRuns();
+    assert.deepEqual(actives.map((run) => run.employeeId).sort((a, b) => a - b), [ctx.employeeId, other.id].sort((a, b) => a - b));
+
+    await ctx.manager.pause({ employeeId: ctx.employeeId });
+    await waitForActive(ctx.manager, 1);
+    const remaining = ctx.manager.activeRuns();
+    assert.deepEqual(remaining.map((run) => run.employeeId), [other.id], "pause 单个员工不牵连别人（多公司/多员工并行硬约束）");
+    const pausedRun = actives.find((run) => run.employeeId === ctx.employeeId);
+    assert.ok(pausedRun, "employee 1 had an active run before the pause");
+    assert.equal(/** @type {any} */ (ctx.store.runById(pausedRun.id)).status, "paused");
+
+    await ctx.manager.abort({ employeeId: other.id });
+    await ctx.manager.whenQuiet();
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+/** poll helper for the activeRuns view */
+async function waitForActive(
+  /** @type {{ activeRuns(): { id: number, employeeId: number }[] }} */ manager,
+  /** @type {number} */ wanted,
+) {
+  const deadline = Date.now() + 2000;
+  while (Date.now() < deadline) {
+    if (manager.activeRuns().length === wanted) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`activeRuns never settled at ${wanted}: got ${manager.activeRuns().length}`);
+}

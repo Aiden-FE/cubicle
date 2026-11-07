@@ -89,13 +89,16 @@ export function ChatOverlay({ employee, onClose }) {
     try {
       await window.cubicle.invoke("run.start", { employeeId: employee.id, text });
     } catch (err) {
-      const code = /** @type {{ code?: string }} */ (err).code ?? "run_start_failed";
+      const failure = /** @type {{ code?: string, message?: string }} */ (err);
+      const code = failure.code ?? "run_start_failed";
       setBusyNote(
         code === "employee_busy"
           ? "TA 正在干活，先等这一轮结束（或点中止）。"
           : code === "engine_not_configured"
             ? "引擎还没配好：把 BYOK 模型配置 engines/pi/models.json 放进应用数据目录后再试。"
-            : `没能开始：${code}`,
+            : code === "off_duty"
+              ? failure.message ?? "公司正在下班中：先在左轨「上下班」点「立即上班」。"
+              : `没能开始：${code}`,
       );
     }
   };

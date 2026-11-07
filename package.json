@@ -10,7 +10,7 @@
   "main": "src/main/index.mjs",
   "scripts": {
     "spike": "node spike/run.mjs",
-    "test": "node --test --experimental-test-isolation=none",
+    "test": "node --test --experimental-test-isolation=none test/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.renderer.json",
     "check": "npm run typecheck && npm test",
     "build:renderer": "vite build",
@@ -18,7 +18,11 @@
     "e2e:02": "node scripts/e2e-02.mjs",
     "e2e:03": "node scripts/e2e-03.mjs",
     "e2e:04": "node scripts/e2e-04.mjs",
+    "e2e:05": "node scripts/e2e-05.mjs",
+    "e2e:06": "node scripts/e2e-06.mjs",
     "e2e:07": "node scripts/e2e-07.mjs",
+    "e2e:08": "node scripts/e2e-08.mjs",
+    "e2e:09": "node scripts/e2e-09.mjs",
     "e2e:11": "node scripts/e2e-11.mjs"
   },
   "dependencies": {

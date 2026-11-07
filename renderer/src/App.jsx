@@ -2,10 +2,16 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { OfficeFloor } from "./OfficeFloor.jsx";
 import { HireModal } from "./HireModal.jsx";
 import { ChatOverlay } from "./ChatOverlay.jsx";
-import { Switcher } from "./Switcher.jsx";
+import { TaskBench } from "./TaskBench.jsx";
+import { LeftRail } from "./LeftRail.jsx";
+import { RosterPanel } from "./RosterPanel.jsx";
+import { EngineCenterPanel } from "./EngineCenterPanel.jsx";
+import { WorkClockPanel } from "./WorkClockPanel.jsx";
+import { TaskHandle } from "./TaskHandle.jsx";
 import { StatusChip } from "./StatusChip.jsx";
 import { initialDeskActivity, reduceDeskActivity, expireDeskBlocked } from "./scene/deskActivity.js";
 import { initialMotion, advanceMotion, motionOnWork, motionOnRelease } from "./scene/idleMotion.js";
+import { activeCountFor } from "./scene/handleGroups.js";
 
 // Topic names mirrored from src/shared/envelope.mjs TOPICS (process boundary).
 const TOPICS = { hostStatus: "host.status", domainChanged: "domain.changed", runEvent: "run.event" };
@@ -28,6 +34,12 @@ export function App() {
    */
   const [deskStates, setDeskStates] = useState(/** @type {() => Map<number, DeskState>} */ (() => new Map()));
   const [viewPrefs, setViewPrefs] = useState(/** @type {() => ViewPrefs} */ (readViewPrefs));
+  // 票 08 外壳：四个左轨入口 + 右把手各自开合，全是浮层（画布永远 100%）。
+  const [benchOpen, setBenchOpen] = useState(false);
+  const [handleOpen, setHandleOpen] = useState(false);
+  const [rosterOpen, setRosterOpen] = useState(false);
+  const [engineOpen, setEngineOpen] = useState(false);
+  const [dutyOpen, setDutyOpen] = useState(false);
   const lastHostState = useRef(/** @type {string | null} */ (null));
 
   const refresh = useCallback(async () => {
@@ -98,6 +110,9 @@ export function App() {
     const unsubscribeRun = window.cubicle.subscribe(TOPICS.runEvent, (envelope) => {
       const payload = /** @type {RunEventData} */ (envelope.payload);
       foldRunEvent(payload.employeeId, payload.event);
+      // 票 08: run 收尾后 host 会落任务状态，但没有 domain 事件 —— 重拉一次
+      // 快照，左轨公司活跃数与右把手徽标才不会说谎。
+      if (payload.event.type === "agent_end") void refresh();
     });
     return () => {
       unsubscribeStatus();
@@ -146,6 +161,12 @@ export function App() {
     });
   };
 
+  // 右把手徽标：当前公司的活跃工单数（进行中 + 待验收），与左轨公司切换器
+  // 同一个 taskCounts 口径（activeCountFor 纯函数，node:test 钉死）。
+  const handleActive = activeCountFor(
+    snapshot ? snapshot.taskCounts?.[String(snapshot.activeCompanyId)] ?? null : null,
+  );
+
   return (
     <div className="office-app">
       <OfficeFloor
@@ -178,7 +199,39 @@ export function App() {
           气泡
         </label>
       </div>
-      <Switcher snapshot={snapshot} onChanged={refresh} />
+      {/* 左轨四入口（票 08）：公司切换（Switcher 收进来）/ 工单台 / 花名册 /
+          引擎中心。工单创建与列表只在浮层，主画布永远是办公室（硬约束）。 */}
+      <LeftRail
+        snapshot={snapshot}
+        onChanged={() => void refresh()}
+        benchOpen={benchOpen}
+        onToggleBench={() => setBenchOpen((open) => !open)}
+        rosterOpen={rosterOpen}
+        onToggleRoster={() => setRosterOpen((open) => !open)}
+        engineOpen={engineOpen}
+        onToggleEngine={() => setEngineOpen((open) => !open)}
+        dutyOpen={dutyOpen}
+        onToggleDuty={() => setDutyOpen((open) => !open)}
+      />
+      {benchOpen ? <TaskBench snapshot={snapshot} onClose={() => setBenchOpen(false)} /> : null}
+      {rosterOpen ? <RosterPanel snapshot={snapshot} onClose={() => setRosterOpen(false)} /> : null}
+      {engineOpen ? <EngineCenterPanel onClose={() => setEngineOpen(false)} /> : null}
+      {dutyOpen ? <WorkClockPanel snapshot={snapshot} onClose={() => setDutyOpen(false)} /> : null}
+      {/* 右缘任务把手：徽标 = 活跃工单数（进行中+待验收），拉开三段
+          进行中 / 待验收 / 档案（done+failed）。 */}
+      <button
+        type="button"
+        className="task-handle"
+        data-testid="task-handle"
+        data-active={String(handleActive)}
+        aria-expanded={handleOpen ? "true" : "false"}
+        onClick={() => setHandleOpen((open) => !open)}
+        title="任务把手：进行中 / 待验收 / 档案"
+      >
+        工单
+        <span className="handle-badge" data-testid="handle-active">{handleActive}</span>
+      </button>
+      {handleOpen ? <TaskHandle snapshot={snapshot} onClose={() => setHandleOpen(false)} /> : null}
       {hireDesk ? <HireModal desk={hireDesk} onClose={() => setHireDesk(null)} /> : null}
       {chatEmployee ? <ChatOverlay employee={chatEmployee} onClose={() => setChatEmployee(null)} /> : null}
     </div>
@@ -272,6 +325,7 @@ function saveViewPrefs(prefs) {
  * @property {{ id: number, companyId: number, name: string }[]} groups
  * @property {number | null} activeGroupId
  * @property {DeskData[]} desks
+ * @property {Record<string, { running: number, review: number }>} taskCounts 票 08: 每公司活跃数（进行中/待验收）
  * @property {{ pid: number, startedAt: string, dataDir: string, dbPath: string }} host
  *
  * @typedef {object} HostStatusData

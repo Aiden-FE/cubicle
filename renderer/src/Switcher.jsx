@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 
 /**
- * Top-left company · project-group switcher: the minimal form of the left-rail
- * company switcher the 08 shell will formalize. Lists and "create" live in
- * dropdown panels — the office canvas stays untouched.
+ * 公司 · 项目组切换器（票 08 起收进左轨）：Lists and "create" live in
+ * dropdown panels — the office canvas stays untouched. 公司列表带各公司
+ * 活跃数（进行中/待验收，来自 office.get 快照里的 taskCounts 聚合）。
  *
  * @param {{
  *   snapshot: import("./App.jsx").OfficeSnapshotData | null,
@@ -91,21 +91,29 @@ export function Switcher({ snapshot, onChanged }) {
         <div className="switcher-panel" data-testid="company-panel">
           <div className="switcher-panel-title">公司</div>
           <div className="switcher-options">
-            {companies.map((company) => (
-              <button
-                key={company.id}
-                type="button"
-                data-testid="company-item"
-                className={company.id === snapshot?.activeCompanyId ? "active" : ""}
-                disabled={busy}
-                onClick={() => {
-                  setOpenPanel(null);
-                  void pickCompany(company.id);
-                }}
-              >
-                {company.name}
-              </button>
-            ))}
+            {companies.map((company) => {
+              const counts = snapshot?.taskCounts?.[String(company.id)];
+              return (
+                <button
+                  key={company.id}
+                  type="button"
+                  data-testid="company-item"
+                  data-running={String(counts?.running ?? 0)}
+                  data-review={String(counts?.review ?? 0)}
+                  className={company.id === snapshot?.activeCompanyId ? "active" : ""}
+                  disabled={busy}
+                  onClick={() => {
+                    setOpenPanel(null);
+                    void pickCompany(company.id);
+                  }}
+                >
+                  {company.name}
+                  <span className="switcher-active-count" data-testid="company-active">
+                    进行中 {counts?.running ?? 0} · 待验收 {counts?.review ?? 0}
+                  </span>
+                </button>
+              );
+            })}
           </div>
           <form
             className="switcher-form"
