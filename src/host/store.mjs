@@ -72,6 +72,9 @@ import { appError } from "../shared/apperror.mjs";
  * @property {string | null} sessionFile
  * @property {string} updatedAt
  *
+ * @typedef {"open" | "running" | "review" | "done" | "failed"} TaskStatus
+ *   待办 / 进行中 / 待验收 / 完成 / 失败 (ticket 06: 五个状态不可跳过).
+ *
  * @typedef {object} RunRow
  * @property {number} id
  * @property {number} employeeSessionId
@@ -83,6 +86,7 @@ import { appError } from "../shared/apperror.mjs";
  * @property {string | null} endedAt
  * @property {number | null} taskId
  * @property {number | null} taskSessionId
+ * @property {import("./engine/events.mjs").Usage | null} usage engine-reported tokens, folded at finish (票 06: 本任务 token)
  *
  * @typedef {object} TaskRow
  * @property {number} id
@@ -94,7 +98,7 @@ import { appError } from "../shared/apperror.mjs";
  * @property {"feature" | "bugfix" | "docs" | "free"} playbook
  * @property {string[]} acceptance
  * @property {string} baseHead
- * @property {"open" | "running" | "finished"} status
+ * @property {TaskStatus} status
  * @property {string} createdAt
  *
  * @typedef {TaskRow & { employeeName: string }} TaskRowWithEmployee
@@ -184,6 +188,7 @@ CREATE TABLE IF NOT EXISTS run (
   prompt TEXT NOT NULL,
   started_at TEXT NOT NULL,
   ended_at TEXT,
+  usage TEXT,
   task_id INTEGER REFERENCES task(id),
   task_session_id INTEGER REFERENCES task_session(id)
 );
@@ -197,7 +202,7 @@ CREATE TABLE IF NOT EXISTS task (
   playbook TEXT NOT NULL CHECK (playbook IN ('feature', 'bugfix', 'docs', 'free')),
   acceptance TEXT NOT NULL,
   base_head TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('open', 'running', 'finished')) DEFAULT 'open',
+  status TEXT NOT NULL CHECK (status IN ('open', 'running', 'review', 'done', 'failed')) DEFAULT 'open',
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS task_session (
@@ -226,6 +231,27 @@ CREATE TABLE IF NOT EXISTS artifact (
  * top of that fact.
  */
 const TERMINAL_RUN_STATUSES = new Set(["completed", "aborted", "failed", "interrupted"]);
+
+/**
+ * Task status machine (ticket 06: 五个状态在界面上可见且不可跳过). The host —
+ * not the view — owns legality: every status change funnels through
+ * setTaskStatus, which refuses anything the map below does not name.
+ *
+ *   open ──派单──▶ running ──跑完──▶ review ──通过──▶ done (终态)
+ *     ▲    ▲         │  └──取消/失败──▶ failed          │
+ *     │    └──打回────┘                        打回 ────┤ (review → running)
+ *     └──崩溃自愈                                       │
+ *          failed ──重试──▶ running                    │
+ */
+const TASK_TRANSITIONS = Object.freeze(
+  /** @type {Record<TaskStatus, readonly TaskStatus[]>} */ ({
+    open: ["running"],
+    running: ["review", "failed"],
+    review: ["done", "running"],
+    done: [],
+    failed: ["running"],
+  }),
+);
 
 /**
  * The v1 preset roster (decision 05: 程序员 / 测试 / 产品经理, default
@@ -390,7 +416,35 @@ function toRun(row) {
     taskId: row.task_id === null || row.task_id === undefined ? null : Number(row.task_id),
     taskSessionId:
       row.task_session_id === null || row.task_session_id === undefined ? null : Number(row.task_session_id),
+    usage: parseUsage(row.usage),
   };
+}
+
+/**
+ * Stored run usage is a JSON blob of the neutral Usage shape; anything
+ * unreadable reads as “no usage reported”, never a crash.
+ *
+ * @param {unknown} raw
+ * @returns {import("./engine/events.mjs").Usage | null}
+ */
+function parseUsage(raw) {
+  if (raw === null || raw === undefined) return null;
+  try {
+    const parsed = JSON.parse(String(raw));
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const usage = /** @type {Record<string, unknown>} */ (parsed);
+    const count = (/** @type {unknown} */ value) =>
+      typeof value === "number" && Number.isFinite(value) ? value : 0;
+    return {
+      input: count(usage.input),
+      cachedInput: count(usage.cachedInput),
+      cacheWrite: count(usage.cacheWrite),
+      output: count(usage.output),
+      reasoning: count(usage.reasoning),
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -483,6 +537,7 @@ export function openStore({ dataDir }) {
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec(SCHEMA);
   migrateRunTaskColumns(db);
+  migrateTaskStateMachine(db);
   // A host that died (or was killed) mid-run must not leave phantom 'running'
   // rows behind: they become 'interrupted' the moment a host opens the store.
   markInterruptedRuns(db);
@@ -694,16 +749,18 @@ export function openStore({ dataDir }) {
     },
 
     /**
-     * @param {{ runId: number, status: "completed" | "aborted" | "failed" | "interrupted" }} input
+     * @param {{ runId: number, status: "completed" | "aborted" | "failed" | "interrupted", usage?: import("./engine/events.mjs").Usage | null }} input
      * @returns {RunRow}
      */
-    finishRun({ runId, status }) {
+    finishRun({ runId, status, usage }) {
       if (!TERMINAL_RUN_STATUSES.has(status)) {
         throw appError("invalid_payload", `run cannot finish with status ${status}`);
       }
-      db.prepare("UPDATE run SET status = ?, ended_at = ? WHERE id = ? AND status = 'running'").run(
+      const usageJson = usage && Object.values(usage).some((n) => n > 0) ? JSON.stringify(usage) : null;
+      db.prepare("UPDATE run SET status = ?, ended_at = ?, usage = ? WHERE id = ? AND status = 'running'").run(
         status,
         new Date().toISOString(),
+        usageJson,
         runId,
       );
       const row = db.prepare("SELECT * FROM run WHERE id = ?").get(runId);
@@ -793,18 +850,26 @@ export function openStore({ dataDir }) {
     },
 
     /**
+     * The only door to a task's status: the five-state transition map makes
+     * illegal jumps (待办→完成, 完成→任何) impossible at the host, so the UI
+     * only ever displays states and triggers legal ones (票 06 验收 5).
+     *
      * @param {number} taskId
-     * @param {"open" | "running" | "finished"} status
+     * @param {TaskStatus} status
      * @returns {TaskRow}
      */
     setTaskStatus(taskId, status) {
-      if (!["open", "running", "finished"].includes(status)) {
+      if (!Object.hasOwn(TASK_TRANSITIONS, status)) {
         throw appError("invalid_payload", `task cannot have status ${status}`);
       }
-      db.prepare("UPDATE task SET status = ? WHERE id = ?").run(status, taskId);
       const row = db.prepare("SELECT * FROM task WHERE id = ?").get(taskId);
       if (!row) throw appError("unknown_task", `no task with id ${taskId}`);
-      return toTask(/** @type {Record<string, unknown>} */ (row));
+      const current = toTask(/** @type {Record<string, unknown>} */ (row)).status;
+      if (!TASK_TRANSITIONS[current].includes(status)) {
+        throw appError("invalid_transition", `任务状态不能从 ${current} 直接跳到 ${status}`);
+      }
+      db.prepare("UPDATE task SET status = ? WHERE id = ?").run(status, taskId);
+      return toTask(/** @type {Record<string, unknown>} */ (db.prepare("SELECT * FROM task WHERE id = ?").get(taskId)));
     },
 
     /**
@@ -891,6 +956,31 @@ export function openStore({ dataDir }) {
     listArtifacts({ taskId }) {
       const rows = db.prepare("SELECT * FROM artifact WHERE task_id = ? ORDER BY id").all(taskId);
       return rows.map((row) => toArtifact(/** @type {Record<string, unknown>} */ (row)));
+    },
+
+    /**
+     * The task's token bill (票 06: 侧边栏展示本任务 token): every run of
+     * every iteration of the task, with its engine-reported usage summed.
+     *
+     * @param {number} taskId
+     * @returns {{ input: number, cachedInput: number, cacheWrite: number, output: number, reasoning: number, total: number }}
+     */
+    taskTokenSummary(taskId) {
+      const rows = db
+        .prepare("SELECT usage FROM run WHERE task_id = ? AND usage IS NOT NULL")
+        .all(taskId);
+      const summary = { input: 0, cachedInput: 0, cacheWrite: 0, output: 0, reasoning: 0, total: 0 };
+      for (const row of rows) {
+        const usage = parseUsage(/** @type {Record<string, unknown>} */ (row).usage);
+        if (!usage) continue;
+        summary.input += usage.input;
+        summary.cachedInput += usage.cachedInput;
+        summary.cacheWrite += usage.cacheWrite;
+        summary.output += usage.output;
+        summary.reasoning += usage.reasoning;
+      }
+      summary.total = summary.input + summary.cachedInput + summary.cacheWrite + summary.output + summary.reasoning;
+      return summary;
     },
 
     /**
@@ -983,6 +1073,55 @@ function migrateRunTaskColumns(db) {
   );
   if (!columns.has("task_id")) db.exec("ALTER TABLE run ADD COLUMN task_id INTEGER");
   if (!columns.has("task_session_id")) db.exec("ALTER TABLE run ADD COLUMN task_session_id INTEGER");
+  if (!columns.has("usage")) db.exec("ALTER TABLE run ADD COLUMN usage TEXT");
+}
+
+/**
+ * Ticket 06 gives the task table a new status CHECK (five states). SQLite
+ * cannot relax a CHECK in place, and `CREATE TABLE IF NOT EXISTS` never
+ * touches a pre-existing table — so a database still carrying the ticket-05
+ * CHECK (open/running/finished) is rebuilt here, mapping 已交产出 rows onto
+ * 待验收 (the boss still owes them a decision). References from run /
+ * task_session / artifact follow the table by name; foreign keys are not
+ * enforced in this store (single writer), so the swap is safe inside a
+ * transaction.
+ *
+ * @param {DatabaseSync} db
+ */
+function migrateTaskStateMachine(db) {
+  const current = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'task'").get();
+  const sql = current ? String(/** @type {Record<string, unknown>} */ (current).sql ?? "") : "";
+  if (sql.length === 0 || !sql.includes("'finished'")) return;
+
+  db.exec("BEGIN");
+  try {
+    db.exec(`
+      CREATE TABLE task_v6 (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        group_id INTEGER NOT NULL REFERENCES project_group(id),
+        employee_id INTEGER NOT NULL REFERENCES employee(id),
+        workspace_dir TEXT NOT NULL,
+        title TEXT NOT NULL,
+        goal TEXT NOT NULL,
+        playbook TEXT NOT NULL CHECK (playbook IN ('feature', 'bugfix', 'docs', 'free')),
+        acceptance TEXT NOT NULL,
+        base_head TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('open', 'running', 'review', 'done', 'failed')) DEFAULT 'open',
+        created_at TEXT NOT NULL
+      );
+      INSERT INTO task_v6 (id, group_id, employee_id, workspace_dir, title, goal, playbook, acceptance, base_head, status, created_at)
+      SELECT id, group_id, employee_id, workspace_dir, title, goal, playbook, acceptance, base_head,
+        CASE status WHEN 'finished' THEN 'review' ELSE status END,
+        created_at
+      FROM task;
+      DROP TABLE task;
+      ALTER TABLE task_v6 RENAME TO task;
+    `);
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
 }
 
 /**

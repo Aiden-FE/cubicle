@@ -130,15 +130,29 @@ test("a finished task run leaves exactly the four artifacts, in order", async ()
   }
 });
 
-test("finishing the run marks the task finished (the run manager owns the task session)", async () => {
-  const ctx = await withCollector("close", { ok: true, headNow: "c".repeat(40), stat: "", nameStatus: [], porcelain: "" });
+test("a clean run ends in 待验收 — 完成 is the boss's call, never the engine's (票 06)", async () => {
+  const ctx = await withCollector("review", { ok: true, headNow: "c".repeat(40), stat: "", nameStatus: [], porcelain: "" });
   try {
-    ctx.hook({ run: ctx.run, status: "aborted", events: eventsOf([{ type: "agent_end", status: "failed" }]) });
-    assert.equal(/** @type {any} */ (ctx.store.taskById(ctx.task.id)).status, "finished");
+    ctx.hook({ run: ctx.run, status: "completed", events: WORK_RUN });
+    assert.equal(/** @type {any} */ (ctx.store.taskById(ctx.task.id)).status, "review");
     // four honest slots even for an aborted run with nothing in them
     assert.equal(ctx.store.listArtifacts({ taskId: ctx.task.id }).length, 4);
   } finally {
     await ctx.dispose();
+  }
+});
+
+test("a cancelled or failed run marks the task 失败 (票 06: 取消终止并标记失败)", async () => {
+  for (const runStatus of ["aborted", "failed"]) {
+    const ctx = await withCollector(`fail-${runStatus}`, { ok: true, headNow: "c".repeat(40), stat: "", nameStatus: [], porcelain: "" });
+    try {
+      ctx.hook({ run: ctx.run, status: /** @type {any} */ (runStatus), events: eventsOf([{ type: "agent_end", status: "failed" }]) });
+      assert.equal(/** @type {any} */ (ctx.store.taskById(ctx.task.id)).status, "failed");
+      // 失败不是终态：重试从 失败 → 进行中 回到循环里
+      assert.equal(ctx.store.setTaskStatus(ctx.task.id, "running").status, "running");
+    } finally {
+      await ctx.dispose();
+    }
   }
 });
 

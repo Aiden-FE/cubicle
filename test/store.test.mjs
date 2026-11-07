@@ -535,18 +535,123 @@ test("a task records its git start HEAD, playbook and editable acceptance, and s
   }
 });
 
-test("task status moves open → running → finished and rejects anything else", async () => {
+test("the five-state task machine (待办/进行中/待验收/完成/失败) accepts only legal transitions", async () => {
   const { dataDir, dispose } = await withTempDir("task-status");
   try {
     const store = openStore({ dataDir });
     const task = makeTask(store, hireProgrammer(store));
+    assert.equal(task.status, "open");
+
+    // 派单 → 进行中 → 跑完自动待验收 → 通过 → 完成（终态）
     assert.equal(store.setTaskStatus(task.id, "running").status, "running");
-    assert.equal(store.setTaskStatus(task.id, "finished").status, "finished");
+    assert.equal(store.setTaskStatus(task.id, "review").status, "review");
+    assert.equal(store.setTaskStatus(task.id, "done").status, "done");
+    // 完成是终态：谁都不能再把已完成的工单拉回任何状态
+    for (const next of ["open", "running", "review", "failed"]) {
+      assert.throws(
+        () => store.setTaskStatus(task.id, /** @type {any} */ (next)),
+        (err) => /** @type {{ code?: string }} */ (err).code === "invalid_transition",
+        `done → ${next} must be rejected`,
+      );
+    }
+    store.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("skipping states is impossible: 待办 cannot jump to 待验收/完成/失败, 待验收 cannot jump to 失败", async () => {
+  const { dataDir, dispose } = await withTempDir("task-skip");
+  try {
+    const store = openStore({ dataDir });
+    const task = makeTask(store, hireProgrammer(store));
+    for (const next of ["review", "done", "failed"]) {
+      assert.throws(
+        () => store.setTaskStatus(task.id, /** @type {any} */ (next)),
+        (err) => /** @type {{ code?: string }} */ (err).code === "invalid_transition",
+        `open → ${next} must be rejected`,
+      );
+    }
+    store.setTaskStatus(task.id, "running");
+    assert.throws(
+      () => store.setTaskStatus(task.id, "done"),
+      (err) => /** @type {{ code?: string }} */ (err).code === "invalid_transition",
+    );
+    store.setTaskStatus(task.id, "review");
+    assert.throws(
+      () => store.setTaskStatus(task.id, "failed"),
+      (err) => /** @type {{ code?: string }} */ (err).code === "invalid_transition",
+    );
+    // unknown words are still payload errors, not transition errors
     assert.throws(
       () => store.setTaskStatus(task.id, /** @type {any} */ ("accepted")),
       (err) => /** @type {{ code?: string }} */ (err).code === "invalid_payload",
     );
     store.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("打回 (review → running) and 取消 (running → failed) and 重试 (failed → running) are legal", async () => {
+  const { dataDir, dispose } = await withTempDir("task-loop");
+  try {
+    const store = openStore({ dataDir });
+    const task = makeTask(store, hireProgrammer(store));
+    store.setTaskStatus(task.id, "running");
+    store.setTaskStatus(task.id, "review");
+    assert.equal(store.setTaskStatus(task.id, "running").status, "running"); // 打回：同一任务再开工
+    assert.equal(store.setTaskStatus(task.id, "failed").status, "failed"); // 取消：终止并标记失败
+    assert.equal(store.setTaskStatus(task.id, "running").status, "running"); // 失败后可重试
+    store.setTaskStatus(task.id, "review");
+    assert.equal(store.setTaskStatus(task.id, "done").status, "done");
+    store.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("an old database (ticket 05 schema: finished + old CHECK) migrates tasks to the five-state machine", async () => {
+  const { dataDir, dispose } = await withTempDir("task-state-migration");
+  try {
+    const store = openStore({ dataDir });
+    const employee = hireProgrammer(store);
+    const task = makeTask(store, employee);
+    store.setTaskStatus(task.id, "running");
+    store.setTaskStatus(task.id, "review");
+    store.close();
+
+    // Rewind the file to the pre-06 schema: task table whose CHECK still
+    // allows only open/running/finished, one row parked at 已交产出.
+    const raw = new DatabaseSync(path.join(dataDir, "cubicle.db"));
+    raw.exec(`
+      CREATE TABLE task_old (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        group_id INTEGER NOT NULL REFERENCES project_group(id),
+        employee_id INTEGER NOT NULL REFERENCES employee(id),
+        workspace_dir TEXT NOT NULL,
+        title TEXT NOT NULL,
+        goal TEXT NOT NULL,
+        playbook TEXT NOT NULL CHECK (playbook IN ('feature', 'bugfix', 'docs', 'free')),
+        acceptance TEXT NOT NULL,
+        base_head TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('open', 'running', 'finished')) DEFAULT 'open',
+        created_at TEXT NOT NULL
+      );
+      INSERT INTO task_old SELECT id, group_id, employee_id, workspace_dir, title, goal, playbook, acceptance, base_head, 'finished', created_at FROM task;
+      DROP TABLE task;
+      ALTER TABLE task_old RENAME TO task;
+    `);
+    raw.close();
+
+    const reopened = openStore({ dataDir});
+    // 已交产出 rows become 待验收 — the boss still owes them a 通过/打回.
+    assert.equal(/** @type {any} */ (reopened.taskById(task.id)).status, "review");
+    // and the healed table accepts the new states (the old CHECK is gone).
+    assert.equal(reopened.setTaskStatus(task.id, "running").status, "running"); // 打回
+    assert.equal(reopened.setTaskStatus(task.id, "review").status, "review");
+    assert.equal(reopened.setTaskStatus(task.id, "done").status, "done");
+    reopened.close();
   } finally {
     await dispose();
   }

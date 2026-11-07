@@ -127,7 +127,7 @@ export function finalReport(events) {
  * @returns {(finished: TaskRunFinished) => void}
  */
 export function createTaskRunHook({ store, git }) {
-  return ({ run, events }) => {
+  return ({ run, status, events }) => {
     if (run.taskId === null) return;
     const task = store.taskById(run.taskId);
 
@@ -165,9 +165,11 @@ export function createTaskRunHook({ store, git }) {
     });
 
     // The task session row is closed by the run manager (single owner of the
-    // run lifecycle); this hook writes the deliverables and marks the task.
+    // run lifecycle); this hook writes the deliverables and parks the task
+    // in its post-run state (票 06): a clean run waits for 验收, a cancelled
+    // or failed run is 失败 — 完成 only ever comes from the boss accepting.
     if (task) {
-      store.setTaskStatus(task.id, "finished");
+      store.setTaskStatus(task.id, status === "completed" ? "review" : "failed");
     }
   };
 }

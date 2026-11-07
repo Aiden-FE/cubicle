@@ -4,7 +4,7 @@
 
 **Blocked by:** 05
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] 任务跑完自动进入待验收，未点通过前不算完成
 - [ ] 通过后状态为完成，侧边栏展示四件套与本任务 token

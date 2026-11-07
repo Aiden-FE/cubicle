@@ -394,13 +394,15 @@ test("run methods answer engine_unavailable when the host has no run manager", a
 /**
  * Service wiring for tasks: real store + stub engine + the real task hook,
  * with a scripted git door (the door itself is tested against real git in
- * test/git-reader.test.mjs).
+ * test/git-reader.test.mjs). `hold: true` makes the stub wait (so 取消 has
+ * something alive to cancel); every stub run reports usage the way a real
+ * turn_end does (票 06: token 来自 run 的 usage).
  *
  * @param {string} name
- * @param {{ headScript?: { ok: boolean, sha?: string, code?: string, message?: string }, useRealGit?: boolean }} [options]
+ * @param {{ headScript?: { ok: boolean, sha?: string, code?: string, message?: string }, useRealGit?: boolean, hold?: boolean }} [options]
  */
 async function withTaskService(name, options = {}) {
-  const { headScript = { ok: true, sha: "a".repeat(40) }, useRealGit = false } = options;
+  const { headScript = { ok: true, sha: "a".repeat(40) }, useRealGit = false, hold = false } = options;
   const dataDir = await mkdtemp(path.join(tmpdir(), `cubicle-task-service-${name}-`));
   const store = openStore({ dataDir });
   const auditCommands = [
@@ -421,6 +423,8 @@ async function withTaskService(name, options = {}) {
       porcelain: "",
     }),
   });
+  /** lets a held stub run settle */
+  let releasePrompt = /** @type {((value?: unknown) => void) | null} */ (null);
   const runManager = createRunManager({
     store,
     getAdapter: (engine) =>
@@ -429,10 +433,15 @@ async function withTaskService(name, options = {}) {
             async open({ onEvent }) {
               return {
                 async prompt() {
+                  onEvent({ type: "turn_end", status: "ok", usage: { input: 40, cachedInput: 4, cacheWrite: 0, output: 8, reasoning: 1 } });
+                  if (hold) await new Promise((resolve) => (releasePrompt = resolve));
                   onEvent({ type: "text_delta", text: "干完了" });
                   onEvent({ type: "agent_end", status: "ok" });
                 },
-                async abort() {},
+                async abort() {
+                  onEvent({ type: "agent_end", status: "failed" });
+                  releasePrompt?.();
+                },
                 sessionFile: () => null,
               };
             },
@@ -557,7 +566,7 @@ test("task.dispatch runs the playbook prompt and the four artifacts arrive when 
     await runManager.whenQuiet();
 
     const detail = /** @type {any} */ (service.handle(createInvoke("k7", "task.detail", { taskId: created.id })).reply.payload);
-    assert.equal(detail.task.status, "finished");
+    assert.equal(detail.task.status, "review", "跑完自动进入待验收");
     assert.deepEqual(detail.artifacts.map((/** @type {any} */ a) => a.kind), ["diff_summary", "changed_files", "command_output", "report"]);
     assert.ok(detail.artifacts[3].content.includes("干完了"));
     assert.equal(detail.sessions.length, 1);
@@ -593,6 +602,160 @@ test("task.gitAudit answers with every git command the app ran — all read-only
     const commands = /** @type {any} */ (reply.payload).commands;
     assert.equal(commands.length, 3);
     assert.ok(commands.every((/** @type {string} */ line) => /\b(rev-parse|diff|status|log|show|ls-files)\b/.test(line)));
+  } finally {
+    await dispose();
+  }
+});
+
+// — 验收与打回 (ticket 06: 五状态不可跳过，通过/打回/取消都在 host 强制) —
+
+/**
+ * Full acceptance-loop helper: one task, dispatched, settled.
+ *
+ * @param {string} name
+ */
+async function withFinishedTask(name) {
+  const ctx = await withTaskService(name);
+  const created = /** @type {any} */ (
+    serviceTaskCreate(ctx.service, ctx.employeeId, "给 greet.txt 加一行欢迎语").task
+  );
+  ctx.service.handle(createInvoke(`${name}-d`, "task.dispatch", { taskId: created.id }));
+  await ctx.runManager.whenQuiet();
+  return { ...ctx, task: created };
+}
+
+/** @param {any} service @param {number} employeeId @param {string} text */
+function serviceTaskCreate(service, employeeId, text) {
+  const reply = service.handle(createInvoke(`c-${Math.random()}`, "task.create", { employeeId, text, goal: text, acceptance: [] })).reply;
+  if (!reply.ok) throw new Error(`task.create failed: ${JSON.stringify(reply.error)}`);
+  return /** @type {any} */ (reply.payload);
+}
+
+test("a settled task waits at 待验收 — not 完成 — until the boss accepts (票 06 验收 1)", async () => {
+  const { service, task, dispose } = await withFinishedTask("accept-wait");
+  try {
+    const detail = /** @type {any} */ (service.handle(createInvoke("a1", "task.detail", { taskId: task.id })).reply.payload);
+    assert.equal(detail.task.status, "review");
+
+    const accepted = service.handle(createInvoke("a2", "task.accept", { taskId: task.id }));
+    assert.equal(accepted.reply.ok, true);
+    assert.equal(/** @type {any} */ (accepted.reply.payload).task.status, "done");
+
+    // done is final: no second accept, no sneak back in
+    const again = service.handle(createInvoke("a3", "task.accept", { taskId: task.id }));
+    assert.equal(again.reply.ok, false);
+    assert.equal(again.reply.error?.code, "invalid_transition");
+  } finally {
+    await dispose();
+  }
+});
+
+test("验收 cannot be skipped: 待办 straight to 完成 is refused by the host", async () => {
+  const { service, employeeId, dispose } = await withTaskService("accept-skip");
+  try {
+    const created = /** @type {any} */ (serviceTaskCreate(service, employeeId, "加个欢迎语").task);
+    const jumped = service.handle(createInvoke("s1", "task.accept", { taskId: created.id }));
+    assert.equal(jumped.reply.ok, false);
+    assert.equal(jumped.reply.error?.code, "invalid_transition");
+    // 待办 can't be 打回 either — only 待验收 has that door
+    const jumpedReject = service.handle(createInvoke("s1b", "task.reject", { taskId: created.id }));
+    assert.equal(jumpedReject.reply.error?.code, "invalid_transition");
+    assert.equal(/** @type {any} */ (service.handle(createInvoke("s2", "task.detail", { taskId: created.id })).reply.payload).task.status, "open");
+  } finally {
+    await dispose();
+  }
+});
+
+test("打回 continues the SAME task: iteration 2, same employee session, rejection note in the prompt (票 06 验收 3)", async () => {
+  const { service, runManager, task, dispose } = await withFinishedTask("reject-loop");
+  try {
+    const rejected = service.handle(
+      createInvoke("r1", "task.reject", { taskId: task.id, reason: "欢迎语必须全小写，这条没过" }),
+    );
+    assert.equal(rejected.reply.ok, true);
+    const run = /** @type {any} */ (rejected.reply.payload).run;
+    assert.equal(run.taskId, task.id, "同一任务，不新建工单");
+    assert.equal(run.status, "running", "打回后任务回到进行中");
+    assert.match(run.prompt, new RegExp(`工单 #${task.id} · 加功能`));
+    assert.ok(run.prompt.includes("打回意见"));
+    assert.ok(run.prompt.includes("欢迎语必须全小写，这条没过"));
+
+    await runManager.whenQuiet();
+
+    const detail = /** @type {any} */ (service.handle(createInvoke("r3", "task.detail", { taskId: task.id })).reply.payload);
+    assert.equal(detail.task.status, "review"); // 第二轮跑完又回到待验收
+    assert.equal(detail.sessions.length, 2, "历史连续：两条任务会话");
+    assert.deepEqual(detail.sessions.map((/** @type {any} */ s) => s.iteration), [1, 2], "迭代次数可见");
+    assert.equal(detail.sessions[0].employeeSessionId, detail.sessions[1].employeeSessionId);
+    assert.equal(detail.artifacts.length, 8, "每个迭代各留一套四件套（第 2 轮的 diff 仍相对任务起点）");
+    assert.equal(/** @type {any} */ (detail.artifacts[4]).runId, run.id);
+
+    // a second 打回 of the same review task is legal (iterations are a loop),
+    // but once 完成, no more rework — done is final
+    const accepted = service.handle(createInvoke("r5", "task.accept", { taskId: task.id }));
+    assert.equal(accepted.reply.ok, true);
+    assert.equal(/** @type {any} */ (accepted.reply.payload).task.status, "done");
+    const lateReject = service.handle(createInvoke("r6", "task.reject", { taskId: task.id }));
+    assert.equal(lateReject.reply.error?.code, "invalid_transition");
+  } finally {
+    await dispose();
+  }
+});
+
+test("取消 terminates a running task and lands it at 失败 (票 06 验收 4)", async () => {
+  const { service, runManager, employeeId, store, dispose } = await withTaskService("cancel-fail", { hold: true });
+  try {
+    const created = /** @type {any} */ (serviceTaskCreate(service, employeeId, "写一份部署文档").task);
+    service.handle(createInvoke("x1", "task.dispatch", { taskId: created.id }));
+    assert.equal(/** @type {any} */ (store.taskById(created.id)).status, "running");
+
+    const cancelled = service.handle(createInvoke("x2", "task.cancel", { taskId: created.id }));
+    assert.equal(cancelled.reply.ok, true);
+    await runManager.whenQuiet();
+
+    assert.equal(/** @type {any} */ (store.taskById(created.id)).status, "failed");
+    const latestRun = /** @type {any} */ (store.latestRunForEmployee(employeeId));
+    assert.equal(latestRun.status, "aborted");
+    const detail = /** @type {any} */ (service.handle(createInvoke("x3", "task.detail", { taskId: created.id })).reply.payload);
+    assert.equal(detail.sessions[0].status, "aborted");
+    assert.equal(detail.artifacts.length, 4, "取消也留下诚实的四件套");
+
+    // 取消 something that is not running: refused, no side effects
+    const idleCancel = service.handle(createInvoke("x4", "task.cancel", { taskId: created.id }));
+    assert.equal(idleCancel.reply.error?.code, "invalid_transition");
+  } finally {
+    await dispose();
+  }
+});
+
+test("task.detail bills the task's tokens across iterations (票 06 验收 2)", async () => {
+  const { service, runManager, task, dispose } = await withFinishedTask("tokens");
+  try {
+    const first = /** @type {any} */ (service.handle(createInvoke("t1", "task.detail", { taskId: task.id })).reply.payload);
+    // one stub turn: input 40 + cached 4 + output 8 + reasoning 1 = 53
+    assert.equal(first.tokens.total, 53);
+    assert.equal(first.tokens.input, 40);
+    assert.equal(first.tokens.output, 8);
+
+    service.handle(createInvoke("t2", "task.reject", { taskId: task.id, reason: "再来一轮" }));
+    await runManager.whenQuiet();
+
+    const second = /** @type {any} */ (service.handle(createInvoke("t3", "task.detail", { taskId: task.id })).reply.payload);
+    assert.equal(second.tokens.total, 106, "两个迭代的 token 累加在同一任务上");
+    assert.equal(second.iterations, 2);
+  } finally {
+    await dispose();
+  }
+});
+
+test("accept / reject / cancel answer unknown_task for tasks that do not exist", async () => {
+  const { service, dispose } = await withTaskService("review-unknown");
+  try {
+    for (const method of ["task.accept", "task.reject", "task.cancel"]) {
+      const { reply } = service.handle(createInvoke(`u-${method}`, method, { taskId: 424242 }));
+      assert.equal(reply.ok, false, method);
+      assert.equal(reply.error?.code, "unknown_task", method);
+    }
   } finally {
     await dispose();
   }

@@ -301,6 +301,88 @@ test("start rejects unknown employees and empty text", async () => {
   }
 });
 
+test("a task run folds turn_end usage onto its run row (票 06: 本任务 token 的来源)", async () => {
+  const stub = makeStub({
+    events: [
+      { type: "turn_start" },
+      { type: "turn_end", status: "ok", usage: { input: 100, cachedInput: 10, cacheWrite: 2, output: 20, reasoning: 5 } },
+      { type: "turn_start" },
+      { type: "turn_end", status: "ok", usage: { input: 50, cachedInput: 0, cacheWrite: 0, output: 30, reasoning: 0 } },
+      AGENT_END,
+    ],
+  });
+  const ctx = await withManager("task-usage", { adapter: stub });
+  try {
+    const group = ctx.store.officeSnapshot().groups[0];
+    const task = ctx.store.createTask({
+      groupId: group.id,
+      employeeId: ctx.employeeId,
+      workspaceDir: "C:\\nowhere",
+      title: "t",
+      goal: "g",
+      playbook: "free",
+      acceptance: [],
+      baseHead: "d".repeat(40),
+    });
+    const started = ctx.manager.start({ employeeId: ctx.employeeId, text: "干活", task: { id: task.id } });
+    await ctx.manager.whenQuiet();
+
+    const run = /** @type {any} */ (ctx.store.runById(started.run.id));
+    assert.deepEqual(run.usage, { input: 150, cachedInput: 10, cacheWrite: 2, output: 50, reasoning: 5 });
+    assert.equal(ctx.store.taskTokenSummary(task.id).total, 150 + 10 + 2 + 50 + 5);
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("runs with no reported usage keep the run row honest (usage stays null)", async () => {
+  const stub = makeStub({ events: [AGENT_END] });
+  const ctx = await withManager("task-usage-none", { adapter: stub });
+  try {
+    const started = ctx.manager.start({ employeeId: ctx.employeeId, text: "干活" });
+    await ctx.manager.whenQuiet();
+    assert.equal(/** @type {any} */ (ctx.store.runById(started.run.id)).usage, null);
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("打回后再开工: the same task grows a second task session on the SAME employee session, one live engine session", async () => {
+  const stub = makeStub({ events: [AGENT_END] });
+  const ctx = await withManager("task-iteration", { adapter: stub });
+  try {
+    const group = ctx.store.officeSnapshot().groups[0];
+    const task = ctx.store.createTask({
+      groupId: group.id,
+      employeeId: ctx.employeeId,
+      workspaceDir: "C:\\nowhere",
+      title: "t",
+      goal: "g",
+      playbook: "free",
+      acceptance: [],
+      baseHead: "d".repeat(40),
+    });
+
+    const first = ctx.manager.start({ employeeId: ctx.employeeId, text: "第一轮", task: { id: task.id } });
+    await ctx.manager.whenQuiet();
+    ctx.store.setTaskStatus(task.id, "review"); // 跑完自动待验收（hook 语义，这里直接落状态）
+
+    const second = ctx.manager.start({ employeeId: ctx.employeeId, text: "打回后重来", task: { id: task.id } });
+    await ctx.manager.whenQuiet();
+
+    const sessions = ctx.store.listTaskSessions(task.id);
+    assert.equal(sessions.length, 2, "迭代次数 = 任务下的会话条数");
+    assert.ok(/** @type {number} */ (second.run.taskSessionId) > /** @type {number} */ (first.run.taskSessionId), "新迭代是追加，不是改写");
+    assert.equal(sessions[0].employeeSessionId, sessions[1].employeeSessionId, "历史连续：同一员工会话实体");
+    assert.equal(stub.state.opens, 1, "引擎会话跨迭代复用 — 对话历史延续");
+    assert.deepEqual(stub.state.prompts, ["第一轮", "打回后重来"]);
+    const total = ctx.store.taskTokenSummary(task.id);
+    assert.equal(total.total, 0);
+  } finally {
+    await ctx.dispose();
+  }
+});
+
 test("a task run opens a task session, marks the task running, and hands the run tail to the task hook", async () => {
   const stub = makeStub({ events: [{ type: "text_delta", text: "好的" }, AGENT_END] });
   const ctx = await withManager("task-hook", { adapter: stub });

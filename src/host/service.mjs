@@ -7,7 +7,7 @@
  */
 import { createReply, createErrorReply, createEvent, TOPICS } from "../shared/envelope.mjs";
 import { appError } from "../shared/apperror.mjs";
-import { draftTask, taskPrompt } from "./task/playbook.mjs";
+import { draftTask, rejectPrompt, taskPrompt } from "./task/playbook.mjs";
 import { enginePaths } from "./engine/paths.mjs";
 
 /**
@@ -189,14 +189,71 @@ export function createService({ store, hostInfo, runManager, git }) {
       const task = store.taskById(taskId);
       if (!task) throw appError("unknown_task", `no task with id ${taskId}`);
       if (task.status === "running") throw appError("task_running", `task ${taskId} is already being worked on`);
-      // finished tasks may be dispatched again (retry = a fresh task session;
-      // ticket 06 layers the accept/reject flow on top)
+      // 待验收/完成 are not dispatch entry points (票 06: 不可跳过): a review
+      // task goes through task.reject, a done task is closed for good.
+      if (task.status === "review" || task.status === "done") {
+        throw appError("invalid_transition", `这张工单当前是「${task.status === "review" ? "待验收" : "完成"}」：${task.status === "review" ? "请点通过或打回。" : "已完成的工单不再开工。"}`);
+      }
+      // open may be dispatched; failed may retry (retry = a fresh task session)
       const { run, session } = requireRunManager().start({
         employeeId: task.employeeId,
         text: taskPrompt(task),
         task: { id: task.id },
       });
       return { payload: { run, session }, event: { reason: "task.dispatch", taskId } };
+    },
+
+    /**
+     * 验收通过: the only way a task reaches 完成 (票 06 验收 2). Legality is
+     * the store's transition map — review → done, nothing else.
+     */
+    "task.accept"(payload) {
+      const taskId = requirePositiveId(payload, "taskId");
+      if (!store.taskById(taskId)) throw appError("unknown_task", `no task with id ${taskId}`);
+      const task = store.setTaskStatus(taskId, "done");
+      return { payload: { task }, event: { reason: "task.accept", taskId } };
+    },
+
+    /**
+     * 打回: NOT a new task — the same task gets one more iteration session,
+     * on the same employee session (history stays continuous), and the
+     * boss's 打回意见 rides into the engine prompt (票 06 验收 3).
+     */
+    "task.reject"(payload) {
+      const taskId = requirePositiveId(payload, "taskId");
+      const task = store.taskById(taskId);
+      if (!task) throw appError("unknown_task", `no task with id ${taskId}`);
+      // Check before opening anything: a refused 打回 must not leave a
+      // dangling task_session row behind.
+      if (task.status !== "review") {
+        throw appError("invalid_transition", "只有「待验收」的工单能打回。");
+      }
+      const rawReason = /** @type {Record<string, unknown>} */ (payload ?? {}).reason;
+      if (rawReason !== undefined && rawReason !== null && typeof rawReason !== "string") {
+        throw appError("invalid_payload", "reason must be a string");
+      }
+      const { run, session } = requireRunManager().start({
+        employeeId: task.employeeId,
+        text: rejectPrompt(task, /** @type {string | undefined} */ (rawReason ?? undefined)),
+        task: { id: task.id },
+      });
+      return { payload: { run, session }, event: { reason: "task.reject", taskId } };
+    },
+
+    /**
+     * 取消: terminate the live engine run; the run settles as 'aborted',
+     * its task session follows, and the task lands at 失败 (票 06 验收 4).
+     */
+    "task.cancel"(payload) {
+      const taskId = requirePositiveId(payload, "taskId");
+      const task = store.taskById(taskId);
+      if (!task) throw appError("unknown_task", `no task with id ${taskId}`);
+      if (task.status !== "running") {
+        throw appError("invalid_transition", "只有「进行中」的工单能取消。");
+      }
+      // validation is synchronous; the engine cancel handshake settles later
+      void requireRunManager().abort({ employeeId: task.employeeId });
+      return { payload: { ok: true, taskId }, event: { reason: "task.cancel", taskId } };
     },
 
     "task.list"(payload) {
@@ -211,11 +268,19 @@ export function createService({ store, hostInfo, runManager, git }) {
       const taskId = requirePositiveId(payload, "taskId");
       const task = store.taskById(taskId);
       if (!task) throw appError("unknown_task", `no task with id ${taskId}`);
+      // iteration = position in the task's session history (票 06 验收 3:
+      // 历史连续且迭代次数可见); tokens = every run's usage, summed (验收 2).
+      const sessions = store.listTaskSessions(taskId).map((session, index) => ({
+        ...session,
+        iteration: index + 1,
+      }));
       return {
         payload: {
           task,
-          sessions: store.listTaskSessions(taskId),
+          sessions,
           artifacts: store.listArtifacts({ taskId }),
+          tokens: store.taskTokenSummary(taskId),
+          iterations: sessions.length,
         },
       };
     },

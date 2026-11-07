@@ -43,6 +43,7 @@ const HISTORY_CAP = 400;
  * @property {boolean} finished
  * @property {LiveSession | null} live        opened engine session for this run
  * @property {Promise<LiveSession> | null} opening in-flight adapter.open()
+ * @property {import("./events.mjs").Usage} usage running fold of every turn_end usage (票 06)
  */
 
 /**
@@ -77,6 +78,28 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
     return new Promise((resolve) => quietWaiters.push(resolve));
   }
 
+  /** @returns {import("./events.mjs").Usage} */
+  function zeroUsage() {
+    return { input: 0, cachedInput: 0, cacheWrite: 0, output: 0, reasoning: 0 };
+  }
+
+  /**
+   * Token accounting rides the event stream itself (票 06: token 来自 run 的
+   * usage): every `turn_end` usage the engine reports is folded into the
+   * run's running total — never invented when the engine stays silent.
+   *
+   * @param {import("./events.mjs").Usage} total
+   * @param {import("./events.mjs").Usage | undefined} usage
+   */
+  function foldUsage(total, usage) {
+    if (!usage) return;
+    total.input += usage.input;
+    total.cachedInput += usage.cachedInput;
+    total.cacheWrite += usage.cacheWrite;
+    total.output += usage.output;
+    total.reasoning += usage.reasoning;
+  }
+
   function signalQuiet() {
     if (active.size !== 0) return;
     const waiters = quietWaiters;
@@ -96,6 +119,7 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
       at: Date.now(),
       event,
     };
+    if (event.type === "turn_end") foldUsage(runRef.usage, event.usage);
     const buffer = lastRunEvents.get(runRef.run.employeeId);
     if (buffer && buffer.runId === runRef.run.id) {
       buffer.events.push({ at: payload.at, event });
@@ -118,7 +142,8 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
     // 'failed' on purpose: the protocol says every run ends with agent_end,
     // so a silent settle never counts as a clean completion.
     try {
-      store.finishRun({ runId: runRef.run.id, status });
+      const hasUsage = Object.values(runRef.usage).some((n) => n > 0);
+      store.finishRun({ runId: runRef.run.id, status, usage: hasUsage ? runRef.usage : null });
       const pointer = runRef.live?.sessionFile() ?? null;
       if (pointer) {
         store.setEmployeeSessionFile({ employeeSessionId: runRef.run.employeeSessionId, sessionFile: pointer });
@@ -194,9 +219,11 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
       workspaceDir: dirs.workspaceDir,
     });
     // A dispatched work order runs inside its own task session (GLOSSARY:
-    // 会话挂在任务下，可多条 — retry gets a fresh one).
-    const taskSession = task ? store.openTaskSession({ taskId: task.id, employeeSessionId: session.id, engine }) : null;
+    // 会话挂在任务下，可多条 — retry/打回 gets a fresh one). The status
+    // gate comes FIRST: an illegal dispatch must not leave a session row
+    // behind (the store's five-state map decides, ticket 06).
     if (task) store.setTaskStatus(task.id, "running");
+    const taskSession = task ? store.openTaskSession({ taskId: task.id, employeeSessionId: session.id, engine }) : null;
     const run = store.createRun({
       employeeId,
       employeeSessionId: session.id,
@@ -207,7 +234,14 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
     });
 
     /** @type {ActiveRun} */
-    const runRef = { run, aborted: false, finished: false, live: liveSessions.get(employeeId) ?? null, opening: null };
+    const runRef = {
+      run,
+      aborted: false,
+      finished: false,
+      live: liveSessions.get(employeeId) ?? null,
+      opening: null,
+      usage: zeroUsage(),
+    };
     active.set(employeeId, runRef);
     lastRunEvents.set(employeeId, { runId: run.id, events: [] });
     // The first event lands synchronously: the UI always sees life on the

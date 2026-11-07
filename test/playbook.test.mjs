@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { PLAYBOOKS, classifyPlaybook, draftTask, taskPrompt } from "../src/host/task/playbook.mjs";
+import { PLAYBOOKS, classifyPlaybook, draftTask, rejectPrompt, taskPrompt } from "../src/host/task/playbook.mjs";
 
 // A playbook draft is what the 工单台 form prefills: the four playbooks,
 // an editable goal, and an editable acceptance-criteria list.
@@ -70,4 +70,17 @@ test("taskPrompt tolerates an unknown playbook key with the free template", () =
   assert.ok(prompt.includes("工单 #1"));
   assert.ok(prompt.includes("目标：把灯关了"));
   assert.ok(prompt.includes("收尾报告"));
+});
+
+test("rejectPrompt carries the 打回意见 on top of the same work-order contract (票 06)", () => {
+  const task = { id: 7, playbook: "feature", goal: "加欢迎语", acceptance: ["全小写"] };
+  const prompt = rejectPrompt(task, "欢迎语没有全小写");
+  assert.ok(prompt.includes("工单 #7 · 加功能"), "same task, same contract");
+  assert.ok(prompt.includes("【打回意见】"));
+  assert.ok(prompt.includes("欢迎语没有全小写"));
+  assert.ok(prompt.includes("新一轮"));
+  assert.ok(prompt.includes("git commit"));
+
+  // an empty note still says something honest
+  assert.ok(rejectPrompt(task, "   ").includes("没有通过验收"));
 });

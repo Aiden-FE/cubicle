@@ -131,3 +131,25 @@ export function taskPrompt(task) {
     "4. 最后一条消息以「收尾报告」开头：完成了什么、变更了哪些文件、测试/命令的输出要点、未尽事项。",
   ].join("\n");
 }
+
+/**
+ * 打回后续跑的第二把钥匙（票 06）: same task, same employee session, new
+ * iteration. The boss's rejection note rides into the prompt so the
+ * employee knows exactly what failed 验收 — and the discipline contract
+ * (own commits, closing report) stays fully in force.
+ *
+ * @param {{ id: number, playbook: string, goal: string, acceptance: string[] }} task
+ * @param {string} [reason] the boss's 打回意见
+ * @returns {string}
+ */
+export function rejectPrompt(task, reason) {
+  const note = String(reason ?? "").trim() || "老板打回了这张工单：产出没有通过验收，需要返工。";
+  return [
+    taskPrompt(task),
+    "",
+    "【打回意见】",
+    note,
+    "",
+    "这是打回后的新一轮：先对照上面的打回意见说明上一轮差在哪，再动手修正；改动照旧自己提交，最后仍以「收尾报告」收尾。",
+  ].join("\n");
+}
