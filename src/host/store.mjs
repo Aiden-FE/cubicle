@@ -81,6 +81,41 @@ import { appError } from "../shared/apperror.mjs";
  * @property {string} prompt
  * @property {string} startedAt
  * @property {string | null} endedAt
+ * @property {number | null} taskId
+ * @property {number | null} taskSessionId
+ *
+ * @typedef {object} TaskRow
+ * @property {number} id
+ * @property {number} groupId
+ * @property {number} employeeId
+ * @property {string} workspaceDir
+ * @property {string} title
+ * @property {string} goal
+ * @property {"feature" | "bugfix" | "docs" | "free"} playbook
+ * @property {string[]} acceptance
+ * @property {string} baseHead
+ * @property {"open" | "running" | "finished"} status
+ * @property {string} createdAt
+ *
+ * @typedef {TaskRow & { employeeName: string }} TaskRowWithEmployee
+ *
+ * @typedef {object} TaskSessionRow
+ * @property {number} id
+ * @property {number} taskId
+ * @property {number} employeeSessionId
+ * @property {string} engine
+ * @property {"running" | "completed" | "aborted" | "failed" | "interrupted"} status
+ * @property {string} startedAt
+ * @property {string | null} endedAt
+ * @property {string | null} [sessionFile] employee session's resume pointer (list reads only)
+ *
+ * @typedef {object} ArtifactRow
+ * @property {number} id
+ * @property {number} taskId
+ * @property {number | null} runId
+ * @property {"diff_summary" | "changed_files" | "command_output" | "report"} kind
+ * @property {string} content
+ * @property {string} createdAt
  *
  * @typedef {object} OfficeSnapshot
  * @property {CompanyRow[]} companies
@@ -148,7 +183,39 @@ CREATE TABLE IF NOT EXISTS run (
   status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'aborted', 'failed', 'interrupted')),
   prompt TEXT NOT NULL,
   started_at TEXT NOT NULL,
+  ended_at TEXT,
+  task_id INTEGER REFERENCES task(id),
+  task_session_id INTEGER REFERENCES task_session(id)
+);
+CREATE TABLE IF NOT EXISTS task (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  group_id INTEGER NOT NULL REFERENCES project_group(id),
+  employee_id INTEGER NOT NULL REFERENCES employee(id),
+  workspace_dir TEXT NOT NULL,
+  title TEXT NOT NULL,
+  goal TEXT NOT NULL,
+  playbook TEXT NOT NULL CHECK (playbook IN ('feature', 'bugfix', 'docs', 'free')),
+  acceptance TEXT NOT NULL,
+  base_head TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('open', 'running', 'finished')) DEFAULT 'open',
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS task_session (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id INTEGER NOT NULL REFERENCES task(id),
+  employee_session_id INTEGER NOT NULL REFERENCES employee_session(id),
+  engine TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'aborted', 'failed', 'interrupted')),
+  started_at TEXT NOT NULL,
   ended_at TEXT
+);
+CREATE TABLE IF NOT EXISTS artifact (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id INTEGER NOT NULL REFERENCES task(id),
+  run_id INTEGER REFERENCES run(id),
+  kind TEXT NOT NULL CHECK (kind IN ('diff_summary', 'changed_files', 'command_output', 'report')),
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL
 );
 `;
 
@@ -314,6 +381,74 @@ function toRun(row) {
     prompt: String(row.prompt),
     startedAt: String(row.started_at),
     endedAt: row.ended_at === null || row.ended_at === undefined ? null : String(row.ended_at),
+    taskId: row.task_id === null || row.task_id === undefined ? null : Number(row.task_id),
+    taskSessionId:
+      row.task_session_id === null || row.task_session_id === undefined ? null : Number(row.task_session_id),
+  };
+}
+
+/**
+ * @param {Record<string, unknown>} row
+ * @returns {TaskRow}
+ */
+function toTask(row) {
+  /** @type {string[]} */
+  let acceptance = [];
+  try {
+    const parsed = JSON.parse(String(row.acceptance));
+    if (Array.isArray(parsed)) acceptance = parsed.map((line) => String(line));
+  } catch {
+    // a corrupted acceptance column reads as "no criteria", never a crash
+  }
+  return {
+    id: Number(row.id),
+    groupId: Number(row.group_id),
+    employeeId: Number(row.employee_id),
+    workspaceDir: String(row.workspace_dir),
+    title: String(row.title),
+    goal: String(row.goal),
+    playbook: /** @type {TaskRow["playbook"]} */ (String(row.playbook)),
+    acceptance,
+    baseHead: String(row.base_head),
+    status: /** @type {TaskRow["status"]} */ (String(row.status)),
+    createdAt: String(row.created_at),
+  };
+}
+
+/**
+ * @param {Record<string, unknown>} row
+ * @returns {TaskSessionRow}
+ */
+function toTaskSession(row) {
+  return {
+    id: Number(row.id),
+    taskId: Number(row.task_id),
+    employeeSessionId: Number(row.employee_session_id),
+    engine: String(row.engine),
+    status: /** @type {TaskSessionRow["status"]} */ (String(row.status)),
+    startedAt: String(row.started_at),
+    endedAt: row.ended_at === null || row.ended_at === undefined ? null : String(row.ended_at),
+    ...(row.session_file === undefined
+      ? {}
+      : {
+          sessionFile:
+            row.session_file === null || row.session_file === undefined ? null : String(row.session_file),
+        }),
+  };
+}
+
+/**
+ * @param {Record<string, unknown>} row
+ * @returns {ArtifactRow}
+ */
+function toArtifact(row) {
+  return {
+    id: Number(row.id),
+    taskId: Number(row.task_id),
+    runId: row.run_id === null || row.run_id === undefined ? null : Number(row.run_id),
+    kind: /** @type {ArtifactRow["kind"]} */ (String(row.kind)),
+    content: String(row.content),
+    createdAt: String(row.created_at),
   };
 }
 
@@ -341,6 +476,7 @@ export function openStore({ dataDir }) {
   const db = new DatabaseSync(dbPath);
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec(SCHEMA);
+  migrateRunTaskColumns(db);
   // A host that died (or was killed) mid-run must not leave phantom 'running'
   // rows behind: they become 'interrupted' the moment a host opens the store.
   markInterruptedRuns(db);
@@ -538,16 +674,16 @@ export function openStore({ dataDir }) {
     },
 
     /**
-     * @param {{ employeeId: number, employeeSessionId: number, engine: string, prompt: string }} input
+     * @param {{ employeeId: number, employeeSessionId: number, engine: string, prompt: string, taskId?: number | null, taskSessionId?: number | null }} input
      * @returns {RunRow}
      */
-    createRun({ employeeId, employeeSessionId, engine, prompt }) {
+    createRun({ employeeId, employeeSessionId, engine, prompt, taskId, taskSessionId }) {
       const startedAt = new Date().toISOString();
       const info = db
         .prepare(
-          "INSERT INTO run (employee_session_id, employee_id, engine, status, prompt, started_at) VALUES (?, ?, ?, 'running', ?, ?)",
+          "INSERT INTO run (employee_session_id, employee_id, engine, status, prompt, started_at, task_id, task_session_id) VALUES (?, ?, ?, 'running', ?, ?, ?, ?)",
         )
-        .run(employeeSessionId, employeeId, engine, prompt, startedAt);
+        .run(employeeSessionId, employeeId, engine, prompt, startedAt, taskId ?? null, taskSessionId ?? null);
       return toRun(/** @type {Record<string, unknown>} */ (db.prepare("SELECT * FROM run WHERE id = ?").get(Number(info.lastInsertRowid))));
     },
 
@@ -573,6 +709,169 @@ export function openStore({ dataDir }) {
     latestRunForEmployee(employeeId) {
       const row = db.prepare("SELECT * FROM run WHERE employee_id = ? ORDER BY id DESC LIMIT 1").get(employeeId);
       return row ? toRun(/** @type {Record<string, unknown>} */ (row)) : null;
+    },
+
+    /** @param {number} runId @returns {RunRow | null} */
+    runById(runId) {
+      const row = db.prepare("SELECT * FROM run WHERE id = ?").get(runId);
+      return row ? toRun(/** @type {Record<string, unknown>} */ (row)) : null;
+    },
+
+    // — tasks (ticket 05: 工单与产出) —
+
+    /**
+     * A work order: the goal + editable acceptance criteria the boss
+     * approved, the employee that owns it, and the git start HEAD recorded
+     * at creation (every later diff is relative to this point).
+     *
+     * @param {{ groupId: number, employeeId: number, workspaceDir: string, title: string, goal: string, playbook: string, acceptance: string[], baseHead: string }} input
+     * @returns {TaskRow}
+     */
+    createTask({ groupId, employeeId, workspaceDir, title, goal, playbook, acceptance, baseHead }) {
+      if (!db.prepare("SELECT id FROM project_group WHERE id = ?").get(groupId)) {
+        throw appError("unknown_group", `no project group with id ${groupId}`);
+      }
+      if (!db.prepare("SELECT id FROM employee WHERE id = ?").get(employeeId)) {
+        throw appError("unknown_employee", `no employee with id ${employeeId}`);
+      }
+      const createdAt = new Date().toISOString();
+      const info = db
+        .prepare(
+          "INSERT INTO task (group_id, employee_id, workspace_dir, title, goal, playbook, acceptance, base_head, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)",
+        )
+        .run(
+          groupId,
+          employeeId,
+          workspaceDir,
+          title,
+          goal,
+          playbook,
+          JSON.stringify(Array.isArray(acceptance) ? acceptance.map(String) : []),
+          baseHead,
+          createdAt,
+        );
+      return toTask(/** @type {Record<string, unknown>} */ (db.prepare("SELECT * FROM task WHERE id = ?").get(Number(info.lastInsertRowid))));
+    },
+
+    /** @param {number} taskId @returns {TaskRow | null} */
+    taskById(taskId) {
+      const row = db.prepare("SELECT * FROM task WHERE id = ?").get(taskId);
+      return row ? toTask(/** @type {Record<string, unknown>} */ (row)) : null;
+    },
+
+    /** @param {{ groupId: number }} input @returns {TaskRowWithEmployee[]} newest first */
+    listTasks({ groupId }) {
+      const rows = db
+        .prepare(
+          `SELECT t.*, e.name AS e_name FROM task t JOIN employee e ON e.id = t.employee_id
+           WHERE t.group_id = ? ORDER BY t.id DESC`,
+        )
+        .all(groupId);
+      return rows.map((row) => ({
+        ...toTask(/** @type {Record<string, unknown>} */ (row)),
+        employeeName: String(/** @type {Record<string, unknown>} */ (row).e_name),
+      }));
+    },
+
+    /**
+     * @param {number} taskId
+     * @param {"open" | "running" | "finished"} status
+     * @returns {TaskRow}
+     */
+    setTaskStatus(taskId, status) {
+      if (!["open", "running", "finished"].includes(status)) {
+        throw appError("invalid_payload", `task cannot have status ${status}`);
+      }
+      db.prepare("UPDATE task SET status = ? WHERE id = ?").run(status, taskId);
+      const row = db.prepare("SELECT * FROM task WHERE id = ?").get(taskId);
+      if (!row) throw appError("unknown_task", `no task with id ${taskId}`);
+      return toTask(/** @type {Record<string, unknown>} */ (row));
+    },
+
+    /**
+     * The task-level Session entity (GLOSSARY: 会话挂在任务下，可多条):
+     * one per dispatch/retry, wrapping the engine run and its outcome.
+     *
+     * @param {{ taskId: number, employeeSessionId: number, engine: string }} input
+     * @returns {TaskSessionRow}
+     */
+    openTaskSession({ taskId, employeeSessionId, engine }) {
+      const startedAt = new Date().toISOString();
+      const info = db
+        .prepare(
+          "INSERT INTO task_session (task_id, employee_session_id, engine, status, started_at) VALUES (?, ?, ?, 'running', ?)",
+        )
+        .run(taskId, employeeSessionId, engine, startedAt);
+      return toTaskSession(
+        /** @type {Record<string, unknown>} */ (db.prepare("SELECT * FROM task_session WHERE id = ?").get(Number(info.lastInsertRowid))),
+      );
+    },
+
+    /**
+     * @param {{ taskSessionId: number, status: "completed" | "aborted" | "failed" | "interrupted" }} input
+     * @returns {TaskSessionRow}
+     */
+    finishTaskSession({ taskSessionId, status }) {
+      if (!TERMINAL_RUN_STATUSES.has(status)) {
+        throw appError("invalid_payload", `task session cannot finish with status ${status}`);
+      }
+      db.prepare("UPDATE task_session SET status = ?, ended_at = ? WHERE id = ? AND status = 'running'").run(
+        status,
+        new Date().toISOString(),
+        taskSessionId,
+      );
+      const row = db.prepare("SELECT * FROM task_session WHERE id = ?").get(taskSessionId);
+      if (!row) throw appError("unknown_task_session", `no task session with id ${taskSessionId}`);
+      return toTaskSession(/** @type {Record<string, unknown>} */ (row));
+    },
+
+    /** @param {number} taskId @returns {TaskSessionRow | null} */
+    latestTaskSessionForTask(taskId) {
+      const row = db.prepare("SELECT * FROM task_session WHERE task_id = ? ORDER BY id DESC LIMIT 1").get(taskId);
+      return row ? toTaskSession(/** @type {Record<string, unknown>} */ (row)) : null;
+    },
+
+    /**
+     * All sessions of a task (oldest first), each carrying the employee
+     * session's current resume pointer so the UI can show 恢复指针.
+     *
+     * @param {number} taskId
+     * @returns {TaskSessionRow[]}
+     */
+    listTaskSessions(taskId) {
+      const rows = db
+        .prepare(
+          `SELECT ts.*, es.session_file AS session_file FROM task_session ts
+           LEFT JOIN employee_session es ON es.id = ts.employee_session_id
+           WHERE ts.task_id = ? ORDER BY ts.id`,
+        )
+        .all(taskId);
+      return rows.map((row) => toTaskSession(/** @type {Record<string, unknown>} */ (row)));
+    },
+
+    /**
+     * One of the four deliverables a finished task run leaves behind.
+     *
+     * @param {{ taskId: number, runId: number | null, kind: "diff_summary" | "changed_files" | "command_output" | "report", content: string }} input
+     * @returns {ArtifactRow}
+     */
+    createArtifact({ taskId, runId, kind, content }) {
+      if (!["diff_summary", "changed_files", "command_output", "report"].includes(kind)) {
+        throw appError("invalid_payload", `unknown artifact kind ${kind}`);
+      }
+      const createdAt = new Date().toISOString();
+      const info = db
+        .prepare("INSERT INTO artifact (task_id, run_id, kind, content, created_at) VALUES (?, ?, ?, ?, ?)")
+        .run(taskId, runId ?? null, kind, content, createdAt);
+      return toArtifact(
+        /** @type {Record<string, unknown>} */ (db.prepare("SELECT * FROM artifact WHERE id = ?").get(Number(info.lastInsertRowid))),
+      );
+    },
+
+    /** @param {{ taskId: number }} input @returns {ArtifactRow[]} creation order */
+    listArtifacts({ taskId }) {
+      const rows = db.prepare("SELECT * FROM artifact WHERE task_id = ? ORDER BY id").all(taskId);
+      return rows.map((row) => toArtifact(/** @type {Record<string, unknown>} */ (row)));
     },
 
     /**
@@ -623,16 +922,45 @@ export function openStore({ dataDir }) {
 /**
  * Runs left 'running' belong to a host that is no longer alive: close that
  * chapter before any new host starts. Ticket 10 (crash recovery) builds the
- * resume story on top of this marker.
+ * resume story on top of this marker. Task sessions follow their runs, and
+ * a task whose session was interrupted goes back to 'open' so the boss can
+ * dispatch it again (ticket 06 will add the richer retry story).
  *
  * @param {DatabaseSync} db
  */
 function markInterruptedRuns(db) {
   const running = db.prepare("SELECT id FROM run WHERE status = 'running'").all();
-  if (running.length === 0) return;
+  if (running.length === 0) {
+    // No orphan runs — task sessions/tasks can still be orphaned if the host
+    // died between opening a session and creating its run; heal those too.
+    db.prepare("UPDATE task_session SET status = 'interrupted', ended_at = ? WHERE status = 'running'").run(
+      new Date().toISOString(),
+    );
+    db.prepare("UPDATE task SET status = 'open' WHERE status = 'running'").run();
+    return;
+  }
   const endedAt = new Date().toISOString();
   const finish = db.prepare("UPDATE run SET status = 'interrupted', ended_at = ? WHERE id = ?");
   for (const row of running) finish.run(endedAt, Number(/** @type {Record<string, unknown>} */ (row).id));
+  db.prepare("UPDATE task_session SET status = 'interrupted', ended_at = ? WHERE status = 'running'").run(endedAt);
+  db.prepare("UPDATE task SET status = 'open' WHERE status = 'running'").run();
+}
+
+/**
+ * Ticket 05 adds task columns to a `run` table that older databases already
+ * created (CREATE IF NOT EXISTS never touches them). Heal them in place.
+ *
+ * @param {DatabaseSync} db
+ */
+function migrateRunTaskColumns(db) {
+  const columns = new Set(
+    db
+      .prepare("PRAGMA table_info(run)")
+      .all()
+      .map((row) => String(/** @type {Record<string, unknown>} */ (row).name)),
+  );
+  if (!columns.has("task_id")) db.exec("ALTER TABLE run ADD COLUMN task_id INTEGER");
+  if (!columns.has("task_session_id")) db.exec("ALTER TABLE run ADD COLUMN task_session_id INTEGER");
 }
 
 /**

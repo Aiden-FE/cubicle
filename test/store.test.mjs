@@ -13,7 +13,20 @@ import { DatabaseSync } from "node:sqlite";
  */
 async function withTempDir(name) {
   const dataDir = await mkdtemp(path.join(tmpdir(), `cubicle-store-${name}-`));
-  return { dataDir, dispose: () => rm(dataDir, { recursive: true, force: true }) };
+  // Windows: a just-closed SQLite/WAL file can take a few ticks to unlock;
+  // retry the cleanup instead of letting a race masquerade as a failure.
+  const dispose = async () => {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      try {
+        await rm(dataDir, { recursive: true, force: true });
+        return;
+      } catch (/** @type {any} */ err) {
+        if (err.code !== "EBUSY" && err.code !== "EPERM") throw err;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    }
+  };
+  return { dataDir, dispose };
 }
 
 test("a fresh store seeds one default company, one project group and four empty desks", async () => {
@@ -471,6 +484,253 @@ test("database and support folders live inside the given data directory in WAL m
       assert.ok(store.directoryExists(folder), `${folder} directory should exist`);
     }
     store.close();
+  } finally {
+    await dispose();
+  }
+});
+
+// — task bookkeeping (ticket 05: 工单与产出) —
+
+/**
+ * @param {ReturnType<typeof openStore>} store
+ * @param {{ id: number }} employee
+ */
+function makeTask(store, employee) {
+  const group = store.officeSnapshot().groups[0];
+  return store.createTask({
+    groupId: group.id,
+    employeeId: employee.id,
+    workspaceDir: path.join(store.dataDir, "engines", "pi", `employee-${employee.id}`, "workspace"),
+    title: "给 greet.txt 加一行欢迎语",
+    goal: "给 greet.txt 加一行欢迎语，并保证测试通过",
+    playbook: "feature",
+    acceptance: ["欢迎语在 greet.txt 里可见", "测试全部通过"],
+    baseHead: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c",
+  });
+}
+
+test("a task records its git start HEAD, playbook and editable acceptance, and survives a reopen", async () => {
+  const { dataDir, dispose } = await withTempDir("task-create");
+  try {
+    const store = openStore({ dataDir });
+    const task = makeTask(store, hireProgrammer(store));
+    assert.equal(task.status, "open");
+    assert.equal(task.playbook, "feature");
+    assert.equal(task.baseHead, "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c");
+    assert.deepEqual(task.acceptance, ["欢迎语在 greet.txt 里可见", "测试全部通过"]);
+
+    const listed = store.listTasks({ groupId: task.groupId });
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0].id, task.id);
+    assert.equal(listed[0].employeeName, "小程");
+
+    store.close();
+    const reopened = openStore({ dataDir });
+    const again = /** @type {any} */ (reopened.taskById(task.id));
+    assert.equal(again.goal, "给 greet.txt 加一行欢迎语，并保证测试通过");
+    assert.equal(again.baseHead, task.baseHead);
+    reopened.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("task status moves open → running → finished and rejects anything else", async () => {
+  const { dataDir, dispose } = await withTempDir("task-status");
+  try {
+    const store = openStore({ dataDir });
+    const task = makeTask(store, hireProgrammer(store));
+    assert.equal(store.setTaskStatus(task.id, "running").status, "running");
+    assert.equal(store.setTaskStatus(task.id, "finished").status, "finished");
+    assert.throws(
+      () => store.setTaskStatus(task.id, /** @type {any} */ ("accepted")),
+      (err) => /** @type {{ code?: string }} */ (err).code === "invalid_payload",
+    );
+    store.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("runs can hang under a task and its task session (ticket 05: 挂在任务上的执行)", async () => {
+  const { dataDir, dispose } = await withTempDir("task-run");
+  try {
+    const store = openStore({ dataDir });
+    const task = makeTask(store, hireProgrammer(store));
+    const employee = /** @type {any} */ (store.employeeById(task.employeeId));
+    const session = store.getOrCreateEmployeeSession({
+      employeeId: employee.id,
+      engine: "pi",
+      agentDir: "a",
+      sessionsDir: "s",
+      workspaceDir: "w",
+    });
+    const taskSession = store.openTaskSession({
+      taskId: task.id,
+      employeeSessionId: session.id,
+      engine: "pi",
+    });
+    assert.equal(taskSession.status, "running");
+
+    const run = store.createRun({
+      employeeId: employee.id,
+      employeeSessionId: session.id,
+      engine: "pi",
+      prompt: "干活",
+      taskId: task.id,
+      taskSessionId: taskSession.id,
+    });
+    assert.equal(run.taskId, task.id);
+    assert.equal(run.taskSessionId, taskSession.id);
+    const byId = /** @type {any} */ (store.runById(run.id));
+    assert.equal(byId.taskSessionId, taskSession.id);
+
+    // a plain chat run (ticket 04) keeps task fields null
+    const chatRun = store.createRun({ employeeId: employee.id, employeeSessionId: session.id, engine: "pi", prompt: "闲聊" });
+    assert.equal(chatRun.taskId, null);
+    assert.equal(chatRun.taskSessionId, null);
+    store.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("task sessions close with the run outcome; sessions still running at reopen go interrupted and the task returns to open", async () => {
+  const { dataDir, dispose } = await withTempDir("task-session-interrupt");
+  try {
+    const store = openStore({ dataDir });
+    const task = makeTask(store, hireProgrammer(store));
+    store.setTaskStatus(task.id, "running");
+    const session = store.getOrCreateEmployeeSession({
+      employeeId: task.employeeId,
+      engine: "pi",
+      agentDir: "a",
+      sessionsDir: "s",
+      workspaceDir: "w",
+    });
+    const taskSession = store.openTaskSession({ taskId: task.id, employeeSessionId: session.id, engine: "pi" });
+    store.close();
+
+    const reopened = openStore({ dataDir});
+    const interrupted = /** @type {any} */ (reopened.latestTaskSessionForTask(task.id));
+    assert.equal(interrupted.status, "interrupted");
+    assert.equal(/** @type {any} */ (reopened.taskById(task.id)).status, "open");
+
+    const done = reopened.openTaskSession({ taskId: task.id, employeeSessionId: session.id, engine: "pi" });
+    const finished = reopened.finishTaskSession({ taskSessionId: done.id, status: "completed" });
+    assert.equal(finished.status, "completed");
+    assert.notEqual(finished.endedAt, null);
+    reopened.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("the four artifact kinds hang under the task in creation order", async () => {
+  const { dataDir, dispose } = await withTempDir("task-artifacts");
+  try {
+    const store = openStore({ dataDir });
+    const task = makeTask(store, hireProgrammer(store));
+    const session = store.getOrCreateEmployeeSession({
+      employeeId: task.employeeId,
+      engine: "pi",
+      agentDir: "a",
+      sessionsDir: "s",
+      workspaceDir: "w",
+    });
+    const run = store.createRun({
+      employeeId: task.employeeId,
+      employeeSessionId: session.id,
+      engine: "pi",
+      prompt: "干活",
+      taskId: task.id,
+    });
+    /** @type {("diff_summary" | "changed_files" | "command_output" | "report")[]} */
+    const kinds = ["diff_summary", "changed_files", "command_output", "report"];
+    for (const kind of kinds) {
+      store.createArtifact({ taskId: task.id, runId: run.id, kind, content: `${kind} 内容` });
+    }
+    const artifacts = store.listArtifacts({ taskId: task.id });
+    assert.deepEqual(artifacts.map((a) => a.kind), ["diff_summary", "changed_files", "command_output", "report"]);
+    assert.equal(artifacts[3].content, "report 内容");
+    assert.equal(artifacts[0].taskId, task.id);
+    store.close();
+
+    const reopened = openStore({ dataDir });
+    assert.equal(reopened.listArtifacts({ taskId: task.id }).length, 4);
+    reopened.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("creating a task for an unknown employee or group is rejected", async () => {
+  const { dataDir, dispose } = await withTempDir("task-bad");
+  try {
+    const store = openStore({ dataDir });
+    const group = store.officeSnapshot().groups[0];
+    const employee = hireProgrammer(store);
+    const base = {
+      groupId: group.id,
+      employeeId: employee.id,
+      workspaceDir: "w",
+      title: "t",
+      goal: "g",
+      playbook: "free",
+      acceptance: [],
+      baseHead: "0".repeat(40),
+    };
+    assert.throws(
+      () => store.createTask({ ...base, employeeId: 99999 }),
+      (err) => /** @type {{ code?: string }} */ (err).code === "unknown_employee",
+    );
+    assert.throws(
+      () => store.createTask({ ...base, groupId: 99999 }),
+      (err) => /** @type {{ code?: string }} */ (err).code === "unknown_group",
+    );
+    store.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("an old database (run rows without task columns) gains the task columns on reopen", async () => {
+  const { dataDir, dispose } = await withTempDir("task-migration");
+  try {
+    // Simulate the pre-05 schema straight on the file (the store keeps its
+    // single-writer discipline): drop the new tables and rebuild `run`
+    // without the new columns — the next open must heal.
+    const store = openStore({ dataDir });
+    const employee = hireProgrammer(store);
+    const session = store.getOrCreateEmployeeSession({
+      employeeId: employee.id,
+      engine: "pi",
+      agentDir: "a",
+      sessionsDir: "s",
+      workspaceDir: "w",
+    });
+    store.createRun({ employeeId: employee.id, employeeSessionId: session.id, engine: "pi", prompt: "旧行" });
+    store.close();
+
+    const raw = new DatabaseSync(path.join(dataDir, "cubicle.db"));
+    raw.exec(`
+      DROP TABLE IF EXISTS task;
+      DROP TABLE IF EXISTS task_session;
+      DROP TABLE IF EXISTS artifact;
+      CREATE TABLE run_old AS
+        SELECT id, employee_session_id, employee_id, engine, status, prompt, started_at, ended_at FROM run;
+      DROP TABLE run;
+      ALTER TABLE run_old RENAME TO run;
+    `);
+    raw.close();
+
+    const reopened = openStore({ dataDir });
+    const latest = /** @type {any} */ (reopened.latestRunForEmployee(employee.id));
+    assert.equal(latest.prompt, "旧行");
+    assert.equal(latest.taskId, null);
+    const task = makeTask(reopened, employee);
+    assert.equal(/** @type {any} */ (reopened.taskById(task.id)).id, task.id);
+    reopened.close();
   } finally {
     await dispose();
   }
