@@ -16,7 +16,7 @@
  *              fails with a visible reason, and 带风险启用 admits it WITH the
  *              risk flag on the card and in the database.
  *
- * Evidence: tmp/e2e-11/{absent,engine,risk,child-samples}.json + hostpid.txt.
+ * Evidence: tmp/e2e-11/{absent,engine,risk,runs,child-samples-<phase>}.json + hostpid.txt.
  */
 import { spawn, execFile } from "node:child_process";
 import { createRequire } from "node:module";
@@ -143,7 +143,13 @@ async function launch(options) {
   });
 
   if (watcher) clearInterval(watcher);
-  await writeFile(path.join(outDir, "child-samples.json"), `${JSON.stringify(samples, null, 2)}\n`, "utf8");
+  // Per-phase name: a later (unsampled) phase must not overwrite the sampling
+  // evidence that proves the CLI host spawned and reclaimed its children.
+  await writeFile(
+    path.join(outDir, `child-samples-${options.phase}.json`),
+    `${JSON.stringify(samples, null, 2)}\n`,
+    "utf8",
+  );
   return { code, samples };
 }
 
@@ -279,7 +285,7 @@ if (ok) {
   await codexMock.close();
   process.exit(0);
 } else {
-  console.log(`\nFAIL · read tmp/e2e-11/{absent,engine,risk,child-samples}.json (${seconds}s total)`);
+  console.log(`\nFAIL · read tmp/e2e-11/{absent,engine,risk,runs,child-samples-<phase>}.json (${seconds}s total)`);
   await piMock.close();
   await codexMock.close();
   process.exit(1);
