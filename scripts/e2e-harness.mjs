@@ -68,6 +68,25 @@ export async function typeInto(contents, selector, value) {
   );
 }
 
+/**
+ * Drive a controlled React <select> to a value.
+ *
+ * @param {import("electron").WebContents} contents
+ * @param {string} selector
+ * @param {string} value
+ */
+export async function setSelect(contents, selector, value) {
+  await evalIn(
+    contents,
+    `(() => {
+      const el = document.querySelector(${JSON.stringify(selector)});
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set;
+      setter.call(el, ${JSON.stringify(value)});
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    })()`,
+  );
+}
+
 /** @param {string} file */
 export async function readJson(file) {
   try {

@@ -300,3 +300,53 @@ test("start rejects unknown employees and empty text", async () => {
     await ctx.dispose();
   }
 });
+
+test("a task run opens a task session, marks the task running, and hands the run tail to the task hook", async () => {
+  const stub = makeStub({ events: [{ type: "text_delta", text: "好的" }, AGENT_END] });
+  const ctx = await withManager("task-hook", { adapter: stub });
+  try {
+    const group = ctx.store.officeSnapshot().groups[0];
+    const task = ctx.store.createTask({
+      groupId: group.id,
+      employeeId: ctx.employeeId,
+      workspaceDir: "C:\\nowhere",
+      title: "t",
+      goal: "g",
+      playbook: "free",
+      acceptance: [],
+      baseHead: "d".repeat(40),
+    });
+    /** @type {any[]} */
+    const hookCalls = [];
+    const manager = createRunManager({
+      store: ctx.store,
+      getAdapter: () => stub,
+      emit: () => {},
+      onTaskRunFinished: (/** @type {any} */ call) => hookCalls.push(call),
+    });
+
+    const started = manager.start({ employeeId: ctx.employeeId, text: "干活", task: { id: task.id } });
+    assert.equal(started.run.taskId, task.id);
+    assert.notEqual(started.run.taskSessionId, null);
+    assert.equal(/** @type {any} */ (ctx.store.taskById(task.id)).status, "running");
+
+    await manager.whenQuiet();
+    assert.equal(hookCalls.length, 1);
+    assert.equal(hookCalls[0].run.id, started.run.id);
+    assert.equal(hookCalls[0].status, "completed");
+    assert.deepEqual(
+      hookCalls[0].events.map((/** @type {any} */ e) => e.event.type),
+      ["session_start", "text_delta", "agent_end"],
+    );
+    const taskSession = /** @type {any} */ (ctx.store.latestTaskSessionForTask(task.id));
+    assert.equal(taskSession.id, started.run.taskSessionId);
+    assert.equal(taskSession.status, "completed");
+
+    // a plain chat run never enters the task story
+    manager.start({ employeeId: ctx.employeeId, text: "闲聊" });
+    await manager.whenQuiet();
+    assert.equal(hookCalls.length, 1);
+  } finally {
+    await ctx.dispose();
+  }
+});

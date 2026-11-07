@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { OfficeFloor } from "./OfficeFloor.jsx";
 import { HireModal } from "./HireModal.jsx";
 import { ChatOverlay } from "./ChatOverlay.jsx";
+import { TaskBench } from "./TaskBench.jsx";
 import { Switcher } from "./Switcher.jsx";
 import { StatusChip } from "./StatusChip.jsx";
 import { initialDeskActivity, reduceDeskActivity, expireDeskBlocked } from "./scene/deskActivity.js";
@@ -26,6 +27,7 @@ export function App() {
    */
   const [deskStates, setDeskStates] = useState(/** @type {() => Map<number, DeskState>} */ (() => new Map()));
   const [viewPrefs, setViewPrefs] = useState(/** @type {() => ViewPrefs} */ (readViewPrefs));
+  const [benchOpen, setBenchOpen] = useState(false);
   const lastHostState = useRef(/** @type {string | null} */ (null));
 
   const refresh = useCallback(async () => {
@@ -170,6 +172,17 @@ export function App() {
         </label>
       </div>
       <Switcher snapshot={snapshot} onChanged={refresh} />
+      {/* 左轨工单台：工单创建/列表只在浮层，主画布永远是办公室（硬约束）。 */}
+      <button
+        type="button"
+        className="task-rail"
+        data-testid="task-rail"
+        aria-expanded={benchOpen ? "true" : "false"}
+        onClick={() => setBenchOpen((open) => !open)}
+      >
+        工单台
+      </button>
+      {benchOpen ? <TaskBench snapshot={snapshot} onClose={() => setBenchOpen(false)} /> : null}
       {hireDesk ? <HireModal desk={hireDesk} onClose={() => setHireDesk(null)} /> : null}
       {chatEmployee ? <ChatOverlay employee={chatEmployee} onClose={() => setChatEmployee(null)} /> : null}
     </div>

@@ -7,6 +7,8 @@ import path from "node:path";
 import { openStore } from "../src/host/store.mjs";
 import { createService } from "../src/host/service.mjs";
 import { createRunManager } from "../src/host/engine/run-manager.mjs";
+import { createTaskRunHook } from "../src/host/task/artifacts.mjs";
+import { createGitReader } from "../src/host/git/reader.mjs";
 import { createInvoke } from "../src/shared/envelope.mjs";
 
 /**
@@ -382,6 +384,215 @@ test("run methods answer engine_unavailable when the host has no run manager", a
       assert.equal(reply.ok, false);
       assert.equal(reply.error?.code, "engine_unavailable");
     }
+  } finally {
+    await dispose();
+  }
+});
+
+// — task methods (ticket 05: 工单与产出) —
+
+/**
+ * Service wiring for tasks: real store + stub engine + the real task hook,
+ * with a scripted git door (the door itself is tested against real git in
+ * test/git-reader.test.mjs).
+ *
+ * @param {string} name
+ * @param {{ headScript?: { ok: boolean, sha?: string, code?: string, message?: string }, useRealGit?: boolean }} [options]
+ */
+async function withTaskService(name, options = {}) {
+  const { headScript = { ok: true, sha: "a".repeat(40) }, useRealGit = false } = options;
+  const dataDir = await mkdtemp(path.join(tmpdir(), `cubicle-task-service-${name}-`));
+  const store = openStore({ dataDir });
+  const auditCommands = [
+    `git -C ${dataDir} rev-parse HEAD`,
+    `git -C ${dataDir} diff --name-status ${"a".repeat(40)}`,
+    `git -C ${dataDir} status --porcelain`,
+  ];
+  const git = useRealGit
+    ? /** @type {any} */ (createGitReader())
+    : /** @type {any} */ ({
+    head: (/** @type {string} */ workspaceDir) => ({ ...headScript }),
+    audit: () => auditCommands.slice(),
+    diffInfo: (/** @type {string} */ workspaceDir, /** @type {string} */ baseSha) => ({
+      ok: true,
+      headNow: baseSha,
+      stat: "",
+      nameStatus: [],
+      porcelain: "",
+    }),
+  });
+  const runManager = createRunManager({
+    store,
+    getAdapter: (engine) =>
+      engine === "pi"
+        ? {
+            async open({ onEvent }) {
+              return {
+                async prompt() {
+                  onEvent({ type: "text_delta", text: "干完了" });
+                  onEvent({ type: "agent_end", status: "ok" });
+                },
+                async abort() {},
+                sessionFile: () => null,
+              };
+            },
+          }
+        : null,
+    emit: () => {},
+    onTaskRunFinished: createTaskRunHook({ store, git }),
+  });
+  const service = createService({
+    store,
+    hostInfo: { pid: 4242, startedAt: "2026-11-05T09:00:00.000Z" },
+    runManager,
+    git,
+  });
+  const group = store.officeSnapshot().groups[0];
+  const programmer = /** @type {any} */ (store.listRoles().find((r) => r.key === "programmer"));
+  const desk = store.listDesks({ groupId: group.id })[0];
+  const employee = store.hireEmployee({ deskId: desk.id, roleId: programmer.id, name: "小程" }).employee;
+  return {
+    service,
+    runManager,
+    store,
+    groupId: group.id,
+    employeeId: employee.id,
+    dispose: async () => {
+      store.close();
+      await rm(dataDir, { recursive: true, force: true });
+    },
+  };
+}
+
+test("task.draft turns one sentence into an editable playbook contract", async () => {
+  const { service, dispose } = await withTaskService("draft");
+  try {
+    const { reply, events } = service.handle(createInvoke("k1", "task.draft", { text: "修复导出报表崩溃的 bug" }));
+    assert.equal(reply.ok, true);
+    assert.deepEqual(events, []);
+    const draft = /** @type {any} */ (reply.payload);
+    assert.equal(draft.playbook, "bugfix");
+    assert.equal(draft.label, "修 bug");
+    assert.equal(draft.goal, "修复导出报表崩溃的 bug");
+    assert.ok(draft.acceptance.length >= 2);
+  } finally {
+    await dispose();
+  }
+});
+
+test("task.create records the start HEAD and keeps the boss's edited goal and acceptance", async () => {
+  const { service, store, groupId, employeeId, dispose } = await withTaskService("create");
+  try {
+    const { reply, events } = service.handle(
+      createInvoke("k2", "task.create", {
+        employeeId,
+        text: "给 greet.txt 加一行欢迎语",
+        goal: "给 greet.txt 加一行英文欢迎语",
+        acceptance: ["欢迎语在 greet.txt 里可见", "手动加的标准"],
+      }),
+    );
+    assert.equal(reply.ok, true);
+    const task = /** @type {any} */ (reply.payload).task;
+    assert.equal(task.baseHead, "a".repeat(40));
+    assert.equal(task.playbook, "feature");
+    assert.equal(task.goal, "给 greet.txt 加一行英文欢迎语");
+    assert.deepEqual(task.acceptance, ["欢迎语在 greet.txt 里可见", "手动加的标准"]);
+    assert.equal(task.status, "open");
+    assert.equal(events[0].topic, "domain.changed");
+
+    const listed = /** @type {any} */ (service.handle(createInvoke("k3", "task.list", { groupId })).reply.payload);
+    assert.equal(listed.tasks.length, 1);
+    assert.equal(listed.tasks[0].employeeName, "小程");
+    void store;
+  } finally {
+    await dispose();
+  }
+});
+
+test("task.create says the workspace is unusable when it is not a git repository", async () => {
+  const { service, store, employeeId, dispose } = await withTaskService("nogit", {
+    headScript: { ok: false, code: "not_a_git_workspace", message: "工作区不是 git 仓库：无法记录起点 HEAD，工单不可用。" },
+  });
+  try {
+    const { reply } = service.handle(
+      createInvoke("k4", "task.create", { employeeId, text: "加个欢迎语", goal: "加个欢迎语", acceptance: [] }),
+    );
+    assert.equal(reply.ok, false);
+    assert.equal(reply.error?.code, "not_a_git_workspace");
+    assert.match(/** @type {any} */ (reply.error).message, /不是 git 仓库/);
+    const group = store.officeSnapshot().groups[0];
+    assert.equal(store.listTasks({ groupId: group.id }).length, 0);
+  } finally {
+    await dispose();
+  }
+});
+
+test("with the real git door, a never-created workspace answers not_a_git_workspace (not a crash)", async () => {
+  const { service, employeeId, dispose } = await withTaskService("nogit-real", { useRealGit: true });
+  try {
+    const { reply } = service.handle(
+      createInvoke("k4b", "task.create", { employeeId, text: "加个欢迎语", goal: "加个欢迎语", acceptance: [] }),
+    );
+    assert.equal(reply.ok, false);
+    assert.equal(reply.error?.code, "not_a_git_workspace", `got: ${JSON.stringify(reply.error)}`);
+  } finally {
+    await dispose();
+  }
+});
+
+test("task.dispatch runs the playbook prompt and the four artifacts arrive when the run settles", async () => {
+  const { service, runManager, employeeId, dispose } = await withTaskService("dispatch");
+  try {
+    const created = /** @type {any} */ (
+      service.handle(createInvoke("k5", "task.create", { employeeId, text: "写一份部署文档", goal: "写一份部署文档", acceptance: ["可照做"] })).reply.payload
+    ).task;
+
+    const dispatched = service.handle(createInvoke("k6", "task.dispatch", { taskId: created.id }));
+    assert.equal(dispatched.reply.ok, true);
+    const run = /** @type {any} */ (dispatched.reply.payload).run;
+    assert.equal(run.status, "running");
+    assert.match(run.prompt, new RegExp(`工单 #${created.id} · 写文档`));
+    assert.ok(run.prompt.includes("验收标准："));
+
+    await runManager.whenQuiet();
+
+    const detail = /** @type {any} */ (service.handle(createInvoke("k7", "task.detail", { taskId: created.id })).reply.payload);
+    assert.equal(detail.task.status, "finished");
+    assert.deepEqual(detail.artifacts.map((/** @type {any} */ a) => a.kind), ["diff_summary", "changed_files", "command_output", "report"]);
+    assert.ok(detail.artifacts[3].content.includes("干完了"));
+    assert.equal(detail.sessions.length, 1);
+    assert.equal(detail.sessions[0].status, "completed");
+  } finally {
+    await dispose();
+  }
+});
+
+test("task.dispatch rejects unknown tasks and a task that is already running", async () => {
+  const { service, runManager, employeeId, dispose } = await withTaskService("dispatch-bad");
+  try {
+    const unknown = service.handle(createInvoke("k8", "task.dispatch", { taskId: 99999 }));
+    assert.equal(unknown.reply.error?.code, "unknown_task");
+
+    const created = /** @type {any} */ (
+      service.handle(createInvoke("k9", "task.create", { employeeId, text: "加功能", goal: "加功能", acceptance: [] })).reply.payload
+    ).task;
+    service.handle(createInvoke("k10", "task.dispatch", { taskId: created.id }));
+    const busy = service.handle(createInvoke("k11", "task.dispatch", { taskId: created.id }));
+    assert.equal(busy.reply.error?.code, "task_running");
+    await runManager.whenQuiet();
+  } finally {
+    await dispose();
+  }
+});
+
+test("task.gitAudit answers with every git command the app ran — all read-only", async () => {
+  const { service, dispose } = await withTaskService("audit");
+  try {
+    const { reply } = service.handle(createInvoke("k12", "task.gitAudit", {}));
+    assert.equal(reply.ok, true);
+    const commands = /** @type {any} */ (reply.payload).commands;
+    assert.equal(commands.length, 3);
+    assert.ok(commands.every((/** @type {string} */ line) => /\b(rev-parse|diff|status|log|show|ls-files)\b/.test(line)));
   } finally {
     await dispose();
   }

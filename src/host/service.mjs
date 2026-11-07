@@ -7,6 +7,8 @@
  */
 import { createReply, createErrorReply, createEvent, TOPICS } from "../shared/envelope.mjs";
 import { appError } from "../shared/apperror.mjs";
+import { draftTask, taskPrompt } from "./task/playbook.mjs";
+import { enginePaths } from "./engine/paths.mjs";
 
 /**
  * @typedef {import("../shared/envelope.mjs").InvokeEnvelope} InvokeEnvelope
@@ -48,13 +50,19 @@ function requirePositiveId(payload, field) {
 }
 
 /**
- * @param {{ store: ReturnType<import("./store.mjs").openStore>, hostInfo: { pid: number, startedAt: string }, runManager?: ReturnType<import("./engine/run-manager.mjs").createRunManager> }} deps
+ * @param {{ store: ReturnType<import("./store.mjs").openStore>, hostInfo: { pid: number, startedAt: string }, runManager?: ReturnType<import("./engine/run-manager.mjs").createRunManager>, git?: Pick<import("./git/reader.mjs").GitReader, "head" | "audit"> }} deps
  */
-export function createService({ store, hostInfo, runManager }) {
+export function createService({ store, hostInfo, runManager, git }) {
   /** 引擎运行方法共用同一道闸门：没有 run manager 就没有 run.*。 */
   function requireRunManager() {
     if (!runManager) throw appError("engine_unavailable", "引擎运行时未启动");
     return runManager;
+  }
+
+  /** 工单方法共用同一道闸门：没有 git 门就没有 task.*。 */
+  function requireGit() {
+    if (!git) throw appError("git_unavailable", "git 访问未配置：工单需要 git 工作区才能记录起点。");
+    return git;
   }
 
   /**
@@ -123,6 +131,102 @@ export function createService({ store, hostInfo, runManager }) {
     "run.history"(payload) {
       const employeeId = requirePositiveId(payload, "employeeId");
       return { payload: requireRunManager().history({ employeeId }) };
+    },
+
+    // — work orders (ticket 05: 工单与产出) —
+
+    /**
+     * One sentence in, an editable contract out: which playbook, what the
+     * goal is, which acceptance criteria — the 工单台 prefills its form
+     * from this and the boss edits anything before dispatch.
+     */
+    "task.draft"(payload) {
+      const text = requireName(payload, "text");
+      return { payload: draftTask(text) };
+    },
+
+    "task.create"(payload) {
+      const employeeId = requirePositiveId(payload, "employeeId");
+      const text = requireName(payload, "text");
+      const employee = store.employeeById(employeeId);
+      if (!employee) throw appError("unknown_employee", `no employee with id ${employeeId}`);
+      const groupId = store.groupOfEmployee(employeeId);
+      if (groupId === null) throw appError("no_desk", `employee ${employeeId} has no desk — seat them first`);
+
+      const draft = draftTask(text);
+      const record = /** @type {Record<string, unknown>} */ (payload ?? {});
+      const goal = typeof record.goal === "string" && record.goal.trim().length > 0 ? record.goal.trim() : draft.goal;
+      const playbook =
+        typeof record.playbook === "string" && ["feature", "bugfix", "docs", "free"].includes(record.playbook)
+          ? record.playbook
+          : draft.playbook;
+      const acceptance = Array.isArray(record.acceptance)
+        ? record.acceptance.map((line) => String(line).trim()).filter((line) => line.length > 0)
+        : draft.acceptance;
+
+      // The git door decides usability BEFORE a task exists: an
+      // unversioned workspace cannot record a start HEAD (票 05 验收 5).
+      const workspaceDir = enginePaths(store.dataDir, employee.roleSnapshot.manifest.engine || "pi", employeeId)
+        .workspaceDir;
+      const head = requireGit().head(workspaceDir);
+      if (!head.ok) throw appError(head.code, head.message);
+
+      const task = store.createTask({
+        groupId,
+        employeeId,
+        workspaceDir,
+        title: text,
+        goal,
+        playbook,
+        acceptance,
+        baseHead: head.sha,
+      });
+      return { payload: { task }, event: { reason: "task.create", taskId: task.id } };
+    },
+
+    "task.dispatch"(payload) {
+      const taskId = requirePositiveId(payload, "taskId");
+      const task = store.taskById(taskId);
+      if (!task) throw appError("unknown_task", `no task with id ${taskId}`);
+      if (task.status === "running") throw appError("task_running", `task ${taskId} is already being worked on`);
+      // finished tasks may be dispatched again (retry = a fresh task session;
+      // ticket 06 layers the accept/reject flow on top)
+      const { run, session } = requireRunManager().start({
+        employeeId: task.employeeId,
+        text: taskPrompt(task),
+        task: { id: task.id },
+      });
+      return { payload: { run, session }, event: { reason: "task.dispatch", taskId } };
+    },
+
+    "task.list"(payload) {
+      const record = /** @type {Record<string, unknown>} */ (payload ?? {});
+      const groupId =
+        typeof record.groupId === "number" ? requirePositiveId(payload, "groupId") : store.officeSnapshot().activeGroupId;
+      if (groupId === null) return { payload: { tasks: [] } };
+      return { payload: { tasks: store.listTasks({ groupId }) } };
+    },
+
+    "task.detail"(payload) {
+      const taskId = requirePositiveId(payload, "taskId");
+      const task = store.taskById(taskId);
+      if (!task) throw appError("unknown_task", `no task with id ${taskId}`);
+      return {
+        payload: {
+          task,
+          sessions: store.listTaskSessions(taskId),
+          artifacts: store.listArtifacts({ taskId }),
+        },
+      };
+    },
+
+    /**
+     * Evidence for "应用全程未执行 git 写操作": every git command this host
+     * process ran, in order — the git door only ever executes its read-only
+     * allow-list (test/git-reader.test.mjs).
+     */
+    "task.gitAudit"() {
+      return { payload: { commands: requireGit().audit() } };
     },
 
     "office.setActive"(payload) {

@@ -46,14 +46,22 @@ const HISTORY_CAP = 400;
  */
 
 /**
+ * @typedef {object} TaskRunFinished
+ * @property {RunRow} run
+ * @property {"completed" | "aborted" | "failed"} status
+ * @property {{ at: number, event: NormalizedEvent }[]} events the full run tail
+ */
+
+/**
  * @param {object} options
  * @param {ReturnType<import("../store.mjs").openStore>} options.store
  * @param {(engine: string) => {
  *   open(input: { employee: unknown, session: EmployeeSessionRow, onEvent: (event: NormalizedEvent) => void }): Promise<LiveSession>,
  * } | null} options.getAdapter
  * @param {(payload: { runId: number, employeeId: number, sessionId: number, at: number, event: NormalizedEvent }) => void} options.emit
+ * @param {(finished: TaskRunFinished) => void} [options.onTaskRunFinished] task-runs-only hook (ticket 05 artifact collection)
  */
-export function createRunManager({ store, getAdapter, emit }) {
+export function createRunManager({ store, getAdapter, emit, onTaskRunFinished }) {
   /** @type {Map<number, ActiveRun>} */
   const active = new Map();
   /** @type {Map<number, LiveSession>} */
@@ -115,8 +123,27 @@ export function createRunManager({ store, getAdapter, emit }) {
       if (pointer) {
         store.setEmployeeSessionFile({ employeeSessionId: runRef.run.employeeSessionId, sessionFile: pointer });
       }
+      // The task session follows its run's outcome — one owner (this
+      // manager) so it can never disagree with the run row.
+      if (runRef.run.taskSessionId !== null) {
+        store.finishTaskSession({ taskSessionId: runRef.run.taskSessionId, status });
+      }
     } catch {
       // the store closing under a settling run (host shutdown) must not throw
+    }
+    if (runRef.run.taskId !== null && onTaskRunFinished) {
+      try {
+        const buffer = lastRunEvents.get(runRef.run.employeeId);
+        onTaskRunFinished({
+          run: runRef.run,
+          status,
+          events: buffer && buffer.runId === runRef.run.id ? buffer.events : [],
+        });
+      } catch (err) {
+        // artifact collection must never take the run loop down; stderr is
+        // teed into <dataDir>/agenthost.log by the main process
+        process.stderr.write(`task artifact hook failed: ${err instanceof Error ? err.stack : err}\n`);
+      }
     }
     active.delete(runRef.run.employeeId);
     signalQuiet();
@@ -137,10 +164,10 @@ export function createRunManager({ store, getAdapter, emit }) {
   }
 
   /**
-   * @param {{ employeeId: number, text: string }} input
+   * @param {{ employeeId: number, text: string, task?: { id: number } | null }} input
    * @returns {{ run: RunRow, session: EmployeeSessionRow }}
    */
-  function start({ employeeId, text }) {
+  function start({ employeeId, text, task }) {
     if (typeof employeeId !== "number" || !Number.isInteger(employeeId) || employeeId <= 0) {
       throw appError("invalid_payload", "employeeId must be a positive integer");
     }
@@ -166,7 +193,18 @@ export function createRunManager({ store, getAdapter, emit }) {
       sessionsDir: dirs.sessionsDir,
       workspaceDir: dirs.workspaceDir,
     });
-    const run = store.createRun({ employeeId, employeeSessionId: session.id, engine, prompt: text.trim() });
+    // A dispatched work order runs inside its own task session (GLOSSARY:
+    // 会话挂在任务下，可多条 — retry gets a fresh one).
+    const taskSession = task ? store.openTaskSession({ taskId: task.id, employeeSessionId: session.id, engine }) : null;
+    if (task) store.setTaskStatus(task.id, "running");
+    const run = store.createRun({
+      employeeId,
+      employeeSessionId: session.id,
+      engine,
+      prompt: text.trim(),
+      taskId: task?.id ?? null,
+      taskSessionId: taskSession?.id ?? null,
+    });
 
     /** @type {ActiveRun} */
     const runRef = { run, aborted: false, finished: false, live: liveSessions.get(employeeId) ?? null, opening: null };
