@@ -28,6 +28,7 @@ import {
   click,
   typeInto,
   bootAndShowOffice,
+  ensureAllDaySchedule,
   hireThroughWizard,
 } from "./e2e-harness.mjs";
 import { enginePaths } from "../src/host/engine/paths.mjs";
@@ -164,6 +165,8 @@ async function phaseDesk(ctx) {
 
   const { win } = await bootAndShowOffice(ctx, add);
   if (!win) return { checks };
+
+  await ensureAllDaySchedule(win.webContents); // 票 09: 默认班表 09:00–18:00，下班中有 off_duty 闸；e2e 配全天班表
 
   const hired = await hireThroughWizard(win.webContents, {
     roleKey: "programmer",

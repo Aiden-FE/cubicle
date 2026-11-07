@@ -27,6 +27,7 @@ import {
   typeInto,
   setSelect,
   bootAndShowOffice,
+  ensureAllDaySchedule,
   hireThroughWizard,
   seedGitWorkspace,
 } from "./e2e-harness.mjs";
@@ -95,6 +96,7 @@ async function phaseReview(ctx) {
   const { win } = await bootAndShowOffice(ctx, add);
   if (!win) return { checks };
   const contents = win.webContents;
+  await ensureAllDaySchedule(win.webContents); // 票 09: 默认班表 09:00–18:00 下班中有 off_duty 闸；e2e 全天班表
 
   const hired = await hireThroughWizard(contents, { roleKey: "programmer", employeeName: EMPLOYEE_NAME, backFrom2: false, backFrom3: false });
   add("招聘程序员（工单 owner）", hired.confirmed);

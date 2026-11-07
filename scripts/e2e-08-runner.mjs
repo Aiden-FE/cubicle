@@ -30,6 +30,7 @@ import {
   typeInto,
   setSelect,
   bootAndShowOffice,
+  ensureAllDaySchedule,
   hireThroughWizard,
   seedGitWorkspace,
 } from "./e2e-harness.mjs";
@@ -100,6 +101,7 @@ async function phaseShell(ctx) {
   const { win } = await bootAndShowOffice(ctx, add);
   if (!win) return { checks };
   const contents = win.webContents;
+  await ensureAllDaySchedule(win.webContents); // 票 09: 默认班表 09:00–18:00 下班中有 off_duty 闸；e2e 全天班表
 
   // ── 画布基线：1280 窗口里画布满窗，工位房间在主体位置 ──────────────
   const baseCanvas = /** @type {any} */ (await evalIn(contents, CANVAS_JS));
@@ -361,8 +363,15 @@ async function phaseShell(ctx) {
   add("全部处理完：把手徽标归 0（没有进行中和待验收）", badgeFinal === "0", `badge=${badgeFinal}`);
   await click(contents, '[data-testid="task-handle"]');
   await waitFor(async () => (await evalIn(contents, `document.querySelector('[data-testid="handle-drawer"]') !== null`)) === true, { timeoutMs: 3000 });
-  const archiveFinal = String(await evalIn(contents, HANDLE_ROWS_JS("handle-archive")));
-  add("档案段收齐两条完成的工单", archiveFinal.includes(String(fastTaskId)) && archiveFinal.includes(String(slowTaskId)), `archive=${archiveFinal}`);
+  let archiveFinal = "";
+  const archiveOk = await waitFor(
+    async () => {
+      archiveFinal = String(await evalIn(contents, HANDLE_ROWS_JS("handle-archive")));
+      return archiveFinal.includes(String(fastTaskId)) && archiveFinal.includes(String(slowTaskId));
+    },
+    { timeoutMs: 6000, intervalMs: 250 },
+  );
+  add("档案段收齐两条完成的工单", archiveOk, `archive=${archiveFinal}`);
   const finalCanvas = /** @type {any} */ (await evalIn(contents, CANVAS_JS));
   add("收尾画布仍满窗（布局从头到尾没被浮层挤过）", finalCanvas.floorW === finalCanvas.innerW && finalCanvas.roomW === baseCanvas.roomW, JSON.stringify(finalCanvas));
 

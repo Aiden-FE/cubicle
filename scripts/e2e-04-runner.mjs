@@ -35,6 +35,7 @@ import {
   fingerprintHome,
   homeDirUntouched,
   bootAndShowOffice,
+  ensureAllDaySchedule,
   hireThroughWizard,
 } from "./e2e-harness.mjs";
 import { enginePaths } from "../src/host/engine/paths.mjs";
@@ -130,6 +131,8 @@ async function bootAndHire(ctx, checks) {
   };
   const { win } = await bootAndShowOffice(ctx, add);
   if (!win) return { win: null, add, employeeId: 0 };
+
+  await ensureAllDaySchedule(win.webContents); // 票 09: 默认班表 09:00–18:00，下班中有 off_duty 闸；e2e 配全天班表
 
   // Publish the host pid early: the orchestrator (plain Node) then samples
   // AgentHost child processes across the whole phase — electron.exe may not
@@ -310,6 +313,8 @@ async function phaseResume(ctx) {
 
   const { win } = await bootAndShowOffice(ctx, add);
   if (!win) return { checks };
+
+  await ensureAllDaySchedule(win.webContents); // 票 09: 全天班表（幂等 upsert）
 
   const talkEvidence = await readJson(path.join(ctx.outDir, "talk.json"));
   const employeeId = Number(talkEvidence?.evidence?.employeeId ?? 0);

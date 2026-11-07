@@ -51,7 +51,12 @@ function requirePositiveId(payload, field) {
 }
 
 /**
- * @param {{ store: ReturnType<import("./store.mjs").openStore>, hostInfo: { pid: number, startedAt: string }, runManager?: ReturnType<import("./engine/run-manager.mjs").createRunManager>, git?: Pick<import("./git/reader.mjs").GitReader, "head" | "audit">, duty?: Pick<import("./duty/runtime.mjs").createDutyRuntime extends (...args: any[]) => infer R ? R : never, "phaseForEmployee" | "applyOverride" | "pauseAll"> }} deps
+ * @typedef {object} DutyDoor 票 09: duty runtime 暴露给 service 的三条门。
+ * @property {(employeeId: number) => "on" | "grace" | "off"} phaseForEmployee
+ * @property {(companyId: number, mode: "on" | "off") => { phase: "on" | "grace" | "off" }} applyOverride
+ * @property {() => Promise<number>} pauseAll
+ *
+ * @param {{ store: ReturnType<import("./store.mjs").openStore>, hostInfo: { pid: number, startedAt: string }, runManager?: ReturnType<import("./engine/run-manager.mjs").createRunManager>, git?: Pick<import("./git/reader.mjs").GitReader, "head" | "audit">, duty?: DutyDoor }} deps
  */
 export function createService({ store, hostInfo, runManager, git, duty }) {
   /** 引擎运行方法共用同一道闸门：没有 run manager 就没有 run.*。 */

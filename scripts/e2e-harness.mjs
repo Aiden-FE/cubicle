@@ -239,6 +239,24 @@ export async function bootAndShowOffice(ctx, add) {
 }
 
 /**
+ * 票 09 的行为同步：默认班表 09:00–18:00，下班中的公司不再开新的引擎运行
+ * （off_duty 闸 —— 验收 5「暂停期间不再产生新的工具调用」的严格读法）。
+ * 早于 09 的票在任意钟点跑 e2e，都要把每公司班表配成全天，才能继续派单。
+ * （先例：06 票改了 05 的 runner 判据措辞。）
+ *
+ * @param {import("electron").WebContents} contents
+ */
+export async function ensureAllDaySchedule(contents) {
+  const snapshot = /** @type {any} */ (await evalIn(contents, `window.cubicle.invoke('office.get')`));
+  for (const company of snapshot?.companies ?? []) {
+    await evalIn(
+      contents,
+      `(async () => await window.cubicle.invoke('schedule.set', { companyId: ${Number(company.id)}, workStart: "00:00", workEnd: "23:59:59", graceSeconds: 90 }))()`,
+    );
+  }
+}
+
+/**
  * Drive the hire wizard through the real UI code path (DOM clicks and input
  * events against the live React tree — not bridge shortcuts).
  *

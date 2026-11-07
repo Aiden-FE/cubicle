@@ -156,7 +156,8 @@ export function TaskBench({ snapshot, onClose }) {
       editedContract.current = false;
       await loadTasks();
     } catch (err) {
-      const code = /** @type {{ code?: string }} */ (err).code ?? "task_create_failed";
+      const failure = /** @type {{ code?: string, message?: string }} */ (err);
+      const code = failure.code ?? "task_create_failed";
       setNote(
         code === "not_a_git_workspace"
           ? "这个工作区不是 git 仓库：工单不可用（应用不会替你初始化仓库，先让员工的工作区成为一个 git 仓库）。"
@@ -166,7 +167,9 @@ export function TaskBench({ snapshot, onClose }) {
               ? "本机找不到 git 命令：工单需要 git 工作区才能记录起点。"
               : code === "task_running"
                 ? "这张工单已经在跑了，等这一轮结束。"
-                : `没能开单：${code}`,
+                : code === "off_duty"
+                  ? failure.message ?? "公司正在下班中：先在左轨「上下班」点「立即上班」，或等时间表到点自动上班。"
+                  : `没能开单：${code}`,
       );
     }
   };
@@ -195,7 +198,9 @@ export function TaskBench({ snapshot, onClose }) {
           ? failure.message ?? "这张工单的当前状态不允许这个操作。"
           : failure.code === "no_active_run"
             ? "这张工单没有正在执行的运行——它可能已经自己收尾了。"
-            : `操作失败：${failure.code ?? "unknown"}`,
+            : failure.code === "off_duty"
+              ? failure.message ?? "公司正在下班中：先在左轨「上下班」点「立即上班」。"
+              : `操作失败：${failure.code ?? "unknown"}`,
       );
     }
   };
