@@ -139,11 +139,12 @@ async function phaseWorkorder(ctx) {
     return { checks, evidence: { headBefore, taskError: await evalIn(contents, TASK_ERROR_JS) } };
   }
 
-  const finishedShown = await waitFor(async () => (await evalIn(contents, TASK_ROW_STATUS_JS(0))) === "finished", {
+  // 票 06 把「已交产出」升级为「待验收」：跑完自动停在 review，四件套此刻已落盘。
+  const finishedShown = await waitFor(async () => (await evalIn(contents, TASK_ROW_STATUS_JS(0))) === "review", {
     timeoutMs: 90_000,
     intervalMs: 300,
   });
-  add("员工在 90s 内跑完工单（四件套落盘）", finishedShown, `${Date.now() - dispatchAt}ms`);
+  add("员工在 90s 内跑完工单，停在「待验收」（四件套落盘）", finishedShown, `${Date.now() - dispatchAt}ms`);
 
   // — open the task: the 四件套 —
   await click(contents, '[data-testid="task-row"]');
