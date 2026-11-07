@@ -14,8 +14,12 @@ function fakeChild(pid) {
   const child = {
     pid,
     killed: false,
-    /** @param {unknown} _message */
-    postMessage(_message) {},
+    /** @type {unknown[]} */
+    sent: [],
+    /** @param {unknown} message */
+    postMessage(message) {
+      child.sent.push(message);
+    },
     kill() {
       child.killed = true;
     },
@@ -110,15 +114,28 @@ test("an unexpected exit marks offline and forks a replacement after the delay",
   assert.equal(supervisor.pid, 1002);
 });
 
-test("stop() shuts the host down without scheduling a restart", () => {
+test("stop() asks the host to reclaim engine children, then exits cleanly without kill or restart", () => {
   const { supervisor, forks, children, timers } = setup();
   supervisor.start();
   supervisor.stop();
+  // the shutdown handshake is offered before any kill (票 04 CLI-host reclamation)
+  assert.deepEqual(children[0].child.sent.map((/** @type {any} */ m) => m.method), ["host.shutdown"]);
+  // the host exits within the grace window → its exit clears the kill timer
   children[0].child.emit("exit", 0);
   assert.equal(supervisor.state, "stopped");
+  assert.equal(children[0].child.killed, false, "graceful exit means no kill");
   assert.equal(timers.pendingCount(), 0);
   timers.runDue();
   assert.equal(forks.length, 1);
+});
+
+test("stop() kills the host after the grace window if it never exits", () => {
+  const { supervisor, children, timers } = setup();
+  supervisor.start();
+  supervisor.stop();
+  assert.equal(children[0].child.killed, false, "not killed before the grace window");
+  timers.runDue(); // grace elapses with no exit event
+  assert.equal(children[0].child.killed, true, "uncooperative host is killed after grace");
 });
 
 test("a healthy restart cycle reports starting then online again", () => {

@@ -19,6 +19,8 @@ export function App() {
   const [bridgeError, setBridgeError] = useState(/** @type {string | null} */ (null));
   const [hireDesk, setHireDesk] = useState(/** @type {DeskData | null} */ (null));
   const [chatEmployee, setChatEmployee] = useState(/** @type {DeskOccupantData | null} */ (null));
+  const chatEmployeeRef = useRef(/** @type {DeskOccupantData | null} */ (null));
+  chatEmployeeRef.current = chatEmployee;
   /**
    * employeeId → 工位状态（票 07）。activity 只由归一化事件流折叠
    * （deskActivity.js）；motion 是空闲时钟（idleMotion.js），仅在无 run
@@ -33,6 +35,13 @@ export function App() {
       const data = /** @type {OfficeSnapshotData} */ (await window.cubicle.invoke("office.get"));
       setSnapshot(data);
       setBridgeError(null);
+      // Keep an open chat drawer's employee in sync with the store (engine
+      // switches and edits land in the snapshot; the drawer must not go stale).
+      const openEmployee = chatEmployeeRef.current;
+      if (openEmployee) {
+        const fresh = data.desks.map((d) => d.occupant).find((o) => o && o.id === openEmployee.id) ?? null;
+        if (fresh) setChatEmployee(fresh);
+      }
       // Every seated employee gets a工位 state entry (idle from the moment
       // the view learns about them); existing live states are kept.
       setDeskStates((prev) => {

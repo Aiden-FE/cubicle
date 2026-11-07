@@ -8,6 +8,8 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { createInvoke } from "../shared/envelope.mjs";
+
 /**
  * @typedef {"idle" | "starting" | "online" | "offline" | "stopped"} HostState
  *
@@ -30,6 +32,7 @@ const hostEntry = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", 
  * @param {string} [options.entryPath]
  * @param {number} [options.restartDelayMs]
  * @param {number} [options.startupTimeoutMs] kill a host that never sends anything
+ * @param {number} [options.shutdownGraceMs] give a stopping host this long to reclaim engine children before kill
  * @param {(fn: () => void, ms: number) => unknown} [options.setTimeoutFn]
  * @param {(id: unknown) => void} [options.clearTimeoutFn]
  * @param {(message: unknown) => void} [options.onMessage] passthrough for host traffic
@@ -39,6 +42,7 @@ export function createHostSupervisor({
   entryPath = hostEntry,
   restartDelayMs = 1000,
   startupTimeoutMs = 6000,
+  shutdownGraceMs = 600,
   setTimeoutFn = (fn, ms) => setTimeout(fn, ms),
   clearTimeoutFn = (id) => clearTimeout(/** @type {NodeJS.Timeout} */ (id)),
   onMessage,
@@ -51,6 +55,8 @@ export function createHostSupervisor({
   let restartTimer = null;
   /** @type {unknown} */
   let startupTimer = null;
+  /** @type {unknown} */
+  let shutdownTimer = null;
   /** @type {Set<(status: HostStatus) => void>} */
   const listeners = new Set();
 
@@ -85,6 +91,10 @@ export function createHostSupervisor({
       if (startupTimer !== null) {
         clearTimeoutFn(startupTimer);
         startupTimer = null;
+      }
+      if (shutdownTimer !== null) {
+        clearTimeoutFn(shutdownTimer);
+        shutdownTimer = null;
       }
       if (state === "stopped") return;
       state = "offline";
@@ -126,7 +136,19 @@ export function createHostSupervisor({
       if (child) {
         const dying = child;
         child = null;
-        dying.kill();
+        // Ask the CLI host to reclaim engine children first, then kill after
+        // a short grace so an uncooperative host still goes down. (票 04 duty.)
+        if (typeof dying.postMessage === "function") {
+          try {
+            dying.postMessage(createInvoke("host-shutdown", "host.shutdown", {}));
+          } catch {
+            // postMessage on a dying channel is best-effort
+          }
+        }
+        shutdownTimer = setTimeoutFn(() => {
+          shutdownTimer = null;
+          dying.kill();
+        }, shutdownGraceMs);
       }
     },
 

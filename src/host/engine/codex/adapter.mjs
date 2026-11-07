@@ -339,13 +339,24 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
     }
   }
 
+  /** Kill every live codex child (sync; taskkill for the tree is fire-and-forget). */
+  function killAllChildren() {
+    for (const child of liveChildren.values()) killChild(child);
+    liveChildren.clear();
+  }
+
   return {
     open,
     bridgeEnv,
-    /** Host exit: no codex child may outlive the AgentHost (票 04 留的回收义务). */
+    /**
+     * Synchronous, best-effort: kill every live codex child. Registered on the
+     * host's `exit` so even an abrupt SIGTERM (supervisor stop → kill) leaves
+     * no codex process parented under the AgentHost (票 04 留的回收义务).
+     */
+    killChildrenSync: killAllChildren,
+    /** Host exit: no codex child may outlive the AgentHost (also closes the bridge). */
     async shutdown() {
-      for (const child of liveChildren.values()) killChild(child);
-      liveChildren.clear();
+      killAllChildren();
       if (bridgePromise) {
         const b = await bridgePromise.catch(() => null);
         await b?.close();

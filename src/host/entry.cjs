@@ -12,14 +12,27 @@ async function main() {
     throw new Error("CUBICLE_DATA_DIR is required");
   }
 
-  const [{ openStore }, { createService }, { createRunManager }, { createPiAdapter }, { parseEnvelope, createEvent, TOPICS }] =
-    await Promise.all([
-      import("./store.mjs"),
-      import("./service.mjs"),
-      import("./engine/run-manager.mjs"),
-      import("./engine/pi/adapter.mjs"),
-      import("../shared/envelope.mjs"),
-    ]);
+  const [
+    { openStore },
+    { createService },
+    { createRunManager },
+    { createPiAdapter },
+    { createCodexAdapter },
+    { createProbeRunner },
+    { existsSync },
+    path,
+    { parseEnvelope, createEvent, TOPICS },
+  ] = await Promise.all([
+    import("./store.mjs"),
+    import("./service.mjs"),
+    import("./engine/run-manager.mjs"),
+    import("./engine/pi/adapter.mjs"),
+    import("./engine/codex/adapter.mjs"),
+    import("./engine/probe.mjs"),
+    import("node:fs"),
+    import("node:path"),
+    import("../shared/envelope.mjs"),
+  ]);
 
   const store = openStore({ dataDir });
   const hostInfo = {
@@ -29,31 +42,92 @@ async function main() {
     dbPath: store.dbPath,
   };
 
-  const piAdapter = createPiAdapter({ dataDir: store.dataDir });
-
   const port = process.parentPort;
   /** @param {unknown} envelope */
   const send = (envelope) => port.postMessage(envelope);
 
+  const piAdapter = createPiAdapter({ dataDir: store.dataDir });
+  const codexAdapter = createCodexAdapter({
+    dataDir: store.dataDir,
+    codexBinary: process.env.CUBICLE_CODEX_PATH || "codex",
+  });
+  // Abrupt host exit (supervisor stop → kill) must still reclaim codex, so the
+  // CLI host leaves no child process under this host pid.
+  process.on("exit", () => codexAdapter.killChildrenSync());
+
   const runManager = createRunManager({
     store,
-    getAdapter: (engine) => (engine === "pi" ? piAdapter : null),
+    getAdapter: (engine) => (engine === "pi" ? piAdapter : engine === "codex" ? codexAdapter : null),
     // Engine events ride the run.event topic; the main process coalesces and
     // the view subscribes per topic. (Payloads stay envelope-shaped.)
     emit: (payload) => send(createEvent(TOPICS.runEvent, payload)),
   });
-  const service = createService({ store, hostInfo, runManager });
+
+  // The admission probe (ticket 11) drives the SAME run-manager seam a real
+  // conversation uses, against a hidden probe employee, and listens on the
+  // internal subscribe() rather than the UI topic.
+  const probeRunner = createProbeRunner({
+    store,
+    startRun: ({ employeeId, text }) => ({ runId: runManager.start({ employeeId, text }).run.id }),
+    subscribeRunEvents: (listener) => runManager.subscribe(listener),
+  });
+
+  /** An engine is "configured" (badge 已登录 vs 待配 key) by its BYOK file. */
+  const engineFacts = (/** @type {string} */ engine) => ({
+    configured: existsSync(path.join(store.dataDir, "engines", engine, "models.json")),
+  });
+
+  const service = createService({
+    store,
+    hostInfo,
+    runManager,
+    engineProbe: probeRunner,
+    engineFacts,
+    notifyDomain: (payload) => send(createEvent(TOPICS.domainChanged, payload)),
+  });
 
   port.on("message", (event) => {
     const envelope = parseEnvelope(event.data);
     if (!envelope || envelope.kind !== "invoke") return;
+    if (envelope.method === "host.shutdown") {
+      // graceful exit requested by the supervisor: reclaim engine children,
+      // ack, then quit. (Ticket 04 left the CLI-host reclamation duty here.)
+      void codexAdapter
+        .shutdown()
+        .catch(() => {})
+        .finally(() => {
+          send(createReplySafe(envelope, { ok: true }));
+          setTimeout(() => process.exit(0), 50);
+        });
+      return;
+    }
     const { reply, events } = service.handle(envelope);
     send(reply);
     for (const domainEvent of events) send(domainEvent);
   });
 
-  const heartbeat = () =>
-    send(createEvent(TOPICS.hostStatus, { state: "online", ...hostInfo }));
+  /** @param {{ id: string, v: number, ts: number }} invoke @param {unknown} payload */
+  function createReplySafe(invoke, payload) {
+    return { v: invoke.v, kind: "reply", id: invoke.id, ok: true, payload, ts: Date.now() };
+  }
+
+  // Best-effort engine detection at startup so badges are honest without the
+  // engine center being opened: `codex --version` proves the binary is present.
+  void detectCodex();
+  async function detectCodex() {
+    try {
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const run = promisify(execFile);
+      const { stdout } = await run(process.env.CUBICLE_CODEX_PATH || "codex", ["--version"], { windowsHide: true, timeout: 8000 });
+      store.setEngineInstalled({ engine: "codex", installed: true, version: String(stdout).trim() });
+    } catch {
+      store.setEngineInstalled({ engine: "codex", installed: false, version: null });
+    }
+    send(createEvent(TOPICS.domainChanged, { reason: "engine.detect", engine: "codex" }));
+  }
+
+  const heartbeat = () => send(createEvent(TOPICS.hostStatus, { state: "online", ...hostInfo }));
   heartbeat();
   setInterval(heartbeat, 2000);
 
