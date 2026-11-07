@@ -4,7 +4,7 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] 一句话自动套 playbook，可手改目标与验收标准
 - [ ] 工单记录起点 HEAD，产出 diff 是相对起点的
