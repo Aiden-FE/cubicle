@@ -386,3 +386,159 @@ test("run methods answer engine_unavailable when the host has no run manager", a
     await dispose();
   }
 });
+
+// ——— ticket 11: engine badges / admission / probe / switching ———
+
+/**
+ * @param {{ probe?: any, configured?: Record<string, boolean>, notify?: (p: any) => void }} [options]
+ * @param {string} name
+ */
+async function withEngineService(name, options = {}) {
+  const dataDir = await mkdtemp(path.join(tmpdir(), `cubicle-engine-service-${name}-`));
+  const store = openStore({ dataDir });
+  const service = createService({
+    store,
+    hostInfo: { pid: 1, startedAt: "x" },
+      engineProbe: options.probe,
+    engineFacts: (/** @type {string} */ engine) => ({ configured: Boolean(options.configured?.[engine]) }),
+    notifyDomain: options.notify,
+  });
+  return {
+    service,
+    store,
+    dispose: async () => {
+      store.close();
+      await rm(dataDir, { recursive: true, force: true });
+    },
+  };
+}
+
+/** @param {unknown} payload @returns {Record<string, any>} */
+function enginesBy(payload) {
+  const engines = /** @type {{ engines: any[] } } */ (payload).engines;
+  return Object.fromEntries(engines.map((e) => [e.engine, e]));
+}
+
+test("engine.list shows the 已登录 badge for pi and 未装 + install guide for codex", async () => {
+  const { service, dispose } = await withEngineService("badges", { configured: { pi: true } });
+  try {
+    const engines = enginesBy(service.handle(createInvoke("e1", "engine.list", {})).reply.payload);
+    assert.equal(engines.pi.badge, "logged_in");
+    assert.equal(engines.pi.enabled, true);
+    assert.equal(engines.codex.badge, "not_installed"); // installed null/false
+    assert.match(engines.codex.installGuide, /codex/i);
+  } finally {
+    await dispose();
+  }
+});
+
+test("engine badges move to 待配 key once installed but unconfigured, then 已登录", async () => {
+  /** @type {Record<string, boolean>} */
+  const flags = {};
+  const { service, store, dispose } = await withEngineService("badge-move", { configured: flags });
+  try {
+    store.setEngineInstalled({ engine: "codex", installed: true, version: "codex-cli 0.163.0" });
+    let engines = enginesBy(service.handle(createInvoke("e2", "engine.list", {})).reply.payload);
+    assert.equal(engines.codex.badge, "needs_key");
+    assert.equal(engines.codex.version, "codex-cli 0.163.0");
+
+    flags.codex = true; // the engine center finished the BYOK config
+    engines = enginesBy(service.handle(createInvoke("e3", "engine.list", {})).reply.payload);
+    assert.equal(engines.codex.badge, "logged_in");
+  } finally {
+    await dispose();
+  }
+});
+
+test("engine.enable refuses an unprobed engine unless manualOverride is set (risk flag)", async () => {
+  const { service, store, dispose } = await withEngineService("enable");
+  try {
+    const plain = service.handle(createInvoke("e4", "engine.enable", { engine: "codex" }));
+    assert.equal(plain.reply.ok, false);
+    assert.equal(plain.reply.error?.code, "probe_required");
+
+    const risky = service.handle(createInvoke("e5", "engine.enable", { engine: "codex", manualOverride: true }));
+    assert.equal(risky.reply.ok, true);
+    const state = /** @type {any} */ (store.engineState("codex"));
+    assert.equal(state.enabled, true);
+    assert.equal(state.manualOverride, true); // 风险标识
+  } finally {
+    await dispose();
+  }
+});
+
+test("engine.enable needs no override once the probe has passed", async () => {
+  const { service, store, dispose } = await withEngineService("enable-pass");
+  try {
+    store.setEngineProbeResult({ engine: "codex", status: "passed", probe: { verdicts: {} } });
+    const { reply } = service.handle(createInvoke("e6", "engine.enable", { engine: "codex" }));
+    assert.equal(reply.ok, true);
+    assert.equal(/** @type {any} */ (store.engineState("codex")).manualOverride, false);
+  } finally {
+    await dispose();
+  }
+});
+
+test("engine.probe kicks off the probe, reports running in-store, notifies on completion", async () => {
+  /** @type {string[]} */
+  const calls = [];
+  /** @type {(() => void) | undefined} */
+  let finishProbe;
+  /** @type {{ current: any }} */
+  const storeRef = { current: null };
+  const probe = {
+    /** @param {string} engine */
+    startProbe: (engine) =>
+      new Promise((res) => {
+        calls.push(engine);
+        finishProbe = () => {
+          // the probe runner itself lands the verdict in the store
+          storeRef.current.setEngineProbeResult({ engine, status: "passed", probe: { verdicts: {} } });
+          res({ engine, status: "passed", verdicts: {} });
+        };
+      }),
+  };
+  /** @type {any[]} */
+  const notified = [];
+  const { service, store, dispose } = await withEngineService("probe", { probe, notify: (p) => notified.push(p) });
+  storeRef.current = store;
+  try {
+    const { reply, events } = service.handle(createInvoke("e7", "engine.probe", { engine: "codex" }));
+    assert.equal(reply.ok, true);
+    assert.deepEqual(calls, ["codex"]);
+    assert.equal(/** @type {any} */ (store.engineState("codex")).probeStatus, "running");
+    assert.equal(/** @type {any} */ (events[0]).payload.reason, "engine.probe.start");
+
+    // a second probe while running is refused
+    const again = service.handle(createInvoke("e8", "engine.probe", { engine: "codex" }));
+    assert.equal(again.reply.error?.code, "engine_probe_running");
+
+    finishProbe?.();
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(/** @type {any} */ (store.engineState("codex")).probeStatus, "passed");
+    assert.notEqual(notified.findIndex((p) => p.reason === "engine.probe"), -1);
+  } finally {
+    await dispose();
+  }
+});
+
+test("employee.setEngine requires admission and rewrites the frozen snapshot", async () => {
+  const { service, store, dispose } = await withEngineService("switch");
+  try {
+    const roles = store.listRoles();
+    const programmer = /** @type {any} */ (roles.find((r) => r.key === "programmer"));
+    const desk = store.listDesks({ groupId: store.officeSnapshot().groups[0].id })[0];
+    const employee = store.hireEmployee({ deskId: desk.id, roleId: programmer.id, name: "小程" }).employee;
+
+    const blocked = service.handle(createInvoke("e9", "employee.setEngine", { employeeId: employee.id, engine: "codex" }));
+    assert.equal(blocked.reply.ok, false);
+    assert.equal(blocked.reply.error?.code, "engine_not_admitted");
+
+    store.setEngineEnabled({ engine: "codex", enabled: true, manualOverride: true });
+    const ok = service.handle(createInvoke("e10", "employee.setEngine", { employeeId: employee.id, engine: "codex" }));
+    assert.equal(ok.reply.ok, true);
+    assert.equal(/** @type {any} */ (store.employeeById(employee.id)).roleSnapshot.manifest.engine, "codex");
+  } finally {
+    await dispose();
+  }
+});

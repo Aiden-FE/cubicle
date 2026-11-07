@@ -7,6 +7,7 @@
  */
 import { createReply, createErrorReply, createEvent, TOPICS } from "../shared/envelope.mjs";
 import { appError } from "../shared/apperror.mjs";
+import { deriveEngineBadge, installGuide } from "./engine/badge.mjs";
 
 /**
  * @typedef {import("../shared/envelope.mjs").InvokeEnvelope} InvokeEnvelope
@@ -48,9 +49,16 @@ function requirePositiveId(payload, field) {
 }
 
 /**
- * @param {{ store: ReturnType<import("./store.mjs").openStore>, hostInfo: { pid: number, startedAt: string }, runManager?: ReturnType<import("./engine/run-manager.mjs").createRunManager> }} deps
+ * @param {{
+ *   store: ReturnType<import("./store.mjs").openStore>,
+ *   hostInfo: { pid: number, startedAt: string },
+ *   runManager?: ReturnType<import("./engine/run-manager.mjs").createRunManager>,
+ *   engineProbe?: { startProbe(engine: string): Promise<{ status: string }> },
+ *   engineFacts?: (engine: string) => { configured: boolean },
+ *   notifyDomain?: (payload: Record<string, unknown>) => void,
+ * }} deps
  */
-export function createService({ store, hostInfo, runManager }) {
+export function createService({ store, hostInfo, runManager, engineProbe, engineFacts, notifyDomain }) {
   /** 引擎运行方法共用同一道闸门：没有 run manager 就没有 run.*。 */
   function requireRunManager() {
     if (!runManager) throw appError("engine_unavailable", "引擎运行时未启动");
@@ -87,6 +95,69 @@ export function createService({ store, hostInfo, runManager }) {
 
     "role.list"() {
       return { payload: { roles: store.listRoles() } };
+    },
+
+    // — engines (ticket 11: 徽章三态 / 准入探针 / 手动带风险启用 / 切换) —
+
+    "engine.list"() {
+      const engines = store.listEngineStates().map((state) => ({
+        ...state,
+        badge: deriveEngineBadge({
+          installed: state.installed,
+          configured: engineFacts?.(state.engine)?.configured ?? false,
+        }),
+        installGuide: state.installed !== true ? installGuide(state.engine) : null,
+      }));
+      return { payload: { engines } };
+    },
+
+    "engine.enable"(payload) {
+      const engine = requireName(payload, "engine");
+      const manualOverride = Boolean(/** @type {Record<string, unknown>} */ (payload ?? {}).manualOverride);
+      const state = store.engineState(engine);
+      if (!state) throw appError("unknown_engine", `no engine ${engine}`);
+      // 只有探针通过才可无脑启用；否则必须显式带风险手动启用。
+      if (!manualOverride && state.probeStatus !== "passed") {
+        throw appError("probe_required", "引擎尚未通过准入探针；如仍要启用，请勾选「带风险启用」。");
+      }
+      store.setEngineEnabled({ engine, enabled: true, manualOverride: state.probeStatus !== "passed" });
+      return {
+        payload: { engine: store.engineState(engine) },
+        event: { reason: "engine.enable", engine, manualOverride },
+      };
+    },
+
+    "engine.probe"(payload) {
+      const engine = requireName(payload, "engine");
+      if (!engineProbe) throw appError("engine_unavailable", "探针运行时未启动");
+      const state = store.engineState(engine);
+      if (!state) throw appError("unknown_engine", `no engine ${engine}`);
+      if (state.probeStatus === "running") throw appError("engine_probe_running", `${engine} 的探针正在运行`);
+      // The reply only says "started"; the probe runs several engine turns and
+      // lands its verdict through the store + a later domain.changed.
+      store.setEngineProbeResult({ engine, status: "running" });
+      engineProbe
+        .startProbe(engine)
+        .then((result) => {
+          notifyDomain?.({ reason: "engine.probe", engine, status: result.status });
+        })
+        .catch((err) => {
+          notifyDomain?.({ reason: "engine.probe", engine, status: "failed", error: err instanceof Error ? err.message : String(err) });
+        });
+      return { payload: { started: true, engine }, event: { reason: "engine.probe.start", engine } };
+    },
+
+    "employee.setEngine"(payload) {
+      const employeeId = requirePositiveId(payload, "employeeId");
+      const engine = requireName(payload, "engine");
+      const state = store.engineState(engine);
+      if (!state) throw appError("unknown_engine", `no engine ${engine}`);
+      if (!state.enabled) {
+        throw appError("engine_not_admitted", `${engine} 尚未准入（未通过探针且未手动启用）`);
+      }
+      if (!store.employeeById(employeeId)) throw appError("unknown_employee", `no employee with id ${employeeId}`);
+      const employee = store.setEmployeeEngine({ employeeId, engine });
+      return { payload: { employee }, event: { reason: "employee.setEngine", employeeId, engine } };
     },
 
     "employee.hire"(payload) {

@@ -4,7 +4,7 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] 员工可切换引擎，同一任务换 codex 能跑通
 - [ ] 探针输出四项结论，结果写进引擎卡

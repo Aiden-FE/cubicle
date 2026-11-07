@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-import { createCodexNormalizer } from "../spike/lib/codex.mjs";
+import { createCodexNormalizer } from "../src/host/engine/codex/normalize.mjs";
 
 const fixtureUrl = new URL("./fixtures/codex-exec.jsonl", import.meta.url);
 const liveFixtureUrl = new URL("./fixtures/codex-exec-live.jsonl", import.meta.url);
@@ -104,13 +104,62 @@ test("unknown records survive as diagnostic events", () => {
     {
       type: "unknown",
       rawType: "item.completed",
-      itemType: "mcp_tool_call",
       payload: { id: "item_9", type: "mcp_tool_call" },
     },
     {
       type: "unknown",
       rawType: "future.event",
       payload: { type: "future.event", payload: { x: 1 } },
+    },
+    { type: "agent_end", status: "unknown" },
+  ]);
+});
+
+test("item-level errors ride as error events, known benign warnings are counted away", () => {
+  const normalizer = createCodexNormalizer();
+
+  normalizer.push('{"type":"turn.started"}');
+  normalizer.push(
+    '{"type":"item.completed","item":{"id":"item_0","type":"error","message":"`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation."}}',
+  );
+  normalizer.push(
+    '{"type":"item.completed","item":{"id":"item_1","type":"error","message":"Model metadata for `cubicle-e2e-model` not found. Defaulting to fallback metadata."}}',
+  );
+  normalizer.push('{"type":"item.completed","item":{"id":"item_2","type":"error","message":"sandbox escape detected"}}');
+  normalizer.push('{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}');
+
+  assert.deepEqual(normalizer.end(), [
+    { type: "turn_start" },
+    { type: "error", code: "codex_item_error", message: "sandbox escape detected" },
+    {
+      type: "turn_end",
+      status: "ok",
+      usage: { input: 1, cachedInput: 0, cacheWrite: 0, output: 1, reasoning: 0 },
+    },
+    { type: "agent_end", status: "ok" },
+  ]);
+  assert.equal(normalizer.warningLines, 2);
+});
+
+test("a command_execution that fails is an error-ended tool call, not a stream error", () => {
+  const normalizer = createCodexNormalizer();
+
+  normalizer.push('{"type":"item.started","item":{"id":"item_5","type":"command_execution","command":"exit 3","aggregated_output":"","exit_code":null,"status":"in_progress"}}');
+  normalizer.push('{"type":"item.completed","item":{"id":"item_5","type":"command_execution","command":"exit 3","aggregated_output":"boom","exit_code":3,"status":"failed"}}');
+
+  assert.deepEqual(normalizer.end(), [
+    {
+      type: "tool_execution_start",
+      toolCallId: "item_5",
+      toolName: "shell",
+      args: { command: "exit 3" },
+    },
+    {
+      type: "tool_execution_end",
+      toolCallId: "item_5",
+      toolName: "shell",
+      isError: true,
+      result: { output: "boom", exitCode: 3, status: "failed" },
     },
     { type: "agent_end", status: "unknown" },
   ]);

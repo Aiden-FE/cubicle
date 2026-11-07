@@ -82,6 +82,17 @@ import { appError } from "../shared/apperror.mjs";
  * @property {string} startedAt
  * @property {string | null} endedAt
  *
+ * @typedef {object} EngineStateRow
+ * @property {string} engine
+ * @property {boolean} enabled
+ * @property {boolean} manualOverride           带风险手动启用（探针未过）
+ * @property {boolean | null} installed         null = 尚未探测
+ * @property {string | null} version
+ * @property {"unprobed" | "running" | "passed" | "failed"} probeStatus
+ * @property {unknown} probe                    { verdicts: { injection, tools, refusal, events }, … }
+ * @property {string | null} probeAt
+ * @property {string} updatedAt
+ *
  * @typedef {object} OfficeSnapshot
  * @property {CompanyRow[]} companies
  * @property {number} activeCompanyId
@@ -132,13 +143,14 @@ CREATE TABLE IF NOT EXISTS employee (
 );
 CREATE TABLE IF NOT EXISTS employee_session (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  employee_id INTEGER NOT NULL UNIQUE REFERENCES employee(id),
+  employee_id INTEGER NOT NULL REFERENCES employee(id),
   engine TEXT NOT NULL,
   agent_dir TEXT NOT NULL,
   sessions_dir TEXT NOT NULL,
   workspace_dir TEXT NOT NULL,
   session_file TEXT,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  UNIQUE (employee_id, engine)
 );
 CREATE TABLE IF NOT EXISTS run (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -149,6 +161,17 @@ CREATE TABLE IF NOT EXISTS run (
   prompt TEXT NOT NULL,
   started_at TEXT NOT NULL,
   ended_at TEXT
+);
+CREATE TABLE IF NOT EXISTS engine_state (
+  engine TEXT PRIMARY KEY,
+  enabled INTEGER NOT NULL DEFAULT 0,
+  manual_override INTEGER NOT NULL DEFAULT 0,
+  installed INTEGER,
+  version TEXT,
+  probe_status TEXT NOT NULL DEFAULT 'unprobed' CHECK (probe_status IN ('unprobed', 'running', 'passed', 'failed')),
+  probe_json TEXT,
+  probe_at TEXT,
+  updated_at TEXT NOT NULL
 );
 `;
 
@@ -324,6 +347,99 @@ function toRun(row) {
 }
 
 /**
+ * @param {Record<string, unknown>} row
+ * @returns {EngineStateRow}
+ */
+function toEngineState(row) {
+  /** @type {unknown} */
+  let probe = null;
+  if (typeof row.probe_json === "string" && row.probe_json.length > 0) {
+    try {
+      probe = JSON.parse(row.probe_json);
+    } catch {
+      probe = null;
+    }
+  }
+  return {
+    engine: String(row.engine),
+    enabled: Number(row.enabled) === 1,
+    manualOverride: Number(row.manual_override) === 1,
+    installed: row.installed === null || row.installed === undefined ? null : Number(row.installed) === 1,
+    version: row.version === null || row.version === undefined ? null : String(row.version),
+    probeStatus: /** @type {EngineStateRow["probeStatus"]} */ (String(row.probe_status)),
+    probe,
+    probeAt: row.probe_at === null || row.probe_at === undefined ? null : String(row.probe_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+/**
+ * Engines the app ships with. pi is enabled out of the box (its SDK is
+ * bundled — ticket 04 already runs on it); every other engine must clear
+ * the admission probe (ticket 11) or be hand-enabled with the risk flag
+ * before it can take work.
+ */
+const ENGINE_SEEDS = [
+  { engine: "pi", enabled: true, installed: true },
+  { engine: "codex", enabled: false, installed: null },
+];
+
+/** @param {DatabaseSync} db */
+function seedEngineStates(db) {
+  const now = new Date().toISOString();
+  const insert = db.prepare(
+    "INSERT INTO engine_state (engine, enabled, installed, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(engine) DO NOTHING",
+  );
+  for (const seed of ENGINE_SEEDS) {
+    insert.run(seed.engine, seed.enabled ? 1 : 0, seed.installed === null ? null : seed.installed ? 1 : 0, now);
+  }
+}
+
+/**
+ * One-shot schema repair for pre-ticket-11 databases: the old table pinned
+ * the per-employee UNIQUE on the column, so a second (engine-switched)
+ * session row was impossible. Rebuild with UNIQUE (employee_id, engine),
+ * keeping ids — run rows reference them.
+ *
+ * @param {DatabaseSync} db
+ */
+function migrateEmployeeSessionPerEngine(db) {
+  const table = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'employee_session'").get();
+  const sql = String(/** @type {Record<string, unknown>} */ (table ?? {}).sql ?? "");
+  if (!/employee_id\s+INTEGER\s+NOT\s+NULL\s+UNIQUE/i.test(sql)) return;
+  db.exec("BEGIN");
+  try {
+    db.exec("ALTER TABLE employee_session RENAME TO employee_session_pre11");
+    db.exec(SCHEMA_SESSION_ONLY);
+    db.exec(`
+      INSERT INTO employee_session (id, employee_id, engine, agent_dir, sessions_dir, workspace_dir, session_file, updated_at)
+      SELECT id, employee_id, engine, agent_dir, sessions_dir, workspace_dir, session_file, updated_at FROM employee_session_pre11
+    `);
+    db.exec("DROP TABLE employee_session_pre11");
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+}
+
+/** The employee_session DDL, duplicated here so the migration can create
+ *  exactly that table without re-running unrelated schema statements. */
+const SCHEMA_SESSION_ONLY = `
+CREATE TABLE employee_session (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id INTEGER NOT NULL REFERENCES employee(id),
+  engine TEXT NOT NULL,
+  agent_dir TEXT NOT NULL,
+  sessions_dir TEXT NOT NULL,
+  workspace_dir TEXT NOT NULL,
+  session_file TEXT,
+  updated_at TEXT NOT NULL,
+  UNIQUE (employee_id, engine)
+);
+`;
+
+/**
  * Freeze a role row into the snapshot shape stored on every employee:
  * identity + manifest, as it is right now.
  *
@@ -347,11 +463,17 @@ export function openStore({ dataDir }) {
   const db = new DatabaseSync(dbPath);
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec(SCHEMA);
+  // Ticket 11 widens employee_session from one-per-employee to one-per
+  // employee × engine (switching engines keeps each engine's resume story).
+  // Databases built before that carry the UNIQUE on the column itself —
+  // rebuild them in place, ids first (run rows reference those ids).
+  migrateEmployeeSessionPerEngine(db);
   // A host that died (or was killed) mid-run must not leave phantom 'running'
   // rows behind: they become 'interrupted' the moment a host opens the store.
   markInterruptedRuns(db);
   seedIfFirstRun(db);
   seedRoles(db);
+  seedEngineStates(db);
 
   return {
     dataDir,
@@ -496,11 +618,12 @@ export function openStore({ dataDir }) {
     },
 
     /**
-     * One conversation session per employee (ticket 04: 同一员工连续两次对话
-     * 复用同一会话). The row also carries the engine-owned directory layout
-     * and — once the engine has written one — the resume pointer (session
-     * file). Directories are only applied on creation; the session entity is
-     * the stable thing, not the paths.
+     * One conversation session per employee × engine (ticket 04: 同一员工连续
+     * 两次对话复用同一会话; ticket 11: 切换引擎后每个引擎各自保留自己的会话与
+     * 恢复指针，换回原引擎照常续). The row also carries the engine-owned
+     * directory layout and — once the engine has written one — the resume
+     * pointer (session file). Directories are only applied on creation; the
+     * session entity is the stable thing, not the paths.
      *
      * @param {{ employeeId: number, engine: string, agentDir: string, sessionsDir: string, workspaceDir: string }} input
      * @returns {EmployeeSessionRow}
@@ -509,7 +632,9 @@ export function openStore({ dataDir }) {
       if (!db.prepare("SELECT id FROM employee WHERE id = ?").get(employeeId)) {
         throw appError("unknown_employee", `no employee with id ${employeeId}`);
       }
-      const existing = db.prepare("SELECT * FROM employee_session WHERE employee_id = ?").get(employeeId);
+      const existing = db
+        .prepare("SELECT * FROM employee_session WHERE employee_id = ? AND engine = ?")
+        .get(employeeId, engine);
       if (existing) return toEmployeeSession(/** @type {Record<string, unknown>} */ (existing));
       const now = new Date().toISOString();
       const info = db
@@ -579,6 +704,146 @@ export function openStore({ dataDir }) {
     latestRunForEmployee(employeeId) {
       const row = db.prepare("SELECT * FROM run WHERE employee_id = ? ORDER BY id DESC LIMIT 1").get(employeeId);
       return row ? toRun(/** @type {Record<string, unknown>} */ (row)) : null;
+    },
+
+    // — engine admission state (ticket 11: 徽章三态 + 准入探针 + 风险启用) —
+
+    /**
+     * @param {string} engine
+     * @returns {EngineStateRow | null}
+     */
+    engineState(engine) {
+      const row = db.prepare("SELECT * FROM engine_state WHERE engine = ?").get(engine);
+      return row ? toEngineState(/** @type {Record<string, unknown>} */ (row)) : null;
+    },
+
+    /** @returns {EngineStateRow[]} */
+    listEngineStates() {
+      const rows = db.prepare("SELECT * FROM engine_state ORDER BY engine").all();
+      return rows.map((row) => toEngineState(/** @type {Record<string, unknown>} */ (row)));
+    },
+
+    /**
+     * Record what engine detection (版本探测) learned about the binary.
+     *
+     * @param {{ engine: string, installed: boolean, version?: string | null }} input
+     */
+    setEngineInstalled({ engine, installed, version = null }) {
+      db.prepare(
+        `INSERT INTO engine_state (engine, installed, version, updated_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(engine) DO UPDATE SET installed = excluded.installed, version = excluded.version, updated_at = excluded.updated_at`,
+      ).run(engine, installed ? 1 : 0, version, new Date().toISOString());
+    },
+
+    /**
+     * Persist an admission probe's four verdicts. A pass is an admission:
+     * it enables the engine and clears any hand-enabled risk flag.
+     *
+     * @param {{ engine: string, status: "running" | "passed" | "failed", probe?: unknown }} input
+     */
+    setEngineProbeResult({ engine, status, probe }) {
+      const now = new Date().toISOString();
+      const json = probe === undefined ? null : JSON.stringify(probe);
+      db.prepare(
+        `INSERT INTO engine_state (engine, probe_status, probe_json, probe_at, enabled, manual_override, updated_at)
+         VALUES (?, ?, ?, ?, 0, 0, ?)
+         ON CONFLICT(engine) DO UPDATE SET
+           probe_status = excluded.probe_status,
+           probe_json = COALESCE(excluded.probe_json, engine_state.probe_json),
+           probe_at = excluded.probe_at,
+           updated_at = excluded.updated_at`,
+      ).run(engine, status, json, now, now);
+      if (status === "passed") {
+        db.prepare("UPDATE engine_state SET enabled = 1, manual_override = 0, updated_at = ? WHERE engine = ?").run(now, engine);
+      }
+    },
+
+    /**
+     * Enable/disable an engine. manualOverride marks a hand-enable after a
+     * failed (or skipped) probe — the engine card must show it as a risk.
+     *
+     * @param {{ engine: string, enabled: boolean, manualOverride?: boolean }} input
+     */
+    setEngineEnabled({ engine, enabled, manualOverride = false }) {
+      if (!db.prepare("SELECT engine FROM engine_state WHERE engine = ?").get(engine)) {
+        throw appError("unknown_engine", `no engine state for ${engine}`);
+      }
+      db.prepare("UPDATE engine_state SET enabled = ?, manual_override = ?, updated_at = ? WHERE engine = ?").run(
+        enabled ? 1 : 0,
+        manualOverride ? 1 : 0,
+        new Date().toISOString(),
+        engine,
+      );
+    },
+
+    /**
+     * @param {string} name
+     * @returns {{ id: number, companyId: number, name: string, roleId: number, roleSnapshot: RoleSnapshot, hiredAt: string } | null}
+     */
+    employeeByName(name) {
+      const row = db
+        .prepare("SELECT id, company_id, name, role_id, role_snapshot, hired_at FROM employee WHERE name = ?")
+        .get(name);
+      if (!row) return null;
+      return {
+        id: Number(row.id),
+        companyId: Number(row.company_id),
+        name: String(row.name),
+        roleId: Number(row.role_id),
+        roleSnapshot: /** @type {RoleSnapshot} */ (JSON.parse(String(row.role_snapshot))),
+        hiredAt: String(row.hired_at),
+      };
+    },
+
+    /**
+     * Hidden desk-less employee used by the admission probe (ticket 11):
+     * conversation plumbing works for it (run-manager only needs an
+     * employee row) while the office view — driven by desks — never sees it.
+     *
+     * @param {{ name: string, engine: string, roleSnapshot: RoleSnapshot }} input
+     * @returns {{ id: number, companyId: number, name: string, roleId: number, roleSnapshot: RoleSnapshot, hiredAt: string }}
+     */
+    ensureProbeEmployee({ name, engine, roleSnapshot }) {
+      const existing = this.employeeByName(name);
+      if (existing) {
+        // Re-runs must not drift onto another engine mid-probe history: keep
+        // one probe employee per engine.
+        if (existing.roleSnapshot?.manifest?.engine === engine) return existing;
+      }
+      const company = db.prepare("SELECT id FROM company ORDER BY id LIMIT 1").get();
+      const role = db.prepare("SELECT id FROM role ORDER BY id LIMIT 1").get();
+      if (!company || !role) throw appError("invalid_state", "probe employee needs a company and a role");
+      const hiredAt = new Date().toISOString();
+      const info = db
+        .prepare("INSERT INTO employee (company_id, name, role_id, role_snapshot, hired_at) VALUES (?, ?, ?, ?, ?)")
+        .run(Number(company.id), name, Number(role.id), JSON.stringify(roleSnapshot), hiredAt);
+      const id = Number(info.lastInsertRowid);
+      return {
+        id,
+        companyId: Number(company.id),
+        name,
+        roleId: Number(role.id),
+        roleSnapshot,
+        hiredAt,
+      };
+    },
+
+    /**
+     * Switch an employee's engine by rewriting the frozen role snapshot's
+     * manifest.engine — the snapshot stays frozen for everything else
+     * (decision 02: 入职冻结, but the ticket-11 switch is an explicit act).
+     *
+     * @param {{ employeeId: number, engine: string }} input
+     * @returns {{ id: number, companyId: number, name: string, roleId: number, roleSnapshot: RoleSnapshot, hiredAt: string }}
+     */
+    setEmployeeEngine({ employeeId, engine }) {
+      const row = db.prepare("SELECT role_snapshot FROM employee WHERE id = ?").get(employeeId);
+      if (!row) throw appError("unknown_employee", `no employee with id ${employeeId}`);
+      const snapshot = JSON.parse(String(row.role_snapshot));
+      if (!snapshot.manifest || typeof snapshot.manifest !== "object") snapshot.manifest = {};
+      snapshot.manifest.engine = engine;
+      db.prepare("UPDATE employee SET role_snapshot = ? WHERE id = ?").run(JSON.stringify(snapshot), employeeId);
+      return /** @type {any} */ (this.employeeById(employeeId));
     },
 
     /**
