@@ -12,6 +12,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 
 import { appError } from "../shared/apperror.mjs";
+import { dataLayout } from "../shared/data-layout.mjs";
 import { DEFAULT_TASK_TOKEN_BUDGET } from "./cost/budget.mjs";
 
 /**
@@ -743,10 +744,13 @@ function toRoleSnapshot(role) {
  * @param {{ dataDir: string }} options
  */
 export function openStore({ dataDir }) {
-  const dbPath = path.join(dataDir, "cubicle.db");
-  mkdirSync(dataDir, { recursive: true });
-  for (const folder of ["artifacts", "engines", "renders"]) {
-    mkdirSync(path.join(dataDir, folder), { recursive: true });
+  // 票 13: 数据目录清单只有一个主人（src/shared/data-layout.mjs），
+  // 首启按它建，打包验收按它查。
+  const layout = dataLayout(dataDir);
+  const dbPath = layout.dbPath;
+  mkdirSync(layout.root, { recursive: true });
+  for (const folder of layout.folders) {
+    mkdirSync(folder.dir, { recursive: true });
   }
 
   const db = new DatabaseSync(dbPath);
