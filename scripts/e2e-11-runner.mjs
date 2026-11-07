@@ -29,7 +29,7 @@ import { mkdirSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { out, sleep, waitFor, evalIn, click, typeInto, bootAndShowOffice, hireThroughWizard } from "./e2e-harness.mjs";
+import { out, sleep, waitFor, evalIn, click, typeInto, bootAndShowOffice, hireThroughWizard, ensureAllDaySchedule } from "./e2e-harness.mjs";
 import { enginePaths } from "../src/host/engine/paths.mjs";
 
 const E2E_EMPLOYEE = "E2E 换擎员";
@@ -144,6 +144,11 @@ async function phaseEngine(ctx) {
   const office = /** @type {any} */ (await evalIn(contents, `window.cubicle.invoke('office.get')`));
   await writeFile(path.join(ctx.outDir, "hostpid.txt"), String(office?.host?.pid ?? ""), "utf8");
 
+  // 票 09: 默认班表 09:00–18:00，下班中 run.start 会被 off_duty 闸拒；本票验的
+  // 是引擎切换，不是上下班 —— 配全天班表并等相位真的翻到「上班中」再派活。
+  const onDuty = await ensureAllDaySchedule(contents);
+  add("全天班表已生效：公司相位是「上班中」", onDuty);
+
   const hired = await hireThroughWizard(contents, { roleKey: "programmer", employeeName: E2E_EMPLOYEE, backFrom2: false, backFrom3: false });
   add("招聘一名程序员", hired.confirmed);
   await waitFor(async () => (await evalIn(contents, `document.querySelectorAll('[data-testid="desk"][data-empty="false"]').length`)) === 1, { timeoutMs: 4000 });
@@ -224,8 +229,18 @@ async function phaseEngine(ctx) {
   childWatch.abortAt = Date.now();
   await click(contents, '[data-testid="chat-abort"]');
   const wentIdle = await waitFor(async () => (await evalIn(contents, `document.querySelector('[data-testid="chat-running"]')?.dataset.running`)) === "false", { timeoutMs: 15_000 });
-  const abortHistory = /** @type {any} */ (await evalIn(contents, `window.cubicle.invoke('run.history', { employeeId: ${employeeId} })`));
-  add("中止一次 codex 运行：面板回空闲，落库 aborted", runningSeen && wentIdle && abortHistory?.lastRun?.status === "aborted", `status=${abortHistory?.lastRun?.status}`);
+  const abortHistory = /** @type {any} */ (
+    await evalIn(
+      contents,
+      `window.cubicle.invoke('run.history', { employeeId: ${employeeId} }).then(h => h).catch(e => ({ rejected: String((e && e.code) || e) }))`,
+    )
+  );
+  const abortNote = await evalIn(contents, `document.querySelector('[data-testid="chat-note"]')?.textContent ?? null`);
+  add(
+    "中止一次 codex 运行：面板回空闲，落库 aborted",
+    runningSeen && wentIdle && abortHistory?.lastRun?.status === "aborted",
+    `running=${runningSeen} idle=${wentIdle} note=${JSON.stringify(abortNote)} history=${JSON.stringify(abortHistory?.lastRun ?? abortHistory)}`,
+  );
 
   // Hold a quiet window so the orchestrator can sample "settled" host children.
   childWatch.idleStartAt = Date.now();

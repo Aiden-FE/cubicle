@@ -86,7 +86,9 @@ async function main() {
   // The admission probe (ticket 11) drives the SAME run-manager seam a real
   // conversation uses, against a hidden probe employee, and listens on the
   // internal subscribe() rather than the UI topic. probe:true bypasses the
-  // admission gate — the probe IS the admission test.
+  // admission gate — the probe IS the admission test. It deliberately does not
+  // go through service.run.start, so the 票 09 下班 gate does not apply: a
+  // probe is configuration-time verification, not an employee taking work.
   const probeRunner = createProbeRunner({
     store,
     startRun: ({ employeeId, text }) => ({ runId: runManager.start({ employeeId, text, probe: true }).run.id }),

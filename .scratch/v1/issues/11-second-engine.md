@@ -52,6 +52,9 @@ npm run e2e:11    # 需本机 codex-cli（PATH 或 CUBICLE_CODEX_PATH）
 - **本机 node 22.20 下 `node --test test/` 报 ERR_MODULE_NOT_FOUND**：跑全套要写 `node --test --experimental-test-isolation=none test/*.test.mjs`。
 - 跨阶段复用 dataDir 时，`rm` 引擎 workspace 目录会 **EBUSY**（刚退出的宿主/子进程还持句柄）：清理要容忍失败（新库才是「干净」的定义），并在 Electron 退出后留一拍。
 
+- **09 的 off_duty 闸会让早于它的 e2e 在 18 点后炸**：`run.start` 下班中直接拒（`off_duty`），表现是「面板一直空闲、`run.history.lastRun=null`」。跑 e2e 前要配全天班表，**而且班表落库 ≠ 相位翻转**（duty runtime 按自己节拍重算）：`ensureAllDaySchedule` 现在会轮询 `schedule.get` 直到每公司 `status.phase==="on"` 才返回。准入探针走 `runManager.start({probe:true})`，不经 service 的下班闸门——探针是配置期验证，不是员工派活。
+- 合并 main（05–09）后的时序坑：`e2e:04/05/06/07/08` 在 22 点跑全部因上面这条炸过一次；修在 harness 一处，六条 runner 一起绿（顺带 `e2e:03` 的能力清单 needle 还写着 `bash`，07 把预设 shell 改成 `powershell` 后它就一直是红的，一并跟上）。
+
 ### 已知边界（留给后续票）
 
 - codex 跑 `-s danger-full-access`：OS 级沙箱在本机开不了，安全性靠注入 hook（CODEX_HOME 是应用私有目录）。13 票做能力声明/策略 UI 时应把它显式建模成「宿主策略」而不是「引擎沙箱」。

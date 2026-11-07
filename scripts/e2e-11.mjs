@@ -22,6 +22,7 @@ import { spawn, execFile } from "node:child_process";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -168,6 +169,25 @@ function countCodexChildren(parentPid) {
   });
 }
 
+/**
+ * The honest record of what actually landed in the database after a phase —
+ * run statuses and engine admission state, straight from SQLite.
+ */
+function dumpState() {
+  try {
+    const db = new DatabaseSync(path.join(dataDir, "cubicle.db"), { readOnly: true });
+    const runs = db
+      .prepare("select id, employee_id, engine, status, prompt, started_at, ended_at from run order by id")
+      .all();
+    const engines = db.prepare("select engine, enabled, manual_override, installed, probe_status from engine_state order by engine").all();
+    const employees = db.prepare("select id, name from employee order by id").all();
+    db.close();
+    return { runs, engines, employees };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 const started = Date.now();
 
 /**
@@ -227,6 +247,7 @@ await freshOffice();
 console.log("ticket 11 e2e · phase engine (准入探针四验 · 切引擎 · 同一任务换 codex · 卡口拒绝 · 中止进程回收)");
 const engine = await launch({ phase: "engine", codexPath: realCodex, sample: true });
 const engineOk = engine.code === 0 && printChecks("engine", await readJson(path.join(outDir, "engine.json")));
+await writeFile(path.join(outDir, "runs.json"), `${JSON.stringify(dumpState(), null, 2)}\n`, "utf8");
 
 // Phase 3 — 探针失败（没配 key）→ 带风险手动启用 + 风险标识 + 待配 key 徽章.
 await freshOffice({ dropCodexModels: true, dropCodexHome: true });

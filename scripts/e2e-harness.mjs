@@ -245,15 +245,35 @@ export async function bootAndShowOffice(ctx, add) {
  * （先例：06 票改了 05 的 runner 判据措辞。）
  *
  * @param {import("electron").WebContents} contents
+ * @param {{ timeoutMs?: number }} [options]
+ * @returns {Promise<boolean>} true once every company really sits in 上班中
  */
-export async function ensureAllDaySchedule(contents) {
+export async function ensureAllDaySchedule(contents, options = {}) {
+  const timeoutMs = options.timeoutMs ?? 20_000;
   const snapshot = /** @type {any} */ (await evalIn(contents, `window.cubicle.invoke('office.get')`));
-  for (const company of snapshot?.companies ?? []) {
+  /** @type {number[]} */
+  const companies = (snapshot?.companies ?? []).map((/** @type {any} */ c) => Number(c.id));
+  for (const companyId of companies) {
     await evalIn(
       contents,
-      `(async () => await window.cubicle.invoke('schedule.set', { companyId: ${Number(company.id)}, workStart: "00:00", workEnd: "23:59:59", graceSeconds: 90 }))()`,
+      `(async () => await window.cubicle.invoke('schedule.set', { companyId: ${companyId}, workStart: "00:00", workEnd: "23:59:59", graceSeconds: 90 }))()`,
     );
   }
+  if (companies.length === 0) return false;
+  // 班表落库 ≠ 相位翻转：duty runtime 按自己的节拍重算 phase，落库后仍可能
+  // 停在 off。必须等到「上班中」再派单，否则 18 点后跑的任何早于 09 的票都会
+  // 在第一次 run.start 上吃到 off_duty（票 11 合并后跑就是这样炸的）。
+  return waitFor(
+    async () => {
+      const phases = await Promise.all(
+        companies.map((companyId) =>
+          evalIn(contents, `window.cubicle.invoke('schedule.get', { companyId: ${companyId} }).then(r => r?.status?.phase ?? null)`),
+        ),
+      );
+      return phases.every((phase) => phase === "on");
+    },
+    { timeoutMs, intervalMs: 300 },
+  );
 }
 
 /**
