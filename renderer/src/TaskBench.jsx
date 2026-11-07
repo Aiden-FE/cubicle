@@ -408,9 +408,12 @@ export function TaskBench({ snapshot, onClose }) {
 
           <div className="task-tokens" data-testid="task-tokens" data-budget-state={budgetMarker} data-tokens-live={String(liveTokens ?? "")}>
             本任务 token <code>{tokenText(tokenSummary)}</code>
-            <span className="task-tokens-detail">
-              （输入 {detail?.tokens?.input ?? 0} · 输出 {detail?.tokens?.output ?? 0}）
-            </span>
+            {/* 未计量就没有 breakdown 可拆 —— 「输入 0 · 输出 0」会把「没数」演成「免费」。 */}
+            {detail?.tokens?.measured === true ? (
+              <span className="task-tokens-detail">
+                （输入 {detail.tokens.input} · 输出 {detail.tokens.output}）
+              </span>
+            ) : null}
             {/* 票 12 验收 4: 80% 黄点 / 100% 预算到顶（软闸判定在 host，信号走事件流） */}
             {budgetMarker === "warn" ? (
               <span className="budget-dot" data-testid="token-warn-dot" title={`token 用量已过 80%（${liveTokens ?? detail?.tokens?.total ?? 0}/${detail?.budget ?? "?"}）`}>
