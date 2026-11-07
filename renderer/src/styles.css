@@ -2184,3 +2184,63 @@ body {
   font-size: 11px;
   color: var(--muted, #6f675b);
 }
+
+/* ——— 票 10：崩溃中断待处置（把手第四段 + 工单台徽标/三选） ——— */
+.task-interrupted-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #7a1f1f;
+  color: #fff4f0;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+.handle-section-interrupted {
+  border: 1px solid rgba(122, 31, 31, 0.4);
+  border-radius: 10px;
+  background: rgba(122, 31, 31, 0.07);
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+.handle-section-interrupted .handle-section-title {
+  color: #7a1f1f;
+  font-weight: 700;
+}
+.handle-interrupted-note {
+  font-size: 12px;
+  color: #5c4438;
+  margin: 2px 0 8px;
+  line-height: 1.45;
+}
+.handle-row-interrupted {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.interrupted-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.task-mini-button {
+  padding: 3px 10px;
+  border-radius: 7px;
+  border: 1px solid rgba(92, 68, 56, 0.35);
+  background: #fffaf3;
+  color: #3c2c22;
+  font-size: 12px;
+  cursor: pointer;
+}
+.task-mini-button:hover {
+  background: #f5ead9;
+}
+.task-mini-danger {
+  border-color: rgba(122, 31, 31, 0.5);
+  color: #7a1f1f;
+}
+.interrupted-hint {
+  font-size: 12px;
+  color: #8a5a44;
+}

@@ -23,6 +23,7 @@ async function main() {
     { createTaskRunHook },
     { createDutyRuntime },
     { taskPrompt },
+    { engineLedgerFile, sweepPidLedger },
     { existsSync },
     path,
     { parseEnvelope, createEvent, TOPICS },
@@ -37,12 +38,22 @@ async function main() {
     import("./task/artifacts.mjs"),
     import("./duty/runtime.mjs"),
     import("./task/playbook.mjs"),
+    import("./engine/child-ledger.mjs"),
     import("node:fs"),
     import("node:path"),
     import("../shared/envelope.mjs"),
   ]);
 
   const store = openStore({ dataDir });
+  // 票 10 「宿主启动时清扫」: main's launch sweep covers the app restart; this
+  // covers the SUPERVISOR restart path (host crashed → new host boots in the
+  // same app session) — orphan engine children of the dead host get swept here,
+  // not only at next app start. Fire-and-forget: an empty ledger costs one
+  // file read; a full sweep never blocks the office coming up.
+  void sweepPidLedger({
+    file: engineLedgerFile(store.dataDir, "codex"),
+    log: (message) => process.stderr.write(`host boot sweep: ${message}\n`),
+  }).catch(() => {});
   const hostInfo = {
     pid: process.pid,
     startedAt: new Date().toISOString(),
@@ -100,6 +111,17 @@ async function main() {
     configured: existsSync(path.join(store.dataDir, "engines", engine, "models.json")),
   });
 
+  // 票 10: 引擎能力声明 — the adapters own the promise ("can this engine
+  // continue its own conversation?"). No adapter / no flag ⇒ NOT resumable:
+  // the UI only offers 重跑, which is the conservative door the ticket asks for.
+  const engineCapabilities = (/** @type {string} */ engine) => ({
+    resumes: adapterFor(engine)?.resumes === true,
+  });
+  /** @param {string} engine */
+  function adapterFor(engine) {
+    return engine === "pi" ? piAdapter : engine === "codex" ? codexAdapter : null;
+  }
+
   const service = createService({
     store,
     hostInfo,
@@ -108,6 +130,7 @@ async function main() {
     duty,
     engineProbe: probeRunner,
     engineFacts,
+    engineCapabilities,
     notifyDomain: (payload) => send(createEvent(TOPICS.domainChanged, payload)),
   });
 

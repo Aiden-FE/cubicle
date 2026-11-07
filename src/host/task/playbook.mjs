@@ -153,3 +153,24 @@ export function rejectPrompt(task, reason) {
     "这是打回后的新一轮：先对照上面的打回意见说明上一轮差在哪，再动手修正；改动照旧自己提交，最后仍以「收尾报告」收尾。",
   ].join("\n");
 }
+
+/**
+ * 崩溃后续跑的第二把钥匙（票 10）: the engine session resumes from its own
+ * pointer (断点在引擎侧), so the prompt's job is to tell the employee this is
+ * a resumed chapter — take stock of what already exists, continue from the
+ * breakpoint, do not redo finished work. The discipline contract stays in
+ * force (own commits, closing report).
+ *
+ * @param {{ id: number, playbook: string, goal: string, acceptance: string[] }} task
+ * @returns {string}
+ */
+export function resumePrompt(task) {
+  return [
+    taskPrompt(task),
+    "",
+    "【崩溃续跑】",
+    "这张工单的上一轮在应用崩溃/强杀中被中断，工单与引擎会话都保留在现场。",
+    "先盘点已经完成的部分（工作区现状、git 历史），从未完成处继续；已经做完的不要重做。",
+    "最后仍以「收尾报告」收尾，并说明本轮是从断点继续的。",
+  ].join("\n");
+}

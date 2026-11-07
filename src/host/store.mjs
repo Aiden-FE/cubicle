@@ -326,10 +326,22 @@ const TERMINAL_RUN_STATUSES = new Set(["completed", "aborted", "failed", "interr
  *     │    └──打回────┘                        打回 ────┤ (review → running)
  *     └──崩溃自愈                                       │
  *          failed ──重试──▶ running                    │
+ *     └──放弃(票 10)──▶ failed
+ *
+ * 票 10 adds exactly one edge: open → failed, the abandon exit for a task a
+ * crash interrupted (the heal parks such tasks back at 待办 with their latest
+ * task_session interrupted). The five states themselves do not change — the
+ * interrupt lives at the run/task_session layer, not as a sixth task state.
+ * Why the edge is honest rather than a hole: it models the boss explicitly
+ * giving up on an interrupted work order (the task already failed once by
+ * crashing), and the service door (task.abandon) only applies it to that
+ * interrupted shape. Fresh, never-dispatched tickets keep 待办→失败 out of
+ * reach in practice through that service gate; the map loosens only where
+ * the crash story needs it.
  */
 const TASK_TRANSITIONS = Object.freeze(
   /** @type {Record<TaskStatus, readonly TaskStatus[]>} */ ({
-    open: ["running"],
+    open: ["running", "failed"],
     running: ["review", "failed"],
     review: ["done", "running"],
     done: [],
@@ -1157,6 +1169,57 @@ export function openStore({ dataDir }) {
         counts[String(companyId)] = bucket(companyId);
       }
       return counts;
+    },
+
+    /**
+     * The 中断的任务 list (ticket 10: 强杀/崩溃重启后等用户三选). A task is
+     * interrupted when its LATEST task_session is 'interrupted' while the task
+     * itself is still open (crash-healed back to 待办) or running (crash after
+     * 上班续跑 — the 09 heal keeps it 进行中). Tasks whose latest session is
+     * paused belong to the 09 badge story, not this list; review/done/failed
+     * are closed chapters.
+     *
+     * Each row carries what the 三选 needs without another query: the engine
+     * (capability lookup), the employee session's resume pointer (a lost
+     * pointer means 「只能重跑」), the iteration count, and when the crash
+     * closed the session (interruptedAt). Newest first.
+     *
+     * @param {{ companyId: number }} input
+     * @returns {(TaskRowWithEmployee & { engine: string, sessionFile: string | null, iterations: number, interruptedAt: string | null })[]}
+     */
+    listInterruptedTasks({ companyId }) {
+      const rows = db
+        .prepare(
+          `SELECT t.*, e.name AS e_name,
+            ls.status AS latest_session_status,
+            ls.engine AS engine,
+            ls.ended_at AS interrupted_at,
+            es.session_file AS session_file,
+            (SELECT COUNT(*) FROM task_session c WHERE c.task_id = t.id) AS iterations
+           FROM task t
+           JOIN employee e ON e.id = t.employee_id
+           JOIN project_group g ON g.id = t.group_id
+           JOIN task_session ls ON ls.id = (
+             SELECT ts.id FROM task_session ts WHERE ts.task_id = t.id ORDER BY ts.id DESC LIMIT 1
+           )
+           LEFT JOIN employee_session es ON es.id = ls.employee_session_id
+           WHERE g.company_id = ?
+             AND t.status IN ('open', 'running')
+             AND ls.status = 'interrupted'
+           ORDER BY t.id DESC`,
+        )
+        .all(companyId);
+      return rows.map((raw) => {
+        const row = /** @type {Record<string, unknown>} */ (raw);
+        return {
+          ...toTask(row),
+          employeeName: String(row.e_name),
+          engine: String(row.engine),
+          sessionFile: row.session_file === null || row.session_file === undefined ? null : String(row.session_file),
+          iterations: Number(row.iterations),
+          interruptedAt: row.interrupted_at === null || row.interrupted_at === undefined ? null : String(row.interrupted_at),
+        };
+      });
     },
 
     /**

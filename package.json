@@ -24,6 +24,7 @@
     "e2e:07": "node scripts/e2e-07.mjs",
     "e2e:08": "node scripts/e2e-08.mjs",
     "e2e:09": "node scripts/e2e-09.mjs",
+    "e2e:10": "node scripts/e2e-10.mjs",
     "e2e:11": "node scripts/e2e-11.mjs",
     "e2e:12": "node scripts/e2e-12.mjs",
     "e2e:13": "node scripts/e2e-13.mjs"

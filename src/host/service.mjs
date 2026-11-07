@@ -7,11 +7,12 @@
  */
 import { createReply, createErrorReply, createEvent, TOPICS } from "../shared/envelope.mjs";
 import { appError } from "../shared/apperror.mjs";
-import { draftTask, rejectPrompt, taskPrompt } from "./task/playbook.mjs";
+import { draftTask, rejectPrompt, resumePrompt, taskPrompt } from "./task/playbook.mjs";
 import { engineConfigDir, enginePaths } from "./engine/paths.mjs";
 import { DEFAULT_SCHEDULE, validateSchedule } from "./duty/schedule.mjs";
 import { deriveEngineBadge, installGuide } from "./engine/badge.mjs";
 import { extendBudgetBy50 } from "./cost/budget.mjs";
+import { existsSync } from "node:fs";
 
 /**
  * @typedef {import("../shared/envelope.mjs").InvokeEnvelope} InvokeEnvelope
@@ -92,6 +93,9 @@ function requirePositiveId(payload, field) {
  * @property {(companyId: number, mode: "on" | "off") => { phase: "on" | "grace" | "off" }} applyOverride
  * @property {() => Promise<number>} pauseAll
  *
+ * @typedef {(engine: string) => { resumes: boolean }} EngineCapabilities
+ *   票 10: 引擎能力声明（宁可给重跑 —— 拿不到 true 就按「不能续跑」办）。
+ *
  * @param {{
  *   store: ReturnType<import("./store.mjs").openStore>,
  *   hostInfo: { pid: number, startedAt: string },
@@ -100,10 +104,11 @@ function requirePositiveId(payload, field) {
  *   duty?: DutyDoor,
  *   engineProbe?: { startProbe(engine: string): Promise<{ status: string }> },
  *   engineFacts?: (engine: string) => { configured: boolean },
+ *   engineCapabilities?: EngineCapabilities,
  *   notifyDomain?: (payload: Record<string, unknown>) => void,
  * }} deps
  */
-export function createService({ store, hostInfo, runManager, git, duty, engineProbe, engineFacts, notifyDomain }) {
+export function createService({ store, hostInfo, runManager, git, duty, engineProbe, engineFacts, engineCapabilities, notifyDomain }) {
   /** 引擎运行方法共用同一道闸门：没有 run manager 就没有 run.*。 */
   function requireRunManager() {
     if (!runManager) throw appError("engine_unavailable", "引擎运行时未启动");
@@ -135,6 +140,61 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
       .officeSnapshot()
       .companies.some((/** @type {{ id: number }} */ c) => c.id === companyId);
     if (!exists) throw appError("unknown_company", `no company with id ${companyId}`);
+  }
+
+  /**
+   * 票 10 的中断形状门：任务存在、最近一轮 task_session 是 interrupted、任务
+   * 还停在 open（开库自愈落回待办）或 running（09 自愈豁免的形状）。三选
+   * （续跑/重跑/放弃）都从这道门进；别的形状诚实报 not_interrupted。
+   *
+   * @param {number} taskId
+   */
+  function requireInterruptedShape(taskId) {
+    const task = store.taskById(taskId);
+    if (!task) throw appError("unknown_task", `no task with id ${taskId}`);
+    const latest = store.latestTaskSessionForTask(taskId);
+    const shaped = latest?.status === "interrupted" && (task.status === "open" || task.status === "running");
+    if (!shaped) {
+      throw appError("not_interrupted", "这张工单不在「中断」形状：只有崩溃/强杀留下的 interrupted 任务可以三选。");
+    }
+    return { task, latest };
+  }
+
+  /**
+   * 票 10 canResume：两道都过才给「续跑」——
+   *   ① 引擎能力声明 resumes=true（没有声明 = 没有能力，宁可给重跑）；
+   *   ② 恢复指针在场：pi 的指针是会话文件（当场 existsSync），codex 的
+   *      thread:<uuid> 活在引擎私有 CODEX_HOME 里、无法廉价的查文件，
+   *      按「有指针就信」。指针 null/空（首轮崩溃且从没落过指针）→ 只能重跑。
+   *
+   * @param {string} engine
+   * @param {string | null | undefined} pointer
+   * @returns {{ canResume: boolean, hint: string | null }}
+   */
+  function resumableVerdict(engine, pointer) {
+    const resumes = engineCapabilities?.(engine)?.resumes === true;
+    if (!resumes) {
+      return { canResume: false, hint: `引擎 ${engine} 没有声明「可恢复会话」：这张只能重跑。` };
+    }
+    if (pointer === null || pointer === undefined || String(pointer).length === 0) {
+      return { canResume: false, hint: "引擎会话的恢复指针不在（这一轮从没跑完过）：只能重跑。" };
+    }
+    if (!String(pointer).startsWith("thread:") && !existsSync(String(pointer))) {
+      return { canResume: false, hint: "引擎的会话文件已经不在了：只能重跑。" };
+    }
+    return { canResume: true, hint: null };
+  }
+
+  /**
+   * The resume pointer as the run manager will use it: the interrupted
+   * round's employee-session row (same engine ⇒ same row — resume continues
+   * exactly that engine session).
+   *
+   * @param {number} employeeSessionId
+   * @returns {string | null}
+   */
+  function pointerOfEmployeeSession(employeeSessionId) {
+    return store.employeeSessionById(employeeSessionId)?.sessionFile ?? null;
   }
 
   /**
@@ -423,6 +483,15 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
         ...session,
         iteration: index + 1,
       }));
+      // 票 10: the 工单台 detail renders the 三选 from this verdict — same
+      // conservative canResume rule as task.interrupted.list (capability +
+      // pointer), so bench and handle never disagree about what is offered.
+      const latest = sessions.at(-1) ?? null;
+      const shaped =
+        latest?.status === "interrupted" && (task.status === "open" || task.status === "running");
+      const verdict = shaped
+        ? resumableVerdict(latest.engine, pointerOfEmployeeSession(latest.employeeSessionId))
+        : null;
       return {
         payload: {
           task,
@@ -434,6 +503,7 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
           // failure.reason = 最近一轮失败会话的人话原因（store 已折叠，视图不重derive）。
           budget: task.tokenBudget,
           failure: { reason: store.latestFailReasonForTask(taskId) },
+          ...(verdict ? { interrupted: { canResume: verdict.canResume, resumeHint: verdict.hint } } : {}),
         },
       };
     },
@@ -488,6 +558,84 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
      */
     "task.gitAudit"() {
       return { payload: { commands: requireGit().audit() } };
+    },
+
+    // — 崩溃恢复 (ticket 10: 强杀后重启 → 中断的任务三选；不静默自动续跑) —
+
+    /**
+     * The 中断的任务 list: tasks whose LATEST task_session ended 'interrupted'
+     * by a crash (the store's open-store heal creates this shape; 票 09's
+     * paused story never does). Each row carries the resume verdict so the UI
+     * can offer 续跑 only when the engine declares it can resume AND the
+     * session pointer still exists — when either fails, the honest door is
+     * 重跑 (票面: 「不支持恢复的引擎给出重跑选项」). 放弃 is always offered;
+     * it just lands the task at 失败 with its history intact.
+     */
+    "task.interrupted.list"(payload) {
+      const companyId = requirePositiveId(payload, "companyId");
+      requireCompany(companyId);
+      const tasks = store.listInterruptedTasks({ companyId }).map((row) => {
+        const verdict = resumableVerdict(row.engine, row.sessionFile);
+        return { ...row, canResume: verdict.canResume, resumeHint: verdict.hint };
+      });
+      return { payload: { tasks } };
+    },
+
+    /**
+     * 续跑: the 09 resume channel (追加 task_session, same employee session,
+     * engine continues from its own pointer). Legality: the task must be in
+     * the interrupted shape; the engine must declare it can resume and its
+     * pointer must exist; 下班中 refused like any new engine work. The five-
+     * state map is untouched — the run manager performs the legal open→running
+     * transition (or skips it for the 09 heal-exempt 进行中 shape).
+     */
+    "task.resume"(payload) {
+      const taskId = requirePositiveId(payload, "taskId");
+      const { task, latest } = requireInterruptedShape(taskId);
+      gateOffDuty(task.employeeId);
+      const verdict = resumableVerdict(latest.engine, pointerOfEmployeeSession(latest.employeeSessionId));
+      if (!verdict.canResume) throw appError("engine_not_resumable", verdict.hint ?? "这个引擎不能续跑");
+      const { run, session } = requireRunManager().start({
+        employeeId: task.employeeId,
+        text: resumePrompt(task),
+        task: { id: task.id },
+        resume: true,
+      });
+      return { payload: { run, session }, event: { reason: "task.resume", taskId } };
+    },
+
+    /**
+     * 重跑: a fresh task_session on the original contract (06's retry semantics,
+     * no resume pointer). For the shape the 09 heal keeps 进行中 (crash after
+     * 上班续跑), the interrupted attempt first lands at 失败 (running→failed,
+     * the same edge 取消 uses) and the rerun goes through the 06 failed→running
+     * exit — the transition map stays the single door.
+     */
+    "task.rerun"(payload) {
+      const taskId = requirePositiveId(payload, "taskId");
+      const { task } = requireInterruptedShape(taskId);
+      gateOffDuty(task.employeeId);
+      if (task.status === "running") store.setTaskStatus(taskId, "failed");
+      const { run, session } = requireRunManager().start({
+        employeeId: task.employeeId,
+        text: taskPrompt(task),
+        task: { id: task.id },
+      });
+      return { payload: { run, session }, event: { reason: "task.rerun", taskId } };
+    },
+
+    /**
+     * 放弃: the boss explicitly gives up on an interrupted ticket → 失败归档.
+     * History is never touched (task_session / artifact rows stay as they are).
+     * This is the ONLY edge ticket 10 added to the transition map (open→failed)
+     * — and this door is what keeps it honest: only the interrupted shape may
+     * take it. No off-duty gate: abandoning spawns no tool calls.
+     */
+    "task.abandon"(payload) {
+      const taskId = requirePositiveId(payload, "taskId");
+      requireInterruptedShape(taskId);
+      const task = store.setTaskStatus(taskId, "failed");
+      return { payload: { task }, event: { reason: "task.abandon", taskId } };
     },
 
     /**

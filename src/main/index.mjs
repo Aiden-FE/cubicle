@@ -16,6 +16,7 @@ import { createEventCoalescer } from "./coalescer.mjs";
 import { createExitCoordinator } from "./exit-coordinator.mjs";
 import { createSingleInstanceGuard, focusMainWindow } from "./single-instance.mjs";
 import { readPackageVersion, resolveAboutVersion } from "./app-version.mjs";
+import { recordHostPid, sweepCrashResidue } from "./crash-residue.mjs";
 import { createInvoke, createEvent, createErrorReply, parseEnvelope, TOPICS } from "../shared/envelope.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -45,7 +46,11 @@ if (process.env.CUBICLE_PROBE_USERDATA) {
 
 // 票 13 验收 2：单实例锁。拿不到锁 = 已经有一个 Cubicle 在跑：把既有窗口
 // 带到前台的活儿归那个进程，这个副本立即退出（不开第二个窗口、不建数据
-// 目录）。锁以 userData 为键，所以上面的路径解析必须先跑。
+// 目录）。锁以 userData 为键，所以上面的路径解析必须先跑（锁文件住在
+// userData，M1 安全策略拒工作区外写入）。票 10 补一层理由：一个数据目录
+// 同时只该有一个 Cubicle——否则两个实例抢同一 SQLite WAL，更糟的是崩溃
+// 清扫会把第一实例的活宿主当孤儿杀掉；锁让「账本里有活 pid = 应用死过」
+// 这个推断成立。
 const instanceGuard = createSingleInstanceGuard({
   requestSingleInstanceLock: () => app.requestSingleInstanceLock(),
 });
@@ -124,6 +129,10 @@ const supervisor = createHostSupervisor({
       stdio: "pipe",
       env: { ...process.env, CUBICLE_DATA_DIR: dataDir },
     });
+    // 票 10: record who we just spawned — if THIS app is force-killed, the
+    // orphaned host is still holding the SQLite WAL; the next launch's
+    // sweepCrashResidue reads this line and kills it before spawning a new one.
+    recordHostPid({ dataDir, pid: child.pid });
     // Host stderr → <dataDir>/agenthost.log, so a silent crash leaves evidence.
     child.stderr?.on("data", (chunk) => {
       try {
@@ -327,6 +336,28 @@ const exitCoordinator = createExitCoordinator({
 });
 
 app.whenReady().then(async () => {
+  if (!hasSingleInstanceLock) return; // second instance: the holder owns the data dir — do NOT sweep, do NOT spawn
+  // 票 10: sweep crash residue BEFORE the first host spawns — an orphaned
+  // AgentHost from a force-killed launch is a second SQLite writer, and its
+  // engine children are the orphan processes the ticket forbids. (The single-
+  // instance lock above guarantees any live host in the ledgers IS residue.)
+  try {
+    const swept = await sweepCrashResidue({
+      dataDir: resolveDataDir(),
+      log: (message) => {
+        try {
+          appendFileSync(path.join(resolveDataDir(), "agenthost.log"), `crash sweep: ${message}\n`);
+        } catch {
+          // evidence is best-effort
+        }
+      },
+    });
+    if (swept.host.checked > 0 || Object.values(swept.engines).some((outcome) => outcome.checked > 0)) {
+      console.log(`crash residue swept: host=${JSON.stringify(swept.host)} engines=${JSON.stringify(swept.engines)}`);
+    }
+  } catch {
+    // residue sweep must never block boot; the ledgers stay for next launch
+  }
   supervisor.start();
   createMainWindow();
 

@@ -192,6 +192,12 @@ export function createPiAdapter({ dataDir, moduleImporter }) {
 
   return {
     open,
+    /**
+     * 票 10 capability: pi persists its conversation as a session file and
+     * re-opens it (SessionManager.open / continueRecent — proven across host
+     * restarts since ticket 04), so a recorded pointer means 续跑 is real.
+     */
+    resumes: true,
     /** Load the pi module (and pay its import cost) before the first run. */
     warm() {
       void loadPi().catch(() => {

@@ -53,4 +53,35 @@ test("空输入不炸：把手在还没有任何工单时也是三段空列表",
   assert.deepEqual(sections.running, []);
   assert.deepEqual(sections.review, []);
   assert.deepEqual(sections.archive, []);
+  assert.deepEqual(sections.interrupted, []);
+});
+
+// ——— 票 10：把手多出一段「中断待处置」——
+
+/**
+ * @param {number} id @param {string} status @param {string | null} latestSessionStatus
+ */
+const shaped = (id, status, latestSessionStatus) =>
+  /** @type {any} */ ({ id, status, latestSessionStatus, title: `#${id}`, employeeName: "小程" });
+
+test("票 10 中断段：最近一轮 interrupted 的任务单独成段（open 与 running 两种形状都收）", () => {
+  const sections = groupTasksForHandle([
+    shaped(1, "open", "interrupted"), // 崩溃自愈落回待办的形状
+    shaped(2, "running", "interrupted"), // 续跑后崩溃、留在进行中的形状
+    shaped(3, "running", "paused"), // 09 的暂停徽标：不是中断
+    shaped(4, "running", "running"), // 真在跑
+    shaped(5, "failed", "interrupted"), // 已放弃归档：不再是中断待处置
+    shaped(6, "open", null), // 从没派过单
+  ]);
+  assert.deepEqual(sections.interrupted.map((t) => t.id), [1, 2]);
+  assert.deepEqual(sections.running.map((t) => t.id), [3, 4], "running+interrupted 从中断段进，不再重复出现在「进行中」");
+  assert.deepEqual(sections.archive.map((t) => t.id), [5]);
+});
+
+test("票 10 中断段：latestSessionStatus 缺失的旧数据不会误入中断段", () => {
+  const sections = groupTasksForHandle([
+    /** @type {any} */ ({ id: 1, status: "running", title: "#1", employeeName: "小程" }),
+  ]);
+  assert.deepEqual(sections.interrupted, []);
+  assert.deepEqual(sections.running.map((t) => t.id), [1]);
 });
