@@ -249,10 +249,21 @@ export async function bootAndShowOffice(ctx, add) {
 export async function ensureAllDaySchedule(contents) {
   const snapshot = /** @type {any} */ (await evalIn(contents, `window.cubicle.invoke('office.get')`));
   for (const company of snapshot?.companies ?? []) {
+    const companyId = Number(company.id);
     await evalIn(
       contents,
-      `(async () => await window.cubicle.invoke('schedule.set', { companyId: ${Number(company.id)}, workStart: "00:00", workEnd: "23:59:59", graceSeconds: 90 }))()`,
+      `(async () => await window.cubicle.invoke('schedule.set', { companyId: ${companyId}, workStart: "00:00", workEnd: "23:59:59", graceSeconds: 90 }))()`,
     );
+    // 班表写库后要等 duty runtime 的下一拍（tick 默认 1s）才把相位从 off 翻到
+    // on —— 派单闸门读的是落库相位，不等就是在和 1s tick 赛跑（票 12 e2e
+    // 实录：dispatch 比下一拍早 23ms，被 off_duty 闸拒了）。
+    const phaseOn = await waitFor(async () => {
+      const info = /** @type {any} */ (
+        await evalIn(contents, `(async () => await window.cubicle.invoke('schedule.get', { companyId: ${companyId} }))()`)
+      );
+      return info?.status?.phase === "on";
+    }, { timeoutMs: 5000 });
+    if (!phaseOn) out(`E2E WARN  schedule.set 后 5s 内相位没翻到 on（公司 ${companyId}）— 后续派单可能被 off_duty 拒`);
   }
 }
 

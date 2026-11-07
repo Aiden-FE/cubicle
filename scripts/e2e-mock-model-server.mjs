@@ -16,7 +16,13 @@ import { setTimeout as sleepFrames } from "node:timers/promises";
  * @property {string} [finish]
  * @property {number} [pauseMs]
  *
- * @typedef {(messages: any[], planCtx: { chunkPauseMs: number }) => { frames: ReplyFrame[], slow?: boolean }} ReplyPlanner
+ * @typedef {(messages: any[], planCtx: { chunkPauseMs: number }) => { frames: ReplyFrame[], slow?: boolean, usage?: { prompt_tokens: number, completion_tokens: number, total_tokens: number } | null }} ReplyPlanner
+ *
+ * `usage` (票 12): per-completion token accounting to demo the budget soft
+ * gate and the 「未计量」 path. undefined = the long-standing default
+ * (42/7/49 — older tickets unchanged); an object bills that request; null
+ * omits the usage frame entirely — pi then reports nothing, and the app
+ * must show 「未计量」, never a fake 0.
  *
  * @typedef {object} MockModelServer
  * @property {string} baseUrl
@@ -154,16 +160,21 @@ export async function startMockModelServer({ planReply, completionPrefix, chunkP
       res.write(frameToSse(completionId, frame));
       if (frame.pauseMs) await sleepFrames(frame.pauseMs);
     }
-    res.write(
-      `data: ${JSON.stringify({
-        id: completionId,
-        object: "chat.completion.chunk",
-        created: Math.floor(Date.now() / 1000),
-        model: MODEL_ID,
-        choices: [],
-        usage: { prompt_tokens: 42, completion_tokens: 7, total_tokens: 49 },
-      })}\n\n`,
-    );
+    // undefined keeps the historical default (tickets 04–09 unchanged); an
+    // object bills this completion; null = the provider never reported usage.
+    const usage = plan.usage === undefined ? { prompt_tokens: 42, completion_tokens: 7, total_tokens: 49 } : plan.usage;
+    if (usage) {
+      res.write(
+        `data: ${JSON.stringify({
+          id: completionId,
+          object: "chat.completion.chunk",
+          created: Math.floor(Date.now() / 1000),
+          model: MODEL_ID,
+          choices: [],
+          usage,
+        })}\n\n`,
+      );
+    }
     res.write("data: [DONE]\n\n");
     res.end();
   });
