@@ -11,7 +11,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 const INVOKE_TIMEOUT_MS = 8000;
 
-/** @type {Map<string, { resolve: (v: unknown) => void, reject: (e: Error) => void, timer: NodeJS.Timeout }>} */
+/** @type {Map<string, { resolve: (v: unknown) => void, reject: (e: { code: string, message: string }) => void, timer: NodeJS.Timeout }>} */
 const pending = new Map();
 /** @type {Map<string, Set<(event: any) => void>>} */
 const topicHandlers = new Map();

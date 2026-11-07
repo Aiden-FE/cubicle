@@ -962,6 +962,9 @@ function markInterruptedRuns(db) {
 /**
  * Ticket 05 adds task columns to a `run` table that older databases already
  * created (CREATE IF NOT EXISTS never touches them). Heal them in place.
+ * (SQLite cannot attach FK clauses via ALTER, so migrated databases carry
+ * these two columns without the REFERENCES the fresh schema declares — the
+ * only writers (service / run manager) always pass ids that exist.)
  *
  * @param {DatabaseSync} db
  */
