@@ -10,10 +10,10 @@ import { appError } from "../src/shared/apperror.mjs";
 
 /**
  * @param {string} name
- * @param {{ adapter?: any, dataDirPrefix?: string }} [options]
+ * @param {{ adapter?: any, dataDirPrefix?: string, drainTimeoutMs?: number, runTimeoutMs?: number }} [options]
  */
 async function withManager(name, options = {}) {
-  const { adapter, dataDirPrefix = `cubicle-runs-${name}-` } = options;
+  const { adapter, dataDirPrefix = `cubicle-runs-${name}-`, drainTimeoutMs, runTimeoutMs } = options;
   const dataDir = await mkdtemp(path.join(tmpdir(), dataDirPrefix));
   const store = openStore({ dataDir });
   const group = store.officeSnapshot().groups[0];
@@ -27,6 +27,8 @@ async function withManager(name, options = {}) {
     store,
     getAdapter: (engine) => (adapter && (adapter.forAll || engine === "pi") ? adapter : null),
     emit: (payload) => emitted.push(payload),
+    ...(drainTimeoutMs === undefined ? {} : { drainTimeoutMs }),
+    ...(runTimeoutMs === undefined ? {} : { runTimeoutMs }),
   });
   return {
     store,
@@ -182,7 +184,7 @@ test("start streams the engine events in order, closes the run as completed, and
     const started = ctx.manager.start({ employeeId: ctx.employeeId, text: "读一下 hello.txt" });
     assert.equal(started.run.status, "running");
     assert.equal(started.session.engine, "pi");
-    assert.ok(started.session.workspaceDir.includes(path.join("engines", "pi", `employee-${ctx.employeeId}`)));
+    assert.ok(started.session.workspaceDir.includes(path.join("workspaces", `employee-${ctx.employeeId}`)));
 
     await ctx.manager.whenQuiet();
 
@@ -262,6 +264,107 @@ test("abort stops the run, finishes it as aborted, and rejects when nothing is r
     );
     // the aborted run still belongs to the same reusable session
     assert.equal(started.session.id, /** @type {any} */ (ctx.store.employeeSessionById(started.session.id)).id);
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("cancel drains before releasing the employee: start is still employee_busy mid-drain", async () => {
+  const adapter = {
+    forAll: true,
+    /** @param {{ session: any, onEvent: (event: any) => void }} input */
+    async open({ session, onEvent }) {
+      return {
+        prompt: () => new Promise(() => {}),
+        abort: async () => {},
+        sessionFile: () => null,
+      };
+    },
+  };
+  const ctx = await withManager("cancel-drain", { adapter, drainTimeoutMs: 30 });
+  try {
+    ctx.manager.start({ employeeId: ctx.employeeId, text: "先跑着" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const cancelling = ctx.manager.abort({ employeeId: ctx.employeeId });
+    assert.equal(ctx.manager.activeRuns().length, 1, "abort 之后的 drain 窗口里，run 仍占着员工");
+    assert.throws(
+      () => ctx.manager.start({ employeeId: ctx.employeeId, text: "立刻重派" }),
+      (err) => /** @type {{ code?: string }} */ (err).code === "employee_busy",
+      "引擎收尾前不允许新 run 复用同一员工",
+    );
+    await cancelling;
+    assert.equal(ctx.manager.activeRuns().length, 0, "drain 结束后才释放员工");
+    assert.equal(/** @type {any} */ (ctx.store.latestRunForEmployee(ctx.employeeId)).status, "aborted");
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("换引擎后旧任务在自己的 workspace 跑，不跟着引擎目录漂移", async () => {
+  const stub = makeStub({ events: [AGENT_END] });
+  const ctx = await withManager("task-workspace", { adapter: stub });
+  try {
+    const group = ctx.store.officeSnapshot().groups[0];
+    const oldWorkspace = path.join(ctx.dataDir, "old-task-workspace");
+    const task = ctx.store.createTask({
+      groupId: group.id,
+      employeeId: ctx.employeeId,
+      workspaceDir: oldWorkspace,
+      title: "换引擎也要认旧工作区",
+      goal: "g",
+      playbook: "free",
+      acceptance: [],
+      baseHead: "0".repeat(40),
+    });
+    ctx.store.setEmployeeEngine({ employeeId: ctx.employeeId, engine: "codex" });
+    ctx.store.setEngineEnabled({ engine: "codex", enabled: true, manualOverride: true });
+
+    ctx.manager.start({ employeeId: ctx.employeeId, text: "干活", task: { id: task.id } });
+    await ctx.manager.whenQuiet();
+    assert.equal(stub.state.session.workspaceDir, oldWorkspace, "task 行记录的工作区优先于引擎的共享工作区");
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("BYOK 配置指纹变化会退役缓存 handle，下一轮重新 open", async () => {
+  const stub = /** @type {any} */ (makeStub({ events: [AGENT_END] }));
+  let fingerprint = "models-v1";
+  stub.configFingerprint = () => fingerprint;
+  const h = await withManager("config-fingerprint", { adapter: stub });
+  try {
+    h.manager.start({ employeeId: h.employeeId, text: "第一轮" });
+    await h.manager.whenQuiet();
+    assert.equal(stub.state.opens, 1);
+
+    fingerprint = "models-v2";
+    h.manager.start({ employeeId: h.employeeId, text: "第二轮" });
+    await h.manager.whenQuiet();
+    assert.equal(stub.state.opens, 2, "models.json 变化后不能复用旧引擎会话 handle");
+    assert.equal(h.store.latestRunForEmployee(h.employeeId)?.status, "completed");
+  } finally {
+    await h.dispose();
+  }
+});
+
+test("一个 run 永不收尾时由 watchdog 强制结束，whenQuiet 不会挂死", async () => {
+  const adapter = {
+    forAll: true,
+    async open() {
+      return {
+        prompt: () => new Promise(() => {}),
+        abort: async () => {},
+        sessionFile: () => null,
+      };
+    },
+  };
+  const ctx = await withManager("run-watchdog", { adapter, runTimeoutMs: 25, drainTimeoutMs: 20 });
+  try {
+    ctx.manager.start({ employeeId: ctx.employeeId, text: "卡死不回" });
+    await ctx.manager.whenQuiet();
+    assert.equal(ctx.manager.activeRuns().length, 0);
+    assert.equal(/** @type {any} */ (ctx.store.latestRunForEmployee(ctx.employeeId)).status, "aborted");
+    assert.ok(ctx.emitted.some((p) => p.event.type === "error" && p.event.code === "run_timeout"));
   } finally {
     await ctx.dispose();
   }
@@ -476,7 +579,7 @@ test("a task run opens a task session, marks the task running, and hands the run
       store: ctx.store,
       getAdapter: () => stub,
       emit: () => {},
-      onTaskRunFinished: (/** @type {any} */ call) => hookCalls.push(call),
+      onTaskRunFinished: (/** @type {any} */ call) => { hookCalls.push(call); },
     });
 
     const started = manager.start({ employeeId: ctx.employeeId, text: "干活", task: { id: task.id } });
@@ -528,7 +631,7 @@ test("下班落盘：pause 把 run 与 task_session 合上为 paused，任务保
       store: ctx.store,
       getAdapter: () => stub,
       emit: () => {},
-      onTaskRunFinished: (/** @type {any} */ call) => hookCalls.push(call),
+      onTaskRunFinished: (/** @type {any} */ call) => { hookCalls.push(call); },
     });
 
     const started = manager.start({ employeeId: ctx.employeeId, text: "慢慢干", task: { id: task.id } });
@@ -877,7 +980,7 @@ test("预算软闸 100%：发 budget_exhausted 后自动 pause — 复用 09 的
       store: ctx.store,
       getAdapter: () => stub,
       emit: (payload) => ctx.emitted.push(payload),
-      onTaskRunFinished: (/** @type {any} */ call) => hookCalls.push(call),
+      onTaskRunFinished: (/** @type {any} */ call) => { hookCalls.push(call); },
     });
 
     const started = manager.start({ employeeId: ctx.employeeId, text: "烧钱", task: { id: task.id } });

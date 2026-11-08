@@ -27,11 +27,12 @@
  * instructions), and the policy hook is injected through CODEX_HOME config.
  */
 import { spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { appError } from "../../../shared/apperror.mjs";
+import { decideToolAccess } from "../policy.mjs";
 import { startPolicyBridge } from "./bridge.mjs";
 import { createCodexNormalizer } from "./normalize.mjs";
 import { createPidLedger, engineLedgerFile } from "../child-ledger.mjs";
@@ -43,6 +44,9 @@ const PROVIDER_KEY = "cubicle";
 
 /** How much codex stderr is kept to explain a run that died silently. */
 const STDERR_TAIL_CHARS = 2000;
+
+/** A single JSONL line above this is diagnostic noise, not a payload. */
+const MAX_LINE_CHARS = 8 * 1024 * 1024;
 
 /**
  * @typedef {import("../events.mjs").NormalizedEvent} NormalizedEvent
@@ -70,8 +74,8 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
   /** the settled bridge, kept as a plain value so runOne spawns synchronously */
   /** @type {{ url: string, token: string } | null} */
   let bridgeInfo = null;
-  /** threadId → the live session's onEvent (verdicts route back to their run) */
-  /** @type {Map<string, (event: NormalizedEvent) => void>} */
+  /** threadId → the live session's event sink + workspace (verdicts/decisions route back) */
+  /** @type {Map<string, { onEvent: (event: NormalizedEvent) => void, workspaceDir: string }>} */
   const streamsByThread = new Map();
   /** live child processes by employeeSessionId, for abort/shutdown */
   /** @type {Map<number, any>} */
@@ -82,17 +86,30 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
 
   function bridge() {
     if (!bridgePromise) {
-      bridgePromise = startPolicyBridge((verdict) => {
-        if (verdict.verdict !== "deny") return; // allow verdicts stay off the stream
-        const onEvent = streamsByThread.get(String(verdict.session_id));
-        if (!onEvent) return; // foreign or finished session — never invent events
-        onEvent({
-          type: "policy_blocked",
-          toolCallId: String(verdict.tool_use_id ?? "unknown"),
-          toolName: String(verdict.tool_name ?? "unknown"),
-          rule: String(verdict.rule ?? "policy"),
-          reason: String(verdict.reason ?? "这次操作被策略拦下"),
-        });
+      bridgePromise = startPolicyBridge({
+        onVerdict: (verdict) => {
+          if (verdict.verdict !== "deny") return; // allow verdicts stay off the stream
+          const entry = streamsByThread.get(String(verdict.session_id));
+          if (!entry) return; // foreign or finished session — never invent events
+          entry.onEvent({
+            type: "policy_blocked",
+            toolCallId: String(verdict.tool_use_id ?? "unknown"),
+            toolName: String(verdict.tool_name ?? "unknown"),
+            rule: String(verdict.rule ?? "policy"),
+            reason: String(verdict.reason ?? "这次操作被策略拦下"),
+          });
+        },
+        decide: (question) => {
+          // The rule table lives here, not in the engine directory the agent
+          // can edit. Unknown session/workspace = deny (fail closed).
+          const entry = streamsByThread.get(String(question.session_id));
+          if (!entry) return { verdict: "deny", rule: "unknown-session", reason: "策略无法判定：未知引擎会话" };
+          return decideToolAccess({
+            toolName: question.tool_name,
+            args: question.tool_input,
+            workspaceDir: entry.workspaceDir,
+          });
+        },
       })
         .then((b) => {
           bridgeInfo = { url: b.url, token: b.token };
@@ -115,10 +132,10 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
   function ensureHookInstall() {
     const hooksDir = path.join(engineRoot, "hooks");
     mkdirSync(hooksDir, { recursive: true });
-    // Copy the hook AND the live policy table: one rule source, so the
-    // CLI host cannot drift from the SDK host's decideToolAccess.
+    // Only the thin client is copied. The rule table stays in the host and is
+    // asked over /decide — copying policy.mjs here would let the agent edit
+    // its own gate.
     copyFileSync(path.join(here, "policy-hook.mjs"), path.join(hooksDir, "policy-hook.mjs"));
-    copyFileSync(path.join(here, "..", "policy.mjs"), path.join(hooksDir, "policy.mjs"));
   }
 
   /**
@@ -159,6 +176,13 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
       `env_key = "CUBICLE_CODEX_KEY"`,
       `wire_api = "responses"`,
       `requires_openai_auth = false`,
+      "",
+      // The BYOK key is codex's own auth (env_key). The shell tool children
+      // must not inherit it: the employee could print its environment into a
+      // command artifact. Hooks keep the bridge vars (they need them).
+      "[shell_environment_policy]",
+      `inherit = "all"`,
+      `exclude = ["CUBICLE_CODEX_KEY"]`,
       "",
       "[hooks]",
       "[[hooks.PreToolUse]]",
@@ -229,9 +253,12 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
       "-C",
       session.workspaceDir,
     ];
+    // A prompt that starts with "-" would be parsed as a CLI option. A leading
+    // space keeps it positional and is invisible to the model.
+    const promptArg = text.startsWith("-") ? ` ${text}` : text;
     const args = threadId
-      ? ["exec", ...launchFlags, "resume", threadId, text]
-      : ["exec", ...launchFlags, text];
+      ? ["exec", ...launchFlags, "resume", threadId, promptArg]
+      : ["exec", ...launchFlags, promptArg];
 
     const env = {
       ...process.env,
@@ -253,7 +280,12 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
     }
     liveChildren.set(session.id, child);
     if (typeof child.pid === "number") {
-      ledger.record({ pid: child.pid, name: ledgerName, startedAt: new Date().toISOString() });
+      ledger.record({
+        pid: child.pid,
+        name: ledgerName,
+        startedAt: new Date().toISOString(),
+        commandLineHint: session.workspaceDir,
+      });
     }
 
     return await new Promise((resolve, reject) => {
@@ -277,9 +309,25 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
         stderrTail = `${stderrTail}${String(chunk)}`.slice(-STDERR_TAIL_CHARS);
       };
 
+      /** Only clean up entries that still belong to THIS child. */
+      const cleanup = () => {
+        if (liveChildren.get(session.id) === child) liveChildren.delete(session.id);
+        killedByUs.delete(child);
+        if (typeof child.pid === "number") ledger.forget(child.pid);
+        if (context.threadId && streamsByThread.get(context.threadId)?.onEvent === onEvent) {
+          streamsByThread.delete(context.threadId);
+        }
+      };
+
       /** @param {string} chunk */
       const onStdout = (chunk) => {
         stdoutTail += String(chunk);
+        // A command that prints a huge line without ever ending it must not
+        // accumulate unboundedly (`+=` is quadratic on a growing string).
+        if (stdoutTail.length > MAX_LINE_CHARS && !stdoutTail.includes("\n")) {
+          stdoutTail = "";
+          return;
+        }
         const lines = stdoutTail.split(/\r?\n/);
         stdoutTail = lines.pop() ?? "";
         for (const line of lines) {
@@ -290,7 +338,7 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
             try {
               const record = JSON.parse(line.trim());
               if (record?.type === "thread.started" && typeof record.thread_id === "string") {
-                streamsByThread.set(record.thread_id, onEvent);
+                streamsByThread.set(record.thread_id, { onEvent, workspaceDir: session.workspaceDir });
                 context.threadId = record.thread_id;
               }
             } catch {
@@ -308,35 +356,34 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
       const finish = (/** @type {number | null} */ exitCode) => {
         if (settled) return;
         settled = true;
-        if (exitCode !== 0 && emitted === 0 && !killedByUs.has(child)) {
-          // codex died before it said anything (a rejected config.toml, a bad
-          // model provider, a missing binary): the run must say why instead of
-          // settling quietly as 'unknown'.
+        const killed = killedByUs.has(child);
+        const cleanExit = killed || exitCode === 0;
+        if (!cleanExit) {
+          // A non-zero exit is a failed run even if some turns already
+          // completed: a partial success must not land as 'completed'.
           emit({
             type: "error",
             code: "engine_exec_failed",
-            message: `codex exec 退出码 ${exitCode ?? "?"}，且没有产生任何事件：${stderrTail.trim().slice(0, 400) || "（无 stderr 输出）"}`,
+            message: `codex exec 退出码 ${exitCode ?? "?"}：${stderrTail.trim().slice(0, 400) || "（无 stderr 输出）"}`,
           });
         }
-        for (const event of normalizer.end()) {
+        for (const event of normalizer.end(cleanExit)) {
           if (event.type === "session_start") continue; // folded (see above)
           emit(event);
         }
-        liveChildren.delete(session.id);
-        killedByUs.delete(child);
-        if (typeof child.pid === "number") ledger.forget(child.pid);
-        if (context.threadId) streamsByThread.delete(context.threadId);
+        cleanup();
         resolve();
       };
 
+      child.stdout?.setEncoding?.("utf8");
+      child.stderr?.setEncoding?.("utf8");
       child.stdout?.on("data", onStdout);
       child.stderr?.on("data", noteStderr);
       child.on("close", finish);
       child.on("error", (/** @type {any} */ err) => {
         if (settled) return;
         settled = true;
-        liveChildren.delete(session.id);
-        if (typeof child.pid === "number") ledger.forget(child.pid);
+        cleanup();
         reject(appError("engine_spawn_failed", `codex 进程故障：${err?.message ?? err}`));
       });
     });
@@ -359,20 +406,59 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
     };
     // A resumed thread is known before its first line lands: map it now, so a
     // hook verdict can never arrive for a session this run considers foreign.
-    if (context.threadId) streamsByThread.set(context.threadId, onEvent);
+    if (context.threadId) {
+      streamsByThread.set(context.threadId, { onEvent, workspaceDir: session.workspaceDir });
+    }
 
     return {
       async prompt(text) {
+        // Re-copy the gate immediately before the engine runs: a model that
+        // edited hooks/ or config.toml between prompts gets the host's copy
+        // back. (The real boundary is still OS-level; this closes the cheap
+        // self-uninstall path.)
+        writeEngineConfig();
+        ensureHookInstall();
         writePersonaFile(session, employee);
         await runOne({ session, onEvent, text, threadId: context.threadId, context });
       },
       async abort() {
-        killChild(liveChildren.get(session.id));
+        const child = liveChildren.get(session.id);
+        if (!child) return;
+        // Resolve only after the child is really closed. Returning when
+        // taskkill is merely launched is what allowed a late agent_end to be
+        // attributed to the NEXT run after a cancel + immediate redispatch.
+        /** @type {Promise<void>} */
+        const closed = new Promise((resolve) => {
+          if (typeof child.exitCode === "number" || child.signalCode) {
+            resolve(undefined);
+            return;
+          }
+          if (typeof child.once === "function") child.once("close", () => resolve(undefined));
+          else resolve(undefined);
+        });
+        killChild(child);
+        await Promise.race([closed, new Promise((r) => setTimeout(r, 3000))]);
       },
       sessionFile() {
         return context.threadId ? `thread:${context.threadId}` : null;
       },
     };
+  }
+
+  /**
+   * A cheap fingerprint of the BYOK config. Live sessions are reused across
+   * conversations; without this, editing models.json's model/base_url never
+   * reaches the already-open engine session.
+   *
+   * @returns {string | null}
+   */
+  function configFingerprint() {
+    try {
+      const stat = statSync(path.join(engineRoot, "models.json"));
+      return `${stat.mtimeMs}:${stat.size}`;
+    } catch {
+      return null;
+    }
   }
 
   /** @param {any} child */
@@ -415,6 +501,7 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
 
   return {
     open,
+    configFingerprint,
     bridgeEnv,
     /** 票 10 capability: codex keeps its thread under CODEX_HOME and resumes
      *  it via `codex exec resume <thread_id>` (proven end-to-end in ticket 11). */

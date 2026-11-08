@@ -21,6 +21,10 @@ export interface CubicleBridge {
   subscribe(topic: string, handler: (event: EventEnvelope) => void): () => void;
   /** 票 13: 关于页 metadata（main 的业务，不走 AgentHost 信封总线）。 */
   appInfo(): Promise<AppInfo>;
+  /** 打开员工工作区（main 从 employeeId 推路径，渲染进程不传路径）。 */
+  openWorkspace(employeeId: number): Promise<string>;
+  /** 打开引擎 BYOK 配置目录（main 从 dataDir + engine 推路径）。 */
+  openEngineDir(engine: string): Promise<string>;
 }
 
 /** Main-process app metadata for the About overlay (ticket 13). */

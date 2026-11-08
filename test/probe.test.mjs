@@ -246,6 +246,30 @@ test("the runner drives two probe runs through the run-manager seam and records 
   }
 });
 
+test("a timed-out probe aborts its run instead of leaving the probe employee busy forever", async () => {
+  const { store, dir } = tempStore();
+  try {
+    let aborted = 0;
+    const runner = createProbeRunner({
+      store,
+      runTimeoutMs: 30,
+      startRun: () => ({ runId: Math.floor(Math.random() * 1e6) }),
+      subscribeRunEvents: () => () => {},
+      abortRun: () => {
+        aborted += 1;
+      },
+    });
+    store.setEngineProbeResult({ engine: "codex", status: "running" });
+    const result = await runner.startProbe("codex");
+    assert.equal(result.status, "failed");
+    assert.equal(aborted, 2, "两个探针轮次都在超时后被 abort");
+    assert.equal(/** @type {any} */ (store.engineState("codex")).probeStatus, "failed");
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a failing probe keeps the engine unadmitted but records everything", async () => {
   const { store, dir } = tempStore();
   try {

@@ -197,6 +197,12 @@ async function phaseShell(ctx) {
   await waitFor(async () => String(await evalIn(contents, `document.querySelector('[data-testid="task-playbook"]')?.textContent ?? ''`)).includes("加功能"), { timeoutMs: 3000 });
   await setSelect(contents, '[data-testid="task-employee"]', String(programmerId));
   await click(contents, '[data-testid="task-dispatch"]');
+  // task.create is async now (git is async); the direct list probe must wait
+  // for the row to land instead of racing the create.
+  await waitFor(async () => {
+    const list = /** @type {any} */ (await evalIn(contents, `window.cubicle.invoke('task.list', { groupId: ${groupIdA} })`));
+    return (list?.tasks ?? []).length > 0;
+  }, { timeoutMs: 5000 });
   const fastList = /** @type {any} */ (await evalIn(contents, `window.cubicle.invoke('task.list', { groupId: ${groupIdA} })`));
   const fastTaskId = Number((fastList?.tasks ?? [])[0]?.id ?? 0);
   add("快活工单已派出", fastTaskId > 0, `taskId=${fastTaskId}`);
@@ -217,6 +223,10 @@ async function phaseShell(ctx) {
   await waitFor(async () => String(await evalIn(contents, `document.querySelector('[data-testid="task-playbook"]')?.textContent ?? ''`)).includes("写文档"), { timeoutMs: 3000 });
   await setSelect(contents, '[data-testid="task-employee"]', String(programmerId));
   await click(contents, '[data-testid="task-dispatch"]');
+  await waitFor(async () => {
+    const list = /** @type {any} */ (await evalIn(contents, `window.cubicle.invoke('task.list', { groupId: ${groupIdA} })`));
+    return (list?.tasks ?? []).some((/** @type {any} */ t) => t.title === SLOW_SENTENCE);
+  }, { timeoutMs: 5000 });
   const slowList = /** @type {any} */ (await evalIn(contents, `window.cubicle.invoke('task.list', { groupId: ${groupIdA} })`));
   const slowTask = (slowList?.tasks ?? []).find((/** @type {any} */ t) => t.title === SLOW_SENTENCE);
   const slowTaskId = Number(slowTask?.id ?? 0);

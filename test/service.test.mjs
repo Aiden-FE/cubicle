@@ -212,6 +212,11 @@ test("unknown methods answer with an unknown_method error reply", async () => {
     assert.equal(reply.ok, false);
     assert.equal(reply.error?.code, "unknown_method");
     assert.equal(reply.id, "r5");
+
+    // A method name is data: never resolve it through Object.prototype.
+    const inherited = service.handle(createInvoke("r5b", "toString", {}));
+    assert.equal(inherited.reply.ok, false);
+    assert.equal(inherited.reply.error?.code, "unknown_method");
   } finally {
     await dispose();
   }
@@ -538,7 +543,7 @@ test("engine.list shows the 已登录 badge for pi and 未装 + install guide fo
 test("task.create records the start HEAD and keeps the boss's edited goal and acceptance", async () => {
   const { service, store, groupId, employeeId, dispose } = await withTaskService("create");
   try {
-    const { reply, events } = service.handle(
+    const { reply, events } = await service.handleEnvelope(
       createInvoke("k2", "task.create", {
         employeeId,
         text: "给 greet.txt 加一行欢迎语",
@@ -569,7 +574,7 @@ test("task.create says the workspace is unusable when it is not a git repository
     headScript: { ok: false, code: "not_a_git_workspace", message: "工作区不是 git 仓库：无法记录起点 HEAD，工单不可用。" },
   });
   try {
-    const { reply } = service.handle(
+    const { reply } = await service.handleEnvelope(
       createInvoke("k4", "task.create", { employeeId, text: "加个欢迎语", goal: "加个欢迎语", acceptance: [] }),
     );
     assert.equal(reply.ok, false);
@@ -585,7 +590,7 @@ test("task.create says the workspace is unusable when it is not a git repository
 test("with the real git door, a never-created workspace answers not_a_git_workspace (not a crash)", async () => {
   const { service, employeeId, dispose } = await withTaskService("nogit-real", { useRealGit: true });
   try {
-    const { reply } = service.handle(
+    const { reply } = await service.handleEnvelope(
       createInvoke("k4b", "task.create", { employeeId, text: "加个欢迎语", goal: "加个欢迎语", acceptance: [] }),
     );
     assert.equal(reply.ok, false);
@@ -599,7 +604,7 @@ test("task.dispatch runs the playbook prompt and the four artifacts arrive when 
   const { service, runManager, employeeId, dispose } = await withTaskService("dispatch");
   try {
     const created = /** @type {any} */ (
-      service.handle(createInvoke("k5", "task.create", { employeeId, text: "写一份部署文档", goal: "写一份部署文档", acceptance: ["可照做"] })).reply.payload
+      (await service.handleEnvelope(createInvoke("k5", "task.create", { employeeId, text: "写一份部署文档", goal: "写一份部署文档", acceptance: ["可照做"] }))).reply.payload
     ).task;
 
     const dispatched = service.handle(createInvoke("k6", "task.dispatch", { taskId: created.id }));
@@ -629,7 +634,7 @@ test("task.dispatch rejects unknown tasks and a task that is already running", a
     assert.equal(unknown.reply.error?.code, "unknown_task");
 
     const created = /** @type {any} */ (
-      service.handle(createInvoke("k9", "task.create", { employeeId, text: "加功能", goal: "加功能", acceptance: [] })).reply.payload
+      (await service.handleEnvelope(createInvoke("k9", "task.create", { employeeId, text: "加功能", goal: "加功能", acceptance: [] }))).reply.payload
     ).task;
     service.handle(createInvoke("k10", "task.dispatch", { taskId: created.id }));
     const busy = service.handle(createInvoke("k11", "task.dispatch", { taskId: created.id }));
@@ -663,7 +668,7 @@ test("task.gitAudit answers with every git command the app ran — all read-only
 async function withFinishedTask(name) {
   const ctx = await withTaskService(name);
   const created = /** @type {any} */ (
-    serviceTaskCreate(ctx.service, ctx.employeeId, "给 greet.txt 加一行欢迎语").task
+    (await serviceTaskCreate(ctx.service, ctx.employeeId, "给 greet.txt 加一行欢迎语")).task
   );
   ctx.service.handle(createInvoke(`${name}-d`, "task.dispatch", { taskId: created.id }));
   await ctx.runManager.whenQuiet();
@@ -671,8 +676,11 @@ async function withFinishedTask(name) {
 }
 
 /** @param {any} service @param {number} employeeId @param {string} text */
-function serviceTaskCreate(service, employeeId, text) {
-  const reply = service.handle(createInvoke(`c-${Math.random()}`, "task.create", { employeeId, text, goal: text, acceptance: [] })).reply;
+async function serviceTaskCreate(service, employeeId, text) {
+  const opened = await service.handleEnvelope(
+    createInvoke(`c-${Math.random()}`, "task.create", { employeeId, text, goal: text, acceptance: [] }),
+  );
+  const reply = opened.reply;
   if (!reply.ok) throw new Error(`task.create failed: ${JSON.stringify(reply.error)}`);
   return /** @type {any} */ (reply.payload);
 }
@@ -699,7 +707,7 @@ test("a settled task waits at 待验收 — not 完成 — until the boss accept
 test("验收 cannot be skipped: 待办 straight to 完成 is refused by the host", async () => {
   const { service, employeeId, dispose } = await withTaskService("accept-skip");
   try {
-    const created = /** @type {any} */ (serviceTaskCreate(service, employeeId, "加个欢迎语").task);
+    const created = /** @type {any} */ ((await serviceTaskCreate(service, employeeId, "加个欢迎语")).task);
     const jumped = service.handle(createInvoke("s1", "task.accept", { taskId: created.id }));
     assert.equal(jumped.reply.ok, false);
     assert.equal(jumped.reply.error?.code, "invalid_transition");
@@ -734,6 +742,8 @@ test("打回 continues the SAME task: iteration 2, same employee session, reject
     assert.deepEqual(detail.sessions.map((/** @type {any} */ s) => s.iteration), [1, 2], "迭代次数可见");
     assert.equal(detail.sessions[0].employeeSessionId, detail.sessions[1].employeeSessionId);
     assert.equal(detail.artifacts.length, 8, "每个迭代各留一套四件套（第 2 轮的 diff 仍相对任务起点）");
+    assert.equal(detail.latestArtifacts.length, 4, "决策面默认只读最近一轮的四件套");
+    assert.ok(detail.latestArtifacts.every((/** @type {any} */ artifact) => artifact.runId === run.id));
     assert.equal(/** @type {any} */ (detail.artifacts[4]).runId, run.id);
 
     // a second 打回 of the same review task is legal (iterations are a loop),
@@ -751,7 +761,7 @@ test("打回 continues the SAME task: iteration 2, same employee session, reject
 test("取消 terminates a running task and lands it at 失败 (票 06 验收 4)", async () => {
   const { service, runManager, employeeId, store, dispose } = await withTaskService("cancel-fail", { hold: true });
   try {
-    const created = /** @type {any} */ (serviceTaskCreate(service, employeeId, "写一份部署文档").task);
+    const created = /** @type {any} */ ((await serviceTaskCreate(service, employeeId, "写一份部署文档")).task);
     service.handle(createInvoke("x1", "task.dispatch", { taskId: created.id }));
     assert.equal(/** @type {any} */ (store.taskById(created.id)).status, "running");
 
@@ -816,7 +826,7 @@ test("office.get answers with per-company active counts (进行中/待验收) in
     assert.equal(other.ok, true);
 
     // dispatch one task so company A shows a live 进行中 (stub settles → review)
-    const created = /** @type {any} */ (serviceTaskCreate(service, employeeId, "加个欢迎语").task);
+    const created = /** @type {any} */ ((await serviceTaskCreate(service, employeeId, "加个欢迎语")).task);
     const dispatched = service.handle(createInvoke("o2", "task.dispatch", { taskId: created.id }));
     assert.equal(dispatched.reply.ok, true);
     const runningSnapshot = /** @type {any} */ (service.handle(createInvoke("o3", "office.get", {})).reply.payload);
@@ -834,7 +844,7 @@ test("office.get answers with per-company active counts (进行中/待验收) in
 test("task.list answers company-scoped when asked with companyId (右把手数据源)", async () => {
   const { service, store, groupId, employeeId, dispose } = await withTaskService("task-list-company");
   try {
-    const created = /** @type {any} */ (serviceTaskCreate(service, employeeId, "A 公司的工单").task);
+    const created = /** @type {any} */ ((await serviceTaskCreate(service, employeeId, "A 公司的工单")).task);
     const company = /** @type {any} */ (service.handle(createInvoke("c1", "company.create", { name: "远岸软件" })).reply.payload);
     const group = /** @type {any} */ (service.handle(createInvoke("c2", "projectGroup.create", { companyId: company.id, name: "看板组" })).reply.payload);
     const roles = /** @type {any} */ (service.handle(createInvoke("c3", "role.list", {})).reply.payload);
@@ -842,7 +852,7 @@ test("task.list answers company-scoped when asked with companyId (右把手数�
       service.handle(createInvoke("c4", "employee.hire", { deskId: group.desks[0].id, roleId: roles.roles[0].id, name: "小岸" })).reply.payload
     );
     const bTask = /** @type {any} */ (
-      serviceTaskCreate(service, hired.employee.id, "B 公司的工单").task
+      (await serviceTaskCreate(service, hired.employee.id, "B 公司的工单")).task
     );
 
     const companyAId = String(store.officeSnapshot().companies[0].id);
@@ -878,7 +888,7 @@ test("office.get is a pure read: repeat calls answer identically and emit nothin
 test("switching company only moves the view: other companies' tasks and counts stay put", async () => {
   const { service, runManager, store, employeeId, dispose } = await withTaskService("switch-view");
   try {
-    const created = /** @type {any} */ (serviceTaskCreate(service, employeeId, "A 公司的工单").task);
+    const created = /** @type {any} */ ((await serviceTaskCreate(service, employeeId, "A 公司的工单")).task);
     service.handle(createInvoke("v1", "task.dispatch", { taskId: created.id }));
 
     const companyB = /** @type {any} */ (service.handle(createInvoke("v2", "company.create", { name: "远岸软件" })).reply.payload);
@@ -1006,9 +1016,9 @@ async function withDutyService(name, { hold = false } = {}) {
   };
 }
 
-/** @param {{ service: ReturnType<typeof createService>, employeeId: number }} ctx @returns {any} */
-function createOpenTask(ctx) {
-  const opened = ctx.service.handle(
+/** @param {{ service: ReturnType<typeof createService>, employeeId: number }} ctx @returns {Promise<any>} */
+async function createOpenTask(ctx) {
+  const opened = await ctx.service.handleEnvelope(
     createInvoke(`open-${Math.random().toString(36).slice(2)}`, "task.create", {
       employeeId: ctx.employeeId,
       text: "写一份部署文档",
@@ -1191,7 +1201,7 @@ test("host.awaitQuiet（退出「等完成」）：run 收尾才回答", async (
 test("task.list 行携带 latestSessionStatus：下班暂停后「进行中」工单挂暂停徽标的数据源", async () => {
   const ctx = await withDutyService("badge-data", { hold: true });
   try {
-    const task = createOpenTask(ctx);
+    const task = await createOpenTask(ctx);
     ctx.service.handle(createInvoke("b1", "task.dispatch", { taskId: task.id }));
     const paused = await ctx.service.handleEnvelope(createInvoke("b4", "host.pauseAll", {}));
     assert.equal(paused.reply.ok, true, "host.pauseAll 走异步门面");
@@ -1328,7 +1338,7 @@ test("employee.setEngine requires admission and rewrites the frozen snapshot", a
 test("task.create 把角色 cost 的预算抄进任务行（detail 带 budget 与 measured）", async () => {
   const { service, employeeId, dispose } = await withTaskService("t12-budget-create");
   try {
-    const created = /** @type {any} */ (serviceTaskCreate(service, employeeId, "加个欢迎语").task);
+    const created = /** @type {any} */ ((await serviceTaskCreate(service, employeeId, "加个欢迎语")).task);
     assert.equal(created.tokenBudget, 500_000, "预设程序员角色 cost.tokenBudgetPerTask = 50 万");
 
     const detail = /** @type {any} */ (service.handle(createInvoke("d2", "task.detail", { taskId: created.id })).reply.payload);
@@ -1342,7 +1352,7 @@ test("task.create 把角色 cost 的预算抄进任务行（detail 带 budget �
 test("task.detail 带最近一轮失败的人话原因（store 折叠，视图不重新推导）", async () => {
   const { service, store, employeeId, dispose } = await withTaskService("t12-failure-detail");
   try {
-    const created = /** @type {any} */ (serviceTaskCreate(service, employeeId, "会挂的活").task);
+    const created = /** @type {any} */ ((await serviceTaskCreate(service, employeeId, "会挂的活")).task);
     // 直接走 store 落一条失败会话（run-manager 写失败事实的门在 run-manager seam 钉）
     store.setTaskStatus(created.id, "running");
     const session = store.getOrCreateEmployeeSession({ employeeId, engine: "pi", agentDir: "a", sessionsDir: "s", workspaceDir: "w" });
@@ -1372,7 +1382,7 @@ test("task.detail 带最近一轮失败的人话原因（store 折叠，视图�
 test("task.extendBudget：预算到顶（paused）后一键 +50% — 落库 1.5× 并当场续跑", async () => {
   const ctx = await withDutyService("t12-extend", { hold: true });
   try {
-    const task = createOpenTask(ctx);
+    const task = await createOpenTask(ctx);
     ctx.service.handle(createInvoke("x1", "task.dispatch", { taskId: task.id }));
     const paused = await ctx.service.handleEnvelope(createInvoke("x2", "host.pauseAll", {}));
     assert.equal(paused.reply.ok, true);
@@ -1398,7 +1408,7 @@ test("task.extendBudget：预算到顶（paused）后一键 +50% — 落库 1.5�
 test("task.extendBudget：下班中的公司只涨预算不续跑（可懂的 resumed=false）", async () => {
   const ctx = await withDutyService("t12-extend-offduty", { hold: true });
   try {
-    const task = createOpenTask(ctx);
+    const task = await createOpenTask(ctx);
     ctx.service.handle(createInvoke("y1", "task.dispatch", { taskId: task.id }));
     await ctx.service.handleEnvelope(createInvoke("y2", "host.pauseAll", {}));
     ctx.service.handle(createInvoke("y3", "duty.override", { companyId: ctx.companyId, mode: "off" }));
@@ -1417,7 +1427,7 @@ test("task.extendBudget：下班中的公司只涨预算不续跑（可懂的 re
 test("task.extendBudget：员工还在跑时只涨预算（employee_busy 可懂），待办/未知工单被拒", async () => {
   const ctx = await withDutyService("t12-extend-busy", { hold: true });
   try {
-    const task = createOpenTask(ctx);
+    const task = await createOpenTask(ctx);
     ctx.service.handle(createInvoke("z1", "task.dispatch", { taskId: task.id })); // 在跑（hold）
 
     const extended = /** @type {any} */ (service_handle(ctx, "task.extendBudget", { taskId: task.id }, "z2"));
@@ -1426,7 +1436,7 @@ test("task.extendBudget：员工还在跑时只涨预算（employee_busy 可懂�
     assert.equal(extended.payload.resumed, false);
     assert.match(extended.payload.resumeNote, /还在跑/);
 
-    const open = createOpenTask(ctx);
+    const open = await createOpenTask(ctx);
     const refused = ctx.service.handle(createInvoke("z3", "task.extendBudget", { taskId: open.id }));
     assert.equal(refused.reply.error?.code, "invalid_transition", "待办还没开工，谈不上预算到顶");
     const unknown = ctx.service.handle(createInvoke("z4", "task.extendBudget", { taskId: 987654 }));
@@ -1443,7 +1453,7 @@ test("task.extendBudget：员工还在跑时只涨预算（employee_busy 可懂�
 test("office.get 随快照带员工级与公司级 token 聚合（未计量 = measured:false，不是 0）", async () => {
   const ctx = await withDutyService("t12-aggregates", {});
   try {
-    const task = createOpenTask(ctx);
+    const task = await createOpenTask(ctx);
     ctx.service.handle(createInvoke("g1", "task.dispatch", { taskId: task.id }));
     await ctx.runManager.whenQuiet();
 

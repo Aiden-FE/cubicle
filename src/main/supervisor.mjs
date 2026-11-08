@@ -36,6 +36,7 @@ const hostEntry = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", 
  * @param {(fn: () => void, ms: number) => unknown} [options.setTimeoutFn]
  * @param {(id: unknown) => void} [options.clearTimeoutFn]
  * @param {(message: unknown) => void} [options.onMessage] passthrough for host traffic
+ * @param {() => void} [options.onExit] host process died (crash or deliberate stop): reject pending calls
  */
 export function createHostSupervisor({
   fork,
@@ -46,11 +47,14 @@ export function createHostSupervisor({
   setTimeoutFn = (fn, ms) => setTimeout(fn, ms),
   clearTimeoutFn = (id) => clearTimeout(/** @type {NodeJS.Timeout} */ (id)),
   onMessage,
+  onExit,
 }) {
   /** @type {HostState} */
   let state = "idle";
   /** @type {ForkedChild | null} */
   let child = null;
+  /** consecutive crashes without a healthy message; drives backoff */
+  let restartAttempt = 0;
   /** @type {unknown} */
   let restartTimer = null;
   /** @type {unknown} */
@@ -80,6 +84,9 @@ export function createHostSupervisor({
         clearTimeoutFn(startupTimer);
         startupTimer = null;
       }
+      // A host that answered is healthy: the next crash starts the backoff at
+      // the base delay again.
+      restartAttempt = 0;
       if (state !== "online") {
         state = "online";
         notify();
@@ -96,13 +103,26 @@ export function createHostSupervisor({
         clearTimeoutFn(shutdownTimer);
         shutdownTimer = null;
       }
+      // Pending main→host invokes belong to a process that no longer exists.
+      // Without this, 「等完成」 waits out its 30-minute timeout while the
+      // window looks frozen (the exit dialog has already been answered).
+      try {
+        onExit?.();
+      } catch {
+        // a broken listener must not stop the restart path
+      }
       if (state === "stopped") return;
       state = "offline";
       notify();
+      // Exponential backoff (1s → 2s → … → 30s). The old fixed 1s loop turned
+      // a host that cannot open its DB into 60 spawns/minute plus 60 ledger
+      // lines that the NEXT boot then has to sweep serially.
+      const delay = Math.min(restartDelayMs * 2 ** Math.min(restartAttempt, 5), 30_000);
+      restartAttempt += 1;
       restartTimer = setTimeoutFn(() => {
         restartTimer = null;
         spawn();
-      }, restartDelayMs);
+      }, delay);
     });
     notify();
   }
@@ -122,8 +142,16 @@ export function createHostSupervisor({
       spawn();
     },
 
+    /**
+     * Stop the host and resolve once it is gone (graceful ack or kill).
+     * Awaitable so `will-quit` can actually delay the app exit: a synchronous
+     * stop() returned immediately, leaving the 600ms grace timer no chance to
+     * run and the host's shutdown handshake unawaited.
+     *
+     * @returns {Promise<void>}
+     */
     stop() {
-      if (state === "stopped") return;
+      if (state === "stopped") return Promise.resolve();
       state = "stopped";
       if (restartTimer !== null) {
         clearTimeoutFn(restartTimer);
@@ -133,9 +161,21 @@ export function createHostSupervisor({
         clearTimeoutFn(startupTimer);
         startupTimer = null;
       }
-      if (child) {
-        const dying = child;
-        child = null;
+      if (!child) return Promise.resolve();
+      const dying = child;
+      child = null;
+      return new Promise((resolve) => {
+        let settled = false;
+        const done = () => {
+          if (settled) return;
+          settled = true;
+          if (shutdownTimer !== null) {
+            clearTimeoutFn(shutdownTimer);
+            shutdownTimer = null;
+          }
+          resolve();
+        };
+        if (typeof dying.on === "function") dying.on("exit", done);
         // Ask the CLI host to reclaim engine children first, then kill after
         // a short grace so an uncooperative host still goes down. (票 04 duty.)
         if (typeof dying.postMessage === "function") {
@@ -147,9 +187,14 @@ export function createHostSupervisor({
         }
         shutdownTimer = setTimeoutFn(() => {
           shutdownTimer = null;
-          dying.kill();
+          try {
+            dying.kill();
+          } catch {
+            // already gone
+          }
+          done();
         }, shutdownGraceMs);
-      }
+      });
     },
 
     /**

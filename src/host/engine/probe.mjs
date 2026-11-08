@@ -128,10 +128,18 @@ export function evaluateProbe({ functionalEvents, refusalEvents, marker }) {
  * @param {ReturnType<import("../store.mjs").openStore>} options.store
  * @param {(input: { employeeId: number, text: string }) => { runId: number }} options.startRun
  * @param {(listener: (payload: { runId: number, event: any }) => void) => () => void} options.subscribeRunEvents
+ * @param {(employeeId: number) => Promise<void> | void} [options.abortRun] stop a timed-out probe run
  * @param {number} [options.runTimeoutMs]
  * @param {() => string} [options.markerFactory] marker token (tests pin it; prod randomizes)
  */
-export function createProbeRunner({ store, startRun, subscribeRunEvents, runTimeoutMs = 120_000, markerFactory = () => randomBytes(6).toString("hex") }) {
+export function createProbeRunner({
+  store,
+  startRun,
+  subscribeRunEvents,
+  abortRun,
+  runTimeoutMs = 120_000,
+  markerFactory = () => randomBytes(6).toString("hex"),
+}) {
   /**
    * One probe run: start it, record its events until its agent_end.
    *
@@ -156,19 +164,38 @@ export function createProbeRunner({ store, startRun, subscribeRunEvents, runTime
         if (settled) return;
         if (runId !== null && payload.runId === runId && eventType(payload.event) === "agent_end") finish();
       });
-      const started = startRun({ employeeId, text });
+      let started;
+      try {
+        started = startRun({ employeeId, text });
+      } catch (err) {
+        // A throw from the start seam must not leave the listener attached:
+        // it would capture every future run forever.
+        unsubscribe();
+        throw err;
+      }
       runId = started.runId;
+      const timer = { current: /** @type {ReturnType<typeof setTimeout> | null} */ (null) };
       // a synchronous finish (an engine that settled inside startRun)
       if (captured.some((p) => p.runId === runId && eventType(p.event) === "agent_end")) {
         finish();
         return;
       }
-      const timer = setTimeout(finish, runTimeoutMs);
+      timer.current = setTimeout(() => {
+        // A timed-out probe run still holds the probe employee busy. Abort it,
+        // otherwise the next probe (and every retry) fails with employee_busy
+        // until the host restarts.
+        try {
+          void Promise.resolve(abortRun?.(employeeId)).catch(() => {});
+        } catch {
+          // best effort; the run may already be settling
+        }
+        finish();
+      }, runTimeoutMs);
 
       function finish() {
         if (settled) return;
         settled = true;
-        clearTimeout(timer);
+        if (timer.current !== null) clearTimeout(timer.current);
         unsubscribe();
         resolve(captured.filter((payload) => payload.runId === runId).map((payload) => payload.event));
       }

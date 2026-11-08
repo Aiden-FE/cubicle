@@ -82,8 +82,11 @@ async function main() {
     // Engine events ride the run.event topic; the main process coalesces and
     // the view subscribes per topic. (Payloads stay envelope-shaped.)
     emit: (payload) => send(createEvent(TOPICS.runEvent, payload)),
-    // Work-order runs collect their 四件套 (ticket 05).
+    // Work-order runs collect their 四件套 (ticket 05). The hook is async now
+    // (git is async); when it settles the view gets a domain event so it
+    // reloads the artifacts instead of showing the pre-git empty state.
     onTaskRunFinished: createTaskRunHook({ store, git }),
+    onTaskArtifactsReady: (taskId) => send(createEvent(TOPICS.domainChanged, { reason: "task.artifacts", taskId })),
   });
 
   // 票 09: 上下班调度 — 到点自动上班（激活有未完成任务的员工自动续跑）、
@@ -104,6 +107,7 @@ async function main() {
     store,
     startRun: ({ employeeId, text }) => ({ runId: runManager.start({ employeeId, text, probe: true }).run.id }),
     subscribeRunEvents: (listener) => runManager.subscribe(listener),
+    abortRun: (employeeId) => runManager.abort({ employeeId }),
   });
 
   /** An engine is "configured" (badge 已登录 vs 待配 key) by its BYOK file. */

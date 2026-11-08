@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import path from "node:path";
+import os from "node:os";
 
 import { decideToolAccess } from "../src/host/engine/policy.mjs";
 
@@ -33,6 +35,36 @@ test("writes aimed at system paths are denied", () => {
   assert.equal(decideToolAccess({ toolName: "write", args: { path: "C:\\Windows\\System32\\drivers\\evil.sys" } }).verdict, "deny");
   assert.equal(decideToolAccess({ toolName: "edit", args: { path: "/etc/passwd" } }).verdict, "deny");
   assert.equal(decideToolAccess({ toolName: "write", args: { path: "C:\\Program Files\\Cubicle\\config.json" } }).verdict, "deny");
+});
+
+test("with a workspace, file writes are contained by resolved path (not prefix luck)", () => {
+  const workspaceDir = path.join(os.tmpdir(), "cubicle-policy-workspace");
+  assert.equal(
+    decideToolAccess({ toolName: "write", args: { path: path.join(workspaceDir, "src", "a.ts") }, workspaceDir }).verdict,
+    "allow",
+  );
+  assert.equal(
+    decideToolAccess({ toolName: "write", args: { path: "..\\..\\Windows\\System32\\evil.txt" }, workspaceDir }).verdict,
+    "deny",
+  );
+  assert.equal(
+    decideToolAccess({ toolName: "edit", args: { path: path.join(os.tmpdir(), "outside.txt") }, workspaceDir }).verdict,
+    "deny",
+  );
+  const verdict = decideToolAccess({ toolName: "write", args: { path: "..\\evil.txt" }, workspaceDir });
+  assert.equal(verdict.verdict, "deny");
+  assert.equal(verdict.rule, "outside-workspace");
+});
+
+test("encoded and alternative destructive commands are denied", () => {
+  for (const command of [
+    "powershell -NoProfile -EncodedCommand ZQBjAGgAbwA=",
+    "powershell -enc ZQBjAGgAbwA=",
+    "rm --recursive --force notes",
+    "git clean -xdf",
+  ]) {
+    assert.equal(decideToolAccess({ toolName: "powershell", args: { command } }).verdict, "deny", `expected deny for: ${command}`);
+  }
 });
 
 test("unparseable args are allowed, not phantom-blocked", () => {

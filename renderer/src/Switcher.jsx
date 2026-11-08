@@ -67,8 +67,9 @@ export function Switcher({ snapshot, onChanged }) {
           data-testid="company-switcher"
           aria-expanded={openPanel === "company"}
           onClick={() => setOpenPanel((p) => (p === "company" ? null : "company"))}
+          aria-label={`切换公司（当前：${activeCompany?.name ?? "未选择公司"}）`}
         >
-          <span className="switcher-value" data-testid="company-name">
+          <span className="switcher-value" data-testid="company-name" title={activeCompany?.name ?? "未选择公司"}>
             {activeCompany?.name ?? "未选择公司"}
           </span>
           <span className="switcher-caret">▾</span>
@@ -80,8 +81,9 @@ export function Switcher({ snapshot, onChanged }) {
           data-testid="group-switcher"
           aria-expanded={openPanel === "group"}
           onClick={() => setOpenPanel((p) => (p === "group" ? null : "group"))}
+          aria-label={`切换项目组（当前：${activeGroup?.name ?? "暂无项目组"}）`}
         >
-          <span className="switcher-value" data-testid="group-name">
+          <span className="switcher-value" data-testid="group-name" title={activeGroup?.name ?? "暂无项目组"}>
             {activeGroup?.name ?? "暂无项目组"}
           </span>
           <span className="switcher-caret">▾</span>

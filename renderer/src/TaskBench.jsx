@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { budgetStateFor, taskBudgetMarker, tokenText } from "./scene/tokenReadout.js";
+import { useDialog } from "./useDialog.js";
 
 // Topic names mirrored from src/shared/envelope.mjs TOPICS (process boundary).
 const RUN_TOPIC = "run.event";
@@ -26,9 +27,9 @@ const SESSION_LABELS = /** @type {Record<string, string>} */ ({ running: "进行
  * (待办/进行中/待验收/完成/失败) are visible on every row, and the detail
  * buttons only ever offer transitions the host accepts anyway.
  *
- * @param {{ snapshot: import("./App.jsx").OfficeSnapshotData | null, onClose: () => void }} props
+ * @param {{ snapshot: import("./App.jsx").OfficeSnapshotData | null, onClose: () => void, initialTaskId?: number | null }} props
  */
-export function TaskBench({ snapshot, onClose }) {
+export function TaskBench({ snapshot, onClose, initialTaskId = null }) {
   const [tasks, setTasks] = useState(/** @type {TaskRowData[]} */ ([]));
   const [sentence, setSentence] = useState("");
   const [draft, setDraft] = useState(/** @type {TaskDraftData | null} */ (null));
@@ -36,9 +37,23 @@ export function TaskBench({ snapshot, onClose }) {
   const [acceptance, setAcceptance] = useState(/** @type {string[]} */ ([]));
   const [employeeId, setEmployeeId] = useState(/** @type {string} */ (""));
   const [note, setNote] = useState(/** @type {string | null} */ (null));
-  const [openTaskId, setOpenTaskId] = useState(/** @type {number | null} */ (null));
+  const [noteTone, setNoteTone] = useState(/** @type {"ok" | "error"} */ ("error"));
+  const showError = useCallback((/** @type {string} */ text) => {
+    setNote(text);
+    setNoteTone("error");
+  }, []);
+  const showInfo = useCallback((/** @type {string} */ text) => {
+    setNote(text);
+    setNoteTone("ok");
+  }, []);
+  const [openTaskId, setOpenTaskId] = useState(/** @type {number | null} */ (initialTaskId));
   const [detail, setDetail] = useState(/** @type {TaskDetailData | null} */ (null));
   const [rejectReason, setRejectReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const [loadError, setLoadError] = useState(false);
+  const [workspaceHelpFor, setWorkspaceHelpFor] = useState(/** @type {number | null} */ (null));
+  const [confirmPending, setConfirmPending] = useState(/** @type {string | null} */ (null));
   // 票 12: run 进行中的预算信号（budget_warning / budget_exhausted 事件带
   // tokens/budget）— 落库的 taskTokenSummary 只含已收尾的轮，黄点必须活在事件上。
   const [liveBudget, setLiveBudget] = useState(() => new Map());
@@ -50,13 +65,16 @@ export function TaskBench({ snapshot, onClose }) {
   const loadTasks = useCallback(async () => {
     if (groupId === null) {
       setTasks([]);
+      setLoadError(false);
       return;
     }
     try {
       const result = /** @type {{ tasks: TaskRowData[] }} */ (await window.cubicle.invoke("task.list", { groupId }));
       setTasks(result.tasks);
+      setLoadError(false);
     } catch {
-      // the desk keeps its last list if the host blinks
+      // A failed load is not an empty list: say so instead of "还没有工单".
+      setLoadError(true);
     }
   }, [groupId]);
 
@@ -156,10 +174,13 @@ export function TaskBench({ snapshot, onClose }) {
     .filter((occupant) => occupant !== null);
 
   const dispatch = async () => {
-    if (sentence.trim().length === 0 || !employeeId) return;
+    if (busyRef.current || sentence.trim().length === 0 || !employeeId) return;
     setNote(null);
+    busyRef.current = true;
+    setBusy(true);
+    let created;
     try {
-      const created = /** @type {{ task: TaskRowData }} */ (
+      created = /** @type {{ task: TaskRowData }} */ (
         await window.cubicle.invoke("task.create", {
           employeeId: Number(employeeId),
           text: sentence.trim(),
@@ -168,30 +189,36 @@ export function TaskBench({ snapshot, onClose }) {
           playbook: draft?.playbook,
         })
       );
-      await window.cubicle.invoke("task.dispatch", { taskId: created.task.id });
-      setSentence("");
-      setDraft(null);
-      setGoal("");
-      setAcceptance([]);
-      editedContract.current = false;
-      await loadTasks();
     } catch (err) {
-      const failure = /** @type {{ code?: string, message?: string }} */ (err);
-      const code = failure.code ?? "task_create_failed";
-      setNote(
-        code === "not_a_git_workspace"
-          ? "这个工作区不是 git 仓库：工单不可用（应用不会替你初始化仓库，先让员工的工作区成为一个 git 仓库）。"
-          : code === "no_head_commit"
-            ? "git 工作区还没有任何提交：工单不可用。"
-            : code === "git_unavailable"
-              ? "本机找不到 git 命令：工单需要 git 工作区才能记录起点。"
-              : code === "task_running"
-                ? "这张工单已经在跑了，等这一轮结束。"
-                : code === "off_duty"
-                  ? failure.message ?? "公司正在下班中：先在左轨「上下班」点「立即上班」，或等时间表到点自动上班。"
-                  : `没能开单：${code}`,
+      showError(errorText(err, "没能开单"));
+      const code = /** @type {{ code?: string }} */ (err ?? {}).code;
+      setWorkspaceHelpFor(
+        code === "not_a_git_workspace" || code === "no_head_commit" ? Number(employeeId) : null,
       );
+      setBusy(false);
+      busyRef.current = false;
+      return;
     }
+    setWorkspaceHelpFor(null);
+    try {
+      await window.cubicle.invoke("task.dispatch", { taskId: created.task.id });
+    } catch (err) {
+      // create succeeded: never leave the user thinking "开单失败" and let a
+      // second click create a duplicate task.
+      showError(`已建单 #${created.task.id}，但派单失败：${errorText(err, "派单失败")}`);
+      await loadTasks();
+      setBusy(false);
+      busyRef.current = false;
+      return;
+    }
+    setSentence("");
+    setDraft(null);
+    setGoal("");
+    setAcceptance([]);
+    editedContract.current = false;
+    await loadTasks();
+    setBusy(false);
+    busyRef.current = false;
   };
 
   const detailTask = detail?.task ?? null;
@@ -209,13 +236,15 @@ export function TaskBench({ snapshot, onClose }) {
 
   /** 「+50%」：host 落库 1.5× 并走 09 的续跑通道；续跑被拒时把可懂的原因上屏。 */
   const extendBudget = async () => {
-    if (openTaskId === null) return;
+    if (openTaskId === null || busyRef.current) return;
     setNote(null);
+    busyRef.current = true;
+    setBusy(true);
     try {
       const result = /** @type {{ resumed?: boolean, resumeNote?: string }} */ (
         await window.cubicle.invoke("task.extendBudget", { taskId: openTaskId })
       );
-      if (result.resumeNote) setNote(result.resumeNote);
+      if (result.resumeNote) showInfo(result.resumeNote);
       setLiveBudget((prev) => {
         const next = new Map(prev);
         next.delete(openTaskId);
@@ -224,14 +253,10 @@ export function TaskBench({ snapshot, onClose }) {
       await loadTasks();
       await loadDetail(openTaskId);
     } catch (err) {
-      const failure = /** @type {{ code?: string, message?: string }} */ (err);
-      setNote(
-        failure.code === "invalid_transition"
-          ? failure.message ?? "这张工单的当前状态不能加预算。"
-          : failure.code === "off_duty"
-            ? failure.message ?? "公司正在下班中：先在左轨「上下班」点「立即上班」。"
-            : `加预算失败：${failure.code ?? "unknown"}`,
-      );
+      showError(errorText(err, "加预算失败"));
+    } finally {
+      setBusy(false);
+      busyRef.current = false;
     }
   };
 
@@ -243,29 +268,42 @@ export function TaskBench({ snapshot, onClose }) {
    * @param {Record<string, unknown>} payload
    */
   const act = async (method, payload) => {
-    if (openTaskId === null) return;
+    if (openTaskId === null || busyRef.current) return;
+    // Non-blocking two-step confirmation for the irreversible exits. The first
+    // click only arms it (and says so); the second click within this drawer
+    // executes. 通过 is the normal acceptance flow and stays one click.
+    const confirmKey =
+      method === "task.cancel" || method === "task.abandon" ? `${method}:${openTaskId}` : null;
+    if (confirmKey !== null && confirmPending !== confirmKey) {
+      setConfirmPending(confirmKey);
+      showInfo(
+        method === "task.cancel"
+          ? "再点一次「取消」确认：这一轮会立即中止，并把工单记为失败。"
+          : "再点一次「放弃」确认：工单进入失败归档，历史保留。",
+      );
+      return;
+    }
+    setConfirmPending(null);
     setNote(null);
+    busyRef.current = true;
+    setBusy(true);
     try {
       await window.cubicle.invoke(method, payload);
       if (method === "task.reject") setRejectReason("");
       await loadTasks();
       await loadDetail(openTaskId);
     } catch (err) {
-      const failure = /** @type {{ code?: string, message?: string }} */ (err);
-      setNote(
-        failure.code === "invalid_transition"
-          ? failure.message ?? "这张工单的当前状态不允许这个操作。"
-          : failure.code === "no_active_run"
-            ? "这张工单没有正在执行的运行——它可能已经自己收尾了。"
-            : failure.code === "off_duty"
-              ? failure.message ?? "公司正在下班中：先在左轨「上下班」点「立即上班」。"
-              : `操作失败：${failure.code ?? "unknown"}`,
-      );
+      showError(errorText(err, "操作失败"));
+    } finally {
+      setBusy(false);
+      busyRef.current = false;
     }
   };
 
+  const dialogRef = useDialog(onClose);
+
   return (
-    <aside className="task-drawer" data-testid="task-bench">
+    <aside className="task-drawer" data-testid="task-bench" ref={dialogRef} role="dialog" aria-modal="true" aria-label="工单台" tabIndex={-1}>
       <header className="task-header">
         <div className="task-title">工单台</div>
         <button type="button" className="task-close" data-testid="task-close" onClick={onClose} aria-label="收起工单台">
@@ -273,6 +311,7 @@ export function TaskBench({ snapshot, onClose }) {
         </button>
       </header>
 
+      {openTaskId === null ? (
       <section className="task-form">
         <label className="task-field-label" htmlFor="task-sentence">一句话派活</label>
         <textarea
@@ -283,6 +322,7 @@ export function TaskBench({ snapshot, onClose }) {
           placeholder="例如：给 greet.txt 加一行欢迎语"
           value={sentence}
           onChange={(event) => setSentence(event.target.value)}
+          disabled={busy}
         />
 
         {draft ? (
@@ -365,16 +405,64 @@ export function TaskBench({ snapshot, onClose }) {
           type="button"
           className="task-dispatch"
           data-testid="task-dispatch"
-          disabled={sentence.trim().length === 0 || !employeeId}
+          disabled={busy || sentence.trim().length === 0 || !employeeId}
           onClick={() => void dispatch()}
         >
-          派单
+          {busy ? "派单中…" : "派单"}
         </button>
-        {note ? <div className="task-note" data-testid="task-error">{note}</div> : null}
       </section>
+      ) : null}
+      {note ? (
+        <div
+          className={`task-note task-detail-note ${noteTone === "ok" ? "task-note-ok" : ""}`}
+          data-testid="task-error"
+          data-tone={noteTone}
+        >
+          {note}
+        </div>
+      ) : null}
+      {workspaceHelpFor !== null ? (
+        <div className="task-workspace-help" data-testid="workspace-help">
+          <button
+            type="button"
+            className="task-mini-button"
+            onClick={() => {
+              void window.cubicle.openWorkspace(workspaceHelpFor).then((message) => {
+                if (message) showError(`打开工作区失败：${message}`);
+              });
+            }}
+          >
+            打开工作区
+          </button>
+          <button
+            type="button"
+            className="task-mini-button"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              void window.cubicle
+                .invoke("run.start", {
+                  employeeId: workspaceHelpFor,
+                  text: "这是你的工作区。请执行 git init、git add -A、git commit -m init，完成后告诉我。",
+                })
+                .then(() => showInfo("初始化任务已启动：等员工提交完成后，再点「派单」。"))
+                .catch((err) => showError(errorText(err, "初始化失败")))
+                .finally(() => setBusy(false));
+            }}
+          >
+            让员工初始化仓库
+          </button>
+        </div>
+      ) : null}
 
       {detailTask ? (
         <section className="task-detail" data-testid="task-detail" data-task-id={detailTask.id}>
+          <div className="task-detail-head">
+            <strong className="task-detail-title">#{detailTask.id} {detailTask.title}</strong>
+            <button type="button" className="task-back" data-testid="task-back" onClick={() => setOpenTaskId(null)}>
+              ← 列表
+            </button>
+          </div>
           <div className="task-detail-head">
             <span className={`task-chip chip-${detailTask.playbook}`}>{PLAYBOOK_LABELS[detailTask.playbook] ?? "自由"}</span>
             <span className={`task-state`} data-testid="task-status" data-status={detailTask.status}>
@@ -398,16 +486,16 @@ export function TaskBench({ snapshot, onClose }) {
                 崩溃中断
               </span>
             ) : null}
-            <button type="button" className="task-back" data-testid="task-back" onClick={() => setOpenTaskId(null)}>
-              ← 列表
-            </button>
           </div>
+          <div className="task-section-label">目标</div>
           <div className="task-detail-goal" data-testid="task-goal-view">{detailTask.goal}</div>
+          <div className="task-section-label">验收标准</div>
           <ul className="task-detail-acceptance" data-testid="task-acceptance-view">
             {detailTask.acceptance.map((line, index) => (
               <li key={index} data-testid="task-acceptance-view-item">{line}</li>
             ))}
           </ul>
+          <div className="task-section-label">起点与成本</div>
           <div className="task-base-head" data-testid="task-base-head">
             起点 HEAD <code>{detailTask.baseHead.slice(0, 7)}…</code>（所有 diff 相对它）
           </div>
@@ -459,18 +547,55 @@ export function TaskBench({ snapshot, onClose }) {
             </div>
           ) : null}
 
+          <div className="task-section-label">证据（四件套）</div>
+          <div className="task-artifacts" data-testid="task-artifacts-latest">
+            {(detail?.latestArtifacts ?? detail?.artifacts ?? []).map((artifact) => (
+              <details key={artifact.id} className="task-artifact" data-testid={`artifact-${artifact.kind}`} open={artifact.kind === "diff_summary"}>
+                <summary>{ARTIFACT_TITLES[artifact.kind] ?? artifact.kind}</summary>
+                <pre>{artifact.content}</pre>
+              </details>
+            ))}
+          </div>
+          {(detail?.artifacts?.length ?? 0) > (detail?.latestArtifacts?.length ?? 0) ? (
+            <details className="task-artifacts-history" data-testid="task-artifact-history">
+              <summary>历史产出（{(detail?.artifacts?.length ?? 0) - (detail?.latestArtifacts?.length ?? 0)} 件）</summary>
+              {groupArtifactsByRun(detail ? olderArtifacts(detail) : []).map(([runId, artifacts]) => (
+                <details key={String(runId)} className="task-artifact" data-testid="task-artifact-history-run" open={false}>
+                  <summary>更早一轮 · 产出</summary>
+                  {artifacts.map((artifact) => (
+                    <details key={artifact.id} className="task-artifact" data-testid={`history-artifact-${artifact.kind}`} open={false}>
+                      <summary>{ARTIFACT_TITLES[artifact.kind] ?? artifact.kind}</summary>
+                      <pre>{artifact.content}</pre>
+                    </details>
+                  ))}
+                </details>
+              ))}
+            </details>
+          ) : (
+            detail && (detail.latestArtifacts ?? detail.artifacts ?? []).length === 0 ? (
+              <div className="task-empty" data-testid="task-detail-hint">
+                {detailTask.status === "running"
+                  ? "员工正在干活，跑完这里会出现四件套；要中途停下点「取消」。"
+                  : detailTask.status === "open"
+                    ? "这张工单还没开工：返回列表，在表单里派单。"
+                    : "产出还没落盘，稍后刷新。"}
+              </div>
+            ) : null
+          )}
+
           {/* 票 10: 中断任务的三选出口（host 的判决在 detail.interrupted）。 */}
           {detail?.interrupted ? (
             <div className="task-review" data-testid="detail-interrupted-actions">
               <div className="interrupted-hint">
                 崩溃把这张工单留在了中断处：续跑（引擎从断点继续）/ 重跑（原合同新一轮）/ 放弃（进失败归档，历史保留）。
               </div>
-              <div className="task-review-actions">
+              <div className="task-review-actions task-decision-bar">
                 {detail.interrupted.canResume ? (
                   <button
                     type="button"
                     className="task-accept"
                     data-testid="detail-resume"
+                    disabled={busy}
                     onClick={() => void act("task.resume", { taskId: detailTask.id })}
                   >
                     续跑
@@ -484,6 +609,7 @@ export function TaskBench({ snapshot, onClose }) {
                   type="button"
                   className="task-reject"
                   data-testid="detail-rerun"
+                  disabled={busy}
                   onClick={() => void act("task.rerun", { taskId: detailTask.id })}
                 >
                   重跑
@@ -492,6 +618,7 @@ export function TaskBench({ snapshot, onClose }) {
                   type="button"
                   className="task-cancel"
                   data-testid="detail-abandon"
+                  disabled={busy}
                   onClick={() => void act("task.abandon", { taskId: detailTask.id })}
                 >
                   放弃
@@ -509,11 +636,12 @@ export function TaskBench({ snapshot, onClose }) {
                 value={rejectReason}
                 onChange={(event) => setRejectReason(event.target.value)}
               />
-              <div className="task-review-actions">
+              <div className="task-review-actions task-decision-bar">
                 <button
                   type="button"
                   className="task-accept"
                   data-testid="task-accept"
+                  disabled={busy}
                   onClick={() => void act("task.accept", { taskId: detailTask.id })}
                 >
                   通过
@@ -522,6 +650,7 @@ export function TaskBench({ snapshot, onClose }) {
                   type="button"
                   className="task-reject"
                   data-testid="task-reject"
+                  disabled={busy}
                   onClick={() => void act("task.reject", { taskId: detailTask.id, reason: rejectReason })}
                 >
                   打回
@@ -534,6 +663,7 @@ export function TaskBench({ snapshot, onClose }) {
               type="button"
               className="task-cancel"
               data-testid="task-cancel"
+              disabled={busy}
               onClick={() => void act("task.cancel", { taskId: detailTask.id })}
             >
               取消
@@ -550,35 +680,27 @@ export function TaskBench({ snapshot, onClose }) {
                 type="button"
                 className="task-retry"
                 data-testid="task-retry"
+                disabled={busy}
                 onClick={() => void act("task.dispatch", { taskId: detailTask.id })}
               >
                 重试（新会话再来一轮）
               </button>
             </div>
           ) : null}
-
-          {detail && detail.artifacts.length > 0 ? (
-            <div className="task-artifacts">
-              {detail.artifacts.map((artifact) => (
-                <details key={artifact.id} className="task-artifact" data-testid={`artifact-${artifact.kind}`} open={artifact.kind === "diff_summary"}>
-                  <summary>{ARTIFACT_TITLES[artifact.kind] ?? artifact.kind}</summary>
-                  <pre>{artifact.content}</pre>
-                </details>
-              ))}
-            </div>
-          ) : (
-            <div className="task-empty" data-testid="task-detail-hint">
-              {detailTask.status === "running"
-                ? "员工正在干活，跑完这里会出现四件套；要中途停下点「取消」。"
-                : detailTask.status === "open"
-                  ? "这张工单还没开工：在上方表单派单。"
-                  : "产出还没落盘，稍后刷新。"}
-            </div>
-          )}
         </section>
       ) : (
         <section className="task-list" data-testid="task-list">
-          {tasks.length === 0 ? <div className="task-empty">还没有工单。一句话派活试试。</div> : null}
+          <div className="task-list-head">
+            <span>工单</span>
+            <span>{tasks.length} 张</span>
+          </div>
+          {loadError ? (
+            <div className="task-note" data-testid="task-load-error">
+              工单列表加载失败。
+              <button type="button" className="task-mini-button" onClick={() => void loadTasks()}>重试</button>
+            </div>
+          ) : null}
+          {!loadError && tasks.length === 0 ? <div className="task-empty">还没有工单。一句话派活试试。</div> : null}
           {tasks.map((task) => (
             <button
               key={task.id}
@@ -608,6 +730,33 @@ export function TaskBench({ snapshot, onClose }) {
   );
 }
 
+const ERROR_TEXT = /** @type {Record<string, string>} */ ({
+  employee_busy: "这位员工正在跑：等这一轮结束，或先在对话里中止。",
+  off_duty: "公司正在下班中：先在左轨「上下班」点「立即上班」。",
+  engine_not_admitted: "这个引擎还没准入：去引擎中心跑探针，或带风险手动启用。",
+  engine_not_configured: "引擎还没配模型：先把 models.json 放进引擎目录。",
+  invalid_transition: "这张工单当前状态不允许这个操作。",
+  no_active_run: "这张工单没有正在执行的运行（可能已经自己收尾了）。",
+  task_running: "这张工单已经在跑了，等这一轮结束。",
+  not_a_git_workspace:
+    "工作区还不是 git 仓库：在对话里让员工执行 git init + 首次提交，或打开工作区手动初始化。",
+  no_head_commit: "git 工作区还没有提交：先让员工做一次初始提交。",
+  git_unavailable: "本机找不到 git 命令：工单需要 git 工作区才能记录起点。",
+  git_timeout: "git 8 秒内没有返回：工作区可能过大或磁盘被占用。",
+  git_output_overflow: "git 输出超过 8 MiB：先清理工作区，或缩小 diff 范围。",
+  host_timeout: "后台响应超时：服务可能正在重启，稍后重试。",
+  host_offline: "后台服务未运行，正在自动重启。",
+  method_not_allowed: "界面调用了一个不允许的方法（IPC 白名单拒绝）。",
+});
+
+/** @param {unknown} err @param {string} fallback @returns {string} */
+function errorText(err, fallback) {
+  const failure = /** @type {{ code?: string, message?: string }} */ (err ?? {});
+  if (failure.code && ERROR_TEXT[failure.code]) return ERROR_TEXT[failure.code];
+  if (failure.message) return failure.message;
+  return `${fallback}（${failure.code ?? "unknown"}）`;
+}
+
 const ARTIFACT_TITLES = /** @type {Record<string, string>} */ ({
   diff_summary: "diff 摘要（相对起点）",
   changed_files: "变更文件清单",
@@ -621,5 +770,24 @@ const ARTIFACT_TITLES = /** @type {Record<string, string>} */ ({
  * @typedef {{ id: number, groupId: number, employeeId: number, title: string, goal: string, playbook: string, acceptance: string[], baseHead: string, status: string, createdAt: string, employeeName: string, latestSessionStatus?: string | null }} TaskRowData
  * @typedef {{ id: number, taskId: number, employeeSessionId: number, engine: string, status: string, startedAt: string, endedAt: string | null, sessionFile: string | null, iteration: number }} TaskSessionData
  * @typedef {{ input: number, cachedInput: number, cacheWrite: number, output: number, reasoning: number, total: number, measured?: boolean }} TaskTokenData
- * @typedef {{ task: TaskRowData, sessions: TaskSessionData[], artifacts: { id: number, kind: string, content: string }[], tokens?: TaskTokenData, iterations?: number, budget?: number, failure?: { reason: string | null }, interrupted?: { canResume: boolean, resumeHint: string | null } | null }} TaskDetailData
+ * @typedef {{ task: TaskRowData, sessions: TaskSessionData[], artifacts: { id: number, runId?: number | null, kind: string, content: string }[], latestArtifacts?: { id: number, runId?: number | null, kind: string, content: string }[], tokens?: TaskTokenData, iterations?: number, budget?: number, failure?: { reason: string | null }, interrupted?: { canResume: boolean, resumeHint: string | null } | null }} TaskDetailData
  */
+
+/** @param {TaskDetailData} detail @returns {{ id: number, runId?: number | null, kind: string, content: string }[]} */
+function olderArtifacts(detail) {
+  const latestIds = new Set((detail.latestArtifacts ?? []).map((artifact) => artifact.id));
+  return (detail.artifacts ?? []).filter((artifact) => !latestIds.has(artifact.id));
+}
+
+/** @param {{ id: number, runId?: number | null, kind: string, content: string }[]} artifacts */
+function groupArtifactsByRun(artifacts) {
+  /** @type {Map<number | null, typeof artifacts>} */
+  const groups = new Map();
+  for (const artifact of artifacts) {
+    const key = artifact.runId ?? null;
+    const group = groups.get(key) ?? [];
+    group.push(artifact);
+    groups.set(key, group);
+  }
+  return [...groups.entries()];
+}

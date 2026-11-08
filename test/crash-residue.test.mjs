@@ -66,6 +66,11 @@ test("crash-residue：宿主 pid 记账每次 spawn 追加（supervisor 重启�
     recordHostPid({ dataDir, pid: 222, startedAt: new Date().toISOString() });
     const ledger = createPidLedger({ file: hostPidFile(dataDir) });
     assert.deepEqual(ledger.read().map((e) => e.pid), [111, 222], "追加式记录：活过又死过的每一代宿主都留账，死宿主名下的工具孤儿才有账可扫");
+    const expectedName = path.basename(process.execPath).replace(/\.exe$/i, "").toLowerCase();
+    assert.ok(
+      ledger.read().every((entry) => entry.name === expectedName),
+      "宿主映像名来自实际可执行文件（打包后是 cubicle，不是写死的 electron）",
+    );
 
     const outcome = await sweepCrashResidue({
       dataDir,

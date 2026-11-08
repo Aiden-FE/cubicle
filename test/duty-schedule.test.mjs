@@ -149,6 +149,38 @@ test("override 未越界时保持有效：手动下班后，同一工作时段�
   assert.deepEqual({ phase: r.phase.phase, effects: r.effects }, { phase: "off", effects: [] });
 });
 
+test("宽限中手动下班：立即 off + pause，不被 graceSeconds 吞掉", () => {
+  const grace = phaseAt("grace", at(2026, 10, 5, 18, 0), at(2026, 10, 5, 18, 1, 30));
+  const r = advanceDuty({
+    phase: grace,
+    schedule: SCHEDULE,
+    override: ovr("off", at(2026, 10, 5, 18, 0, 20)),
+    now: at(2026, 10, 5, 18, 0, 30),
+  });
+  assert.deepEqual({ phase: r.phase.phase, effects: r.effects }, { phase: "off", effects: ["pause_runs"] });
+});
+
+test("跨天重启：昨天的 on 在今天上班时段重新 clock_in，不会用昨天相位假装上班", () => {
+  const yesterdayOn = phaseAt("on", at(2026, 10, 4, 10, 0));
+  const r = advanceDuty({ phase: yesterdayOn, schedule: SCHEDULE, override: null, now: at(2026, 10, 5, 10, 0) });
+  assert.deepEqual({ phase: r.phase.phase, effects: r.effects }, { phase: "on", effects: ["clock_in"] });
+
+  const early = advanceDuty({ phase: yesterdayOn, schedule: SCHEDULE, override: null, now: at(2026, 10, 5, 8, 0) });
+  assert.deepEqual(
+    { phase: early.phase.phase, effects: early.effects },
+    { phase: "off", effects: ["pause_runs"] },
+    "早上 8 点不能把昨天的 on 演成今天的宽限",
+  );
+
+  const yesterdayGrace = phaseAt("grace", at(2026, 10, 4, 18, 0), at(2026, 10, 4, 18, 1, 30));
+  const lateMorning = advanceDuty({ phase: yesterdayGrace, schedule: SCHEDULE, override: null, now: at(2026, 10, 5, 10, 0) });
+  assert.deepEqual(
+    { phase: lateMorning.phase.phase, effects: lateMorning.effects },
+    { phase: "on", effects: ["clock_in"] },
+    "昨天的宽限不是今天的宽限",
+  );
+});
+
 test("首次观测（phase 未知）只落位、不放 effects：重启不伪造一次上班", () => {
   const morning = advanceDuty({ phase: null, schedule: SCHEDULE, override: null, now: at(2026, 10, 5, 10, 0) });
   assert.deepEqual({ phase: morning.phase.phase, effects: morning.effects }, { phase: "on", effects: [] });

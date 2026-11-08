@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { appearanceFor } from "./roleAppearance.js";
+import { useDialog } from "./useDialog.js";
 
 /**
  * Three-step hiring wizard, opened by clicking an empty desk (decision 10:
@@ -25,6 +26,7 @@ export function HireModal({ desk, onClose }) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(/** @type {string | null} */ (null));
+  const dialogRef = useDialog(onClose);
 
   const role = roles?.find((r) => r.id === roleId) ?? null;
 
@@ -59,7 +61,16 @@ export function HireModal({ desk, onClose }) {
 
   return (
     <div className="hire-scrim" data-testid="hire-scrim" onClick={busy ? undefined : onClose}>
-      <div className="hire-modal" data-testid="hire-modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="hire-modal"
+        data-testid="hire-modal"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="招聘新员工"
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+      >
         <header className="hire-header">
           <div>
             <div className="hire-title">招聘新员工</div>
@@ -119,15 +130,15 @@ export function HireModal({ desk, onClose }) {
             </div>
             <div className="cap-row" data-testid="cap-skills">
               <span className="cap-label">技能</span>
-              <Chips items={role.manifest.skills} />
+              <Chips items={role.manifest.skills ?? []} />
             </div>
             <div className="cap-row" data-testid="cap-tools">
               <span className="cap-label">工具</span>
-              <Chips items={role.manifest.tools} />
+              <Chips items={role.manifest.tools ?? []} />
             </div>
             <div className="cap-row" data-testid="cap-mcp">
               <span className="cap-label">MCP</span>
-              <Chips items={role.manifest.mcpServers} emptyLabel="无" />
+              <Chips items={role.manifest.mcpServers ?? []} emptyLabel="无" />
             </div>
             <div className="cap-row" data-testid="cap-engine">
               <span className="cap-label">引擎</span>
@@ -135,7 +146,11 @@ export function HireModal({ desk, onClose }) {
             </div>
             <div className="cap-row" data-testid="cap-cost">
               <span className="cap-label">成本</span>
-              <span className="cap-cost-text">单任务软闸 {Math.round(role.manifest.cost.tokenBudgetPerTask / 10000)} 万 token</span>
+              <span className="cap-cost-text">
+                {typeof role.manifest.cost?.tokenBudgetPerTask === "number"
+                  ? `单任务软闸 ${Math.round(role.manifest.cost.tokenBudgetPerTask / 10000)} 万 token`
+                  : "未配置"}
+              </span>
             </div>
             <div className="hire-hint">录用时这份清单会快照进员工，之后改角色不影响他。</div>
           </div>

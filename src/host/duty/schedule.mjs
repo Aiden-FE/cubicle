@@ -142,8 +142,21 @@ export function advanceDuty({ phase, schedule, override, now }) {
     return { phase: { phase: desired, phaseSince: now, graceUntil: null }, effects: [], clearOverride };
   }
 
+  // The persisted phase belongs to the day it was written. If the app was
+  // closed over a boundary (直接退 at 18:30 → next morning 10:00), the
+  // current phase is yesterday's; relying on an edge that happened while the
+  // app was down means no clock_in (paused tasks never resume) and, before
+  // 09:00, an old "on" misread as today's begin_grace. A phase written on an
+  // earlier local day is stale: re-anchor to today's schedule. (Local
+  // midnight, not workStart: a manual 08:00 上班 is today's phase even though
+  // it predates the 09:00 shift.)
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  const stale = Number(phase.phaseSince) < midnight.getTime();
+  const window = dayWindow(schedule, now);
+
   if (desired === "on") {
-    if (phase.phase === "off") {
+    if (phase.phase === "off" || stale) {
       return { phase: { phase: "on", phaseSince: now, graceUntil: null }, effects: ["clock_in"], clearOverride };
     }
     if (phase.phase === "grace") {
@@ -153,13 +166,18 @@ export function advanceDuty({ phase, schedule, override, now }) {
     return { phase, effects: [], clearOverride };
   }
 
+  // 手动下班：立即落盘，没有宽限（验收 2「立即生效」）——包括宽限期内点
+  // “立即下班”（否则 graceSeconds 最长可配到一天，override 被吞掉）。
+  if (active?.mode === "off" && phase.phase !== "off") {
+    return { phase: { phase: "off", phaseSince: now, graceUntil: null }, effects: ["pause_runs"], clearOverride };
+  }
+
   // desired === "off"
   if (phase.phase === "on") {
-    if (active?.mode === "off") {
-      // 手动下班：立即落盘，没有宽限（验收 2「立即生效」）。
+    if (stale) {
+      // 昨天残留的 on 不是今天的上班：直接落 off，不要伪造今天的宽限。
       return { phase: { phase: "off", phaseSince: now, graceUntil: null }, effects: ["pause_runs"], clearOverride };
     }
-    const window = dayWindow(schedule, now);
     const graceUntil = window ? window.endMs + schedule.graceSeconds * 1000 : now;
     if (schedule.graceSeconds > 0 && graceUntil > now) {
       return { phase: { phase: "grace", phaseSince: now, graceUntil }, effects: ["begin_grace"], clearOverride };
@@ -169,6 +187,10 @@ export function advanceDuty({ phase, schedule, override, now }) {
   }
 
   if (phase.phase === "grace") {
+    if (stale) {
+      // A grace phase left over from a previous day is not a grace today.
+      return { phase: { phase: "off", phaseSince: now, graceUntil: null }, effects: ["pause_runs"], clearOverride };
+    }
     // 宽限只在「现在确实下班了」时才会到期落盘；班表反悔（改回上班）走 desired===on 分支。
     if (!scheduleNow) {
       if (phase.graceUntil !== null && now >= phase.graceUntil) {

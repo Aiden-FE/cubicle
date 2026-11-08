@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { groupTasksForHandle } from "./scene/handleGroups.js";
+import { useDialog } from "./useDialog.js";
 
 // Topic names mirrored from src/shared/envelope.mjs TOPICS (process boundary).
 const RUN_TOPIC = "run.event";
@@ -23,20 +24,23 @@ const STATUS_LABELS = /** @type {Record<string, string>} */ ({ open: "待办", r
  * @param {{
  *   snapshot: import("./App.jsx").OfficeSnapshotData | null,
  *   onClose: () => void,
+ *   onOpenTask: (taskId?: number | null) => void,
  * }} props
  */
-export function TaskHandle({ snapshot, onClose }) {
+export function TaskHandle({ snapshot, onClose, onOpenTask }) {
   const [tasks, setTasks] = useState(/** @type {{ id: number, title: string, status: string, employeeName: string, latestSessionStatus?: string | null }[]} */ ([]));
   // 票 10: taskId → 续跑判决（canResume + 为什么不能续跑），来自 task.interrupted.list。
   const [resumable, setResumable] = useState(
     /** @type {() => Map<number, { canResume: boolean, resumeHint: string | null }>} */ (() => new Map()),
   );
+  const [loadError, setLoadError] = useState(false);
   const companyId = snapshot?.activeCompanyId ?? null;
 
   const loadTasks = useCallback(async () => {
     if (companyId === null) {
       setTasks([]);
       setResumable(new Map());
+      setLoadError(false);
       return;
     }
     try {
@@ -50,8 +54,10 @@ export function TaskHandle({ snapshot, onClose }) {
         verdicts.set(Number(row.id), { canResume: row.canResume === true, resumeHint: row.resumeHint ?? null });
       }
       setResumable(verdicts);
+      setLoadError(false);
     } catch {
-      // 后台打了个盹：把手留着上一次列表，下一次事件再更新
+      // A failed load is not an empty office: keep the last list but say so.
+      setLoadError(true);
     }
   }, [companyId]);
 
@@ -80,20 +86,30 @@ export function TaskHandle({ snapshot, onClose }) {
 
   const sections = groupTasksForHandle(tasks);
 
+  const dialogRef = useDialog(onClose);
+
   return (
-    <aside className="handle-drawer" data-testid="handle-drawer">
+    <aside className="handle-drawer" data-testid="handle-drawer" ref={dialogRef} role="dialog" aria-modal="true" aria-label="工单把手" tabIndex={-1}>
       <header className="task-header">
-        <div className="task-title">任务把手</div>
-        <button type="button" className="task-close" data-testid="handle-close" onClick={onClose} aria-label="收起任务把手">
+        <div className="task-title">工单把手</div>
+        <button type="button" className="task-close" data-testid="handle-close" onClick={onClose} aria-label="收起工单把手">
           ✕
         </button>
       </header>
-      {sections.interrupted.length > 0 ? (
-        <InterruptedSection tasks={sections.interrupted} resumable={resumable} onActioned={() => void loadTasks()} />
+      {loadError ? (
+        <div className="handle-section">
+          <div className="task-note" data-testid="handle-load-error">
+            工单列表加载失败。
+            <button type="button" className="task-mini-button" onClick={() => void loadTasks()}>重试</button>
+          </div>
+        </div>
       ) : null}
-      <HandleSection testid="handle-running" title="进行中" tasks={sections.running} empty="没有进行中的工单。" />
-      <HandleSection testid="handle-review" title="待验收" tasks={sections.review} empty="没有等验收的工单。" />
-      <HandleSection testid="handle-archive" title="档案" tasks={sections.archive} empty="档案是空的。" />
+      {sections.interrupted.length > 0 ? (
+        <InterruptedSection tasks={sections.interrupted} resumable={resumable} onActioned={() => void loadTasks()} onOpenTask={onOpenTask} />
+      ) : null}
+      <HandleSection testid="handle-running" title="进行中" tasks={sections.running} empty="没有进行中的工单。" onOpenTask={onOpenTask} />
+      <HandleSection testid="handle-review" title="待验收" tasks={sections.review} empty="没有等验收的工单。" onOpenTask={onOpenTask} />
+      <HandleSection testid="handle-archive" title="档案" tasks={sections.archive} empty="档案是空的。" onOpenTask={onOpenTask} />
     </aside>
   );
 }
@@ -107,20 +123,36 @@ export function TaskHandle({ snapshot, onClose }) {
  *   tasks: { id: number, title: string, status: string, employeeName: string }[],
  *   resumable: Map<number, { canResume: boolean, resumeHint: string | null }>,
  *   onActioned: () => void,
+ *   onOpenTask: (taskId: number) => void,
  * }} props
  */
-function InterruptedSection({ tasks, resumable, onActioned }) {
+function InterruptedSection({ tasks, resumable, onActioned, onOpenTask }) {
   const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const [confirmAbandon, setConfirmAbandon] = useState(false);
   /**
    * @param {"task.resume" | "task.rerun" | "task.abandon"} method
    * @param {number} taskId
    */
   const act = async (method, taskId) => {
+    if (busyRef.current) return;
+    if (method === "task.abandon" && !confirmAbandon) {
+      setConfirmAbandon(true);
+      setNote("再点一次「放弃」确认：工单进入失败归档，历史保留。");
+      return;
+    }
+    setConfirmAbandon(false);
     setNote("");
+    busyRef.current = true;
+    setBusy(true);
     try {
       await window.cubicle.invoke(method, { taskId });
     } catch (err) {
       setNote(/** @type {{ message?: string }} */ (err ?? {}).message ?? "处置失败");
+    } finally {
+      setBusy(false);
+      busyRef.current = false;
     }
     onActioned();
   };
@@ -148,17 +180,20 @@ function InterruptedSection({ tasks, resumable, onActioned }) {
             </span>
             <span className="interrupted-actions">
               {verdict.canResume ? (
-                <button type="button" className="task-mini-button" data-testid="interrupted-resume" onClick={() => void act("task.resume", task.id)}>
+                <button type="button" className="task-mini-button" data-testid="interrupted-resume" disabled={busy} onClick={() => void act("task.resume", task.id)}>
                   续跑
                 </button>
               ) : (
                 <span className="interrupted-hint" data-testid="interrupted-hint" title={verdict.resumeHint ?? ""}>不能续跑</span>
               )}
-              <button type="button" className="task-mini-button" data-testid="interrupted-rerun" onClick={() => void act("task.rerun", task.id)}>
+              <button type="button" className="task-mini-button" data-testid="interrupted-rerun" disabled={busy} onClick={() => void act("task.rerun", task.id)}>
                 重跑
               </button>
-              <button type="button" className="task-mini-button task-mini-danger" data-testid="interrupted-abandon" onClick={() => void act("task.abandon", task.id)}>
+              <button type="button" className="task-mini-button task-mini-danger" data-testid="interrupted-abandon" disabled={busy} onClick={() => void act("task.abandon", task.id)}>
                 放弃
+              </button>
+              <button type="button" className="task-mini-button" data-testid="interrupted-open" onClick={() => onOpenTask(task.id)}>
+                查看
               </button>
             </span>
           </div>
@@ -169,21 +204,24 @@ function InterruptedSection({ tasks, resumable, onActioned }) {
 }
 
 /**
- * @param {{ testid: string, title: string, tasks: { id: number, title: string, status: string, employeeName: string, latestSessionStatus?: string | null }[], empty: string }} props
+ * @param {{ testid: string, title: string, tasks: { id: number, title: string, status: string, employeeName: string, latestSessionStatus?: string | null }[], empty: string, onOpenTask: (taskId: number) => void }} props
  */
-function HandleSection({ testid, title, tasks, empty }) {
+function HandleSection({ testid, title, tasks, empty, onOpenTask }) {
   return (
     <section className="handle-section" data-testid={testid}>
       <div className="handle-section-title">{title} · {tasks.length}</div>
       {tasks.length === 0 ? <div className="task-empty">{empty}</div> : null}
       {tasks.map((task) => (
-        <div
+        <button
           key={task.id}
+          type="button"
           className="handle-row"
           data-testid="handle-row"
           data-task-id={task.id}
           data-status={task.status}
           data-paused={task.status === "running" && task.latestSessionStatus === "paused" ? "true" : "false"}
+          onClick={() => onOpenTask(task.id)}
+          title="在工单台打开"
         >
           <span className="task-row-title">#{task.id} {task.title}</span>
           <span className="task-row-meta">
@@ -192,7 +230,7 @@ function HandleSection({ testid, title, tasks, empty }) {
               <span className="task-paused-badge" data-testid="handle-paused-badge">已下班·暂停</span>
             ) : null}
           </span>
-        </div>
+        </button>
       ))}
     </section>
   );

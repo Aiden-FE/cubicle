@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useDialog } from "./useDialog.js";
 
 /**
  * 关于浮层（票 13 验收 5）：产品名 + 版本号。版本号来自 app.getVersion()
@@ -26,8 +27,10 @@ export function AboutPanel({ onClose }) {
     };
   }, []);
 
+  const dialogRef = useDialog(onClose);
+
   return (
-    <aside className="rail-drawer about-panel" data-testid="about-panel">
+    <aside className="rail-drawer about-panel" data-testid="about-panel" ref={dialogRef} role="dialog" aria-modal="true" aria-label="关于 Cubicle" tabIndex={-1}>
       <header className="task-header">
         <div className="task-title">关于 Cubicle</div>
         <button type="button" className="task-close" data-testid="about-close" onClick={onClose} aria-label="收起关于页">

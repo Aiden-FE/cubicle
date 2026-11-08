@@ -8,7 +8,7 @@
 import { createReply, createErrorReply, createEvent, TOPICS } from "../shared/envelope.mjs";
 import { appError } from "../shared/apperror.mjs";
 import { draftTask, rejectPrompt, resumePrompt, taskPrompt } from "./task/playbook.mjs";
-import { engineConfigDir, enginePaths } from "./engine/paths.mjs";
+import { employeeWorkspaceDir, engineConfigDir } from "./engine/paths.mjs";
 import { DEFAULT_SCHEDULE, validateSchedule } from "./duty/schedule.mjs";
 import { deriveEngineBadge, installGuide } from "./engine/badge.mjs";
 import { extendBudgetBy50 } from "./cost/budget.mjs";
@@ -136,10 +136,9 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
 
   /** @param {number} companyId */
   function requireCompany(companyId) {
-    const exists = store
-      .officeSnapshot()
-      .companies.some((/** @type {{ id: number }} */ c) => c.id === companyId);
-    if (!exists) throw appError("unknown_company", `no company with id ${companyId}`);
+    if (!store.companyExists(companyId)) {
+      throw appError("unknown_company", `no company with id ${companyId}`);
+    }
   }
 
   /**
@@ -227,6 +226,12 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
 
     "role.list"() {
       return { payload: { roles: store.listRoles() } };
+    },
+
+    "employee.list"(payload) {
+      const companyId = requirePositiveId(payload, "companyId");
+      requireCompany(companyId);
+      return { payload: { employees: store.listEmployeesForCompany({ companyId }) } };
     },
 
     // — engines (ticket 11: 徽章三态 / 准入探针 / 手动带风险启用 / 切换) —
@@ -341,7 +346,7 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
       return { payload: draftTask(text) };
     },
 
-    "task.create"(payload) {
+    async "task.create"(payload) {
       const employeeId = requirePositiveId(payload, "employeeId");
       const text = requireName(payload, "text");
       const employee = store.employeeById(employeeId);
@@ -362,9 +367,11 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
 
       // The git door decides usability BEFORE a task exists: an
       // unversioned workspace cannot record a start HEAD (票 05 验收 5).
-      const workspaceDir = enginePaths(store.dataDir, employee.roleSnapshot.manifest.engine || "pi", employeeId)
-        .workspaceDir;
-      const head = requireGit().head(workspaceDir);
+      // A workspace belongs to the employee, not the currently selected
+      // engine: switching pi→codex must not move the task to an empty repo
+      // (ticket-11 review: baseHead would not exist there).
+      const workspaceDir = employeeWorkspaceDir(store.dataDir, employeeId);
+      const head = await requireGit().head(workspaceDir);
       if (!head.ok) throw appError(head.code, head.message);
 
       const task = store.createTask({
@@ -461,14 +468,11 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
       // 票 08: 右把手按公司看全量（跨组）；工单台仍按组。两个都走同一扇门。
       if (typeof record.companyId === "number") {
         const companyId = requirePositiveId(payload, "companyId");
-        const companyExists = store
-          .officeSnapshot()
-          .companies.some((/** @type {{ id: number }} */ c) => c.id === companyId);
-        if (!companyExists) throw appError("unknown_company", `no company with id ${companyId}`);
+        requireCompany(companyId);
         return { payload: { tasks: store.listTasksForCompany({ companyId }) } };
       }
       const groupId =
-        typeof record.groupId === "number" ? requirePositiveId(payload, "groupId") : store.officeSnapshot().activeGroupId;
+        typeof record.groupId === "number" ? requirePositiveId(payload, "groupId") : store.activeGroupId();
       if (groupId === null) return { payload: { tasks: [] } };
       return { payload: { tasks: store.listTasks({ groupId }) } };
     },
@@ -497,6 +501,10 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
           task,
           sessions,
           artifacts: store.listArtifacts({ taskId }),
+          // 票 06/12: the decision surface reads the latest closed round by
+          // default; older rounds stay available for history, never silently
+          // flattened above the newest diff.
+          latestArtifacts: store.listArtifacts({ taskId, latestRunOnly: true }),
           tokens: store.taskTokenSummary(taskId),
           iterations: sessions.length,
           // 票 12: 预算与「到顶/黄点」判定的原料一起上信封（判定纯函数在渲染层镜像）；
@@ -662,9 +670,7 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
       const record = /** @type {Record<string, unknown>} */ (payload ?? {});
       const rawGroup = record.groupId;
       // Validate against real rows so the UI can't wedge the selection.
-      const companyExists = store
-        .officeSnapshot()
-        .companies.some((/** @type {{ id: number }} */ c) => c.id === companyId);
+      const companyExists = store.companyExists(companyId);
       if (!companyExists) throw appError("unknown_company", `no company with id ${companyId}`);
       if (rawGroup !== undefined && rawGroup !== null) {
         const groupId = requirePositiveId(payload, "groupId");
@@ -760,7 +766,7 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
    * @returns {HandleResult | Promise<HandleResult>}
    */
   function run(invoke) {
-    const method = methods[invoke.method];
+    const method = Object.hasOwn(methods, invoke.method) ? methods[invoke.method] : null;
     if (!method) {
       return {
         reply: createErrorReply(invoke, {

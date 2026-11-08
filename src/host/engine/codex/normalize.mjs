@@ -27,7 +27,7 @@
  *
  * @typedef {object} CodexNormalizer
  * @property {(line: string) => NormalizedEvent[]} push Feed one raw stdout line; returns that line's events.
- * @property {() => NormalizedEvent[]} end Flush the terminal event (exactly one agent_end).
+ * @property {(exitOk?: boolean) => NormalizedEvent[]} end Flush the terminal event (exactly one agent_end).
  * @property {number} ignoredLines Count of blank or non-JSON lines.
  * @property {number} warningLines Count of benign engine warnings folded away.
  */
@@ -99,7 +99,9 @@ function foldCommandExecution(item, phase) {
       toolName: "shell",
       isError: status !== "completed" || (exitCode !== null && exitCode !== 0),
       result: {
-        output: typeof item.aggregated_output === "string" ? item.aggregated_output : "",
+        // The artifact collector caps display text; the event tail must not
+        // carry a 10 MB command log into memory / across the process bridge.
+        output: String(typeof item.aggregated_output === "string" ? item.aggregated_output : "").slice(0, 20_000),
         exitCode,
         status,
       },
@@ -182,7 +184,17 @@ export function createCodexNormalizer() {
       "turn.completed",
       (record) => {
         lastTurnStatus = "ok";
-        return [{ type: "turn_end", status: "ok", usage: toUsage(record.usage) }];
+        const usage = toUsage(record.usage);
+        // pi treats an all-zero usage as "the provider never spoke about
+        // tokens"; codex must use the same semantics or an unmeasured engine
+        // silently bills as 0 and the budget gate never trips.
+        return [
+          {
+            type: "turn_end",
+            status: "ok",
+            ...(Object.values(usage).some((n) => n > 0) ? { usage } : {}),
+          },
+        ];
       },
     ],
     [
@@ -242,11 +254,13 @@ export function createCodexNormalizer() {
       return [{ type: "unknown", rawType: record.type, payload: record }];
     },
 
-    end() {
+    end(exitOk = true) {
       // The process closed: whatever the last turn reported is the run's
       // verdict; a stream that never completed a turn is an honest "unknown"
-      // (run-manager records that as failed — never a clean end).
-      return [{ type: "agent_end", status: lastTurnStatus }];
+      // (run-manager records that as failed — never a clean end). A non-zero
+      // exit after the last turn overrides "ok": a partially successful
+      // process must not be recorded as a clean completion.
+      return [{ type: "agent_end", status: exitOk ? lastTurnStatus : "failed" }];
     },
   };
 }

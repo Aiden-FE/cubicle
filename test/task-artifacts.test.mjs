@@ -104,7 +104,7 @@ test("a finished task run leaves exactly the four artifacts, in order", async ()
     porcelain: "M greet.txt",
   });
   try {
-    ctx.hook({ run: ctx.run, status: "completed", events: WORK_RUN });
+    await ctx.hook({ run: ctx.run, status: "completed", events: WORK_RUN });
     const artifacts = ctx.store.listArtifacts({ taskId: ctx.task.id });
     assert.deepEqual(artifacts.map((a) => a.kind), ["diff_summary", "changed_files", "command_output", "report"]);
     assert.deepEqual(artifacts.map((a) => a.runId), [ctx.run.id, ctx.run.id, ctx.run.id, ctx.run.id]);
@@ -133,7 +133,7 @@ test("a finished task run leaves exactly the four artifacts, in order", async ()
 test("a clean run ends in 待验收 — 完成 is the boss's call, never the engine's (票 06)", async () => {
   const ctx = await withCollector("review", { ok: true, headNow: "c".repeat(40), stat: "", nameStatus: [], porcelain: "" });
   try {
-    ctx.hook({ run: ctx.run, status: "completed", events: WORK_RUN });
+    await ctx.hook({ run: ctx.run, status: "completed", events: WORK_RUN });
     assert.equal(/** @type {any} */ (ctx.store.taskById(ctx.task.id)).status, "review");
     // four honest slots even for an aborted run with nothing in them
     assert.equal(ctx.store.listArtifacts({ taskId: ctx.task.id }).length, 4);
@@ -146,7 +146,7 @@ test("a cancelled or failed run marks the task 失败 (票 06: 取消终止并�
   for (const runStatus of ["aborted", "failed"]) {
     const ctx = await withCollector(`fail-${runStatus}`, { ok: true, headNow: "c".repeat(40), stat: "", nameStatus: [], porcelain: "" });
     try {
-      ctx.hook({ run: ctx.run, status: /** @type {any} */ (runStatus), events: eventsOf([{ type: "agent_end", status: "failed" }]) });
+      await ctx.hook({ run: ctx.run, status: /** @type {any} */ (runStatus), events: eventsOf([{ type: "agent_end", status: "failed" }]) });
       assert.equal(/** @type {any} */ (ctx.store.taskById(ctx.task.id)).status, "failed");
       // 失败不是终态：重试从 失败 → 进行中 回到循环里
       assert.equal(ctx.store.setTaskStatus(ctx.task.id, "running").status, "running");
@@ -159,7 +159,7 @@ test("a cancelled or failed run marks the task 失败 (票 06: 取消终止并�
 test("paused（下班落盘）：不落四件套、不搬任务状态 —— 暂停的一轮等上班续跑（票 09）", async () => {
   const ctx = await withCollector("paused", { ok: true, headNow: "c".repeat(40), stat: "", nameStatus: [], porcelain: "" });
   try {
-    ctx.hook({
+    await ctx.hook({
       run: ctx.run,
       status: "paused",
       events: eventsOf([
@@ -178,7 +178,7 @@ test("paused（下班落盘）：不落四件套、不搬任务状态 —— 暂
 test("artifacts still land when the workspace cannot be diffed — with an honest reason", async () => {
   const ctx = await withCollector("nogit", { ok: false, code: "not_a_git_workspace", message: "工作区不是 git 仓库" });
   try {
-    ctx.hook({ run: ctx.run, status: "completed", events: WORK_RUN });
+    await ctx.hook({ run: ctx.run, status: "completed", events: WORK_RUN });
     const artifacts = ctx.store.listArtifacts({ taskId: ctx.task.id });
     assert.deepEqual(artifacts.map((a) => a.kind), ["diff_summary", "changed_files", "command_output", "report"]);
     assert.ok(artifacts[0].content.includes("工作区不是 git 仓库"));
@@ -200,6 +200,25 @@ test("commandTranscript keeps every bash command with its output and failure mar
   assert.ok(transcript.includes("[失败]"));
   assert.ok(transcript.includes("boom"), "object results are rendered as text");
   assert.ok(!transcript.includes("read"));
+});
+
+test("codex 的 shell 事件也算命令输出，并直接取 result.output（不是 JSON dump）", () => {
+  const transcript = commandTranscript([
+    { at: 1, event: { type: "tool_execution_start", toolCallId: "s1", toolName: "shell", args: { command: "npm test" } } },
+    {
+      at: 2,
+      event: {
+        type: "tool_execution_end",
+        toolCallId: "s1",
+        toolName: "shell",
+        isError: false,
+        result: { output: "# pass 356", exitCode: 0, status: "completed" },
+      },
+    },
+  ]);
+  assert.match(transcript, /\$ npm test/);
+  assert.match(transcript, /# pass 356/);
+  assert.doesNotMatch(transcript, /"exitCode"/, "不要退化成 JSON dump");
 });
 
 test("powershell runs count as command output too, rendered from the engine's structured result", () => {

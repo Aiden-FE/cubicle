@@ -49,7 +49,10 @@ const ROW_STATUS_JS = (taskId) =>
     return detail ? detail.querySelector('[data-testid="task-status"]')?.dataset.status ?? '' : '';
   })()`;
 const DETAIL_STATUS_JS = `document.querySelector('[data-testid="task-status"]')?.dataset.status ?? ''`;
-const ARTIFACT_COUNT_JS = `document.querySelectorAll('[data-testid="task-detail"] [data-testid^="artifact-"]').length`;
+const ARTIFACT_COUNT_JS = `document.querySelectorAll('[data-testid="task-detail"] [data-testid^="artifact-"], [data-testid="task-detail"] [data-testid^="history-artifact-"]').length`;
+const HISTORICAL_ARTIFACT_COUNT_JS = `document.querySelectorAll('[data-testid="task-detail"] [data-testid^="history-artifact-"]').length`;
+const HISTORICAL_ARTIFACT_JS = (/** @type {string} */ kind) =>
+  `document.querySelector('[data-testid="task-detail"] [data-testid="history-artifact-${kind}"] pre')?.textContent ?? ''`;
 /** @param {string} kind @param {number} index */
 const ARTIFACT_JS = (kind, index = 0) =>
   `document.querySelectorAll('[data-testid="task-detail"] [data-testid="artifact-${kind}"] pre')[${index}]?.textContent ?? ''`;
@@ -122,6 +125,10 @@ async function phaseReview(ctx) {
   await waitFor(async () => String(await evalIn(contents, `document.querySelector('[data-testid="task-playbook"]')?.textContent ?? ''`)).includes("加功能"), { timeoutMs: 3000 });
   await setSelect(contents, '[data-testid="task-employee"]', String(programmerId));
   await click(contents, '[data-testid="task-dispatch"]');
+  await waitFor(async () => {
+    const list = /** @type {any} */ (await evalIn(contents, `window.cubicle.invoke('task.list', { groupId: ${snapshot?.activeGroupId ?? 0} })`));
+    return (list?.tasks ?? []).length > 0;
+  }, { timeoutMs: 5000 });
 
   const created = /** @type {any} */ (
     await evalIn(contents, `window.cubicle.invoke('task.list', { groupId: ${snapshot?.activeGroupId ?? 0} })`)
@@ -185,13 +192,26 @@ async function phaseReview(ctx) {
   add("第二轮跑完又自动回到「待验收」", review2);
 
   await waitFor(async () => Number(await evalIn(contents, ARTIFACT_COUNT_JS)) === 8, { timeoutMs: 10_000 });
-  const secondDiff = String(await evalIn(contents, ARTIFACT_JS("diff_summary", 1)));
-  const secondFiles = String(await evalIn(contents, ARTIFACT_JS("changed_files", 1)));
-  const secondReport = String(await evalIn(contents, ARTIFACT_JS("report", 1)));
+  const latestArtifactCount = Number(await evalIn(contents, `document.querySelectorAll('[data-testid="task-detail"] [data-testid^="artifact-"]').length`));
+  const historicalArtifactCount = Number(await evalIn(contents, HISTORICAL_ARTIFACT_COUNT_JS));
+  const latestDiff = String(await evalIn(contents, ARTIFACT_JS("diff_summary")));
+  const latestFiles = String(await evalIn(contents, ARTIFACT_JS("changed_files")));
+  const latestReport = String(await evalIn(contents, ARTIFACT_JS("report")));
+  const historicalDiff = String(await evalIn(contents, HISTORICAL_ARTIFACT_JS("diff_summary")));
+  add(
+    "第 2 轮四件套：默认展示最新一轮，旧一轮折叠在历史里（不把最旧 diff 摆在决策前）",
+    latestArtifactCount === 4 && historicalArtifactCount === 4,
+    `latest=${latestArtifactCount} history=${historicalArtifactCount}`,
+  );
   add(
     "第 2 轮四件套：diff 仍相对任务起点（起点 SHA + 员工改动都在其中）",
-    secondDiff.includes(headBefore.slice(0, 7)) && secondFiles.includes("greet.txt") && secondReport.includes("打回意见已处理"),
-    secondDiff.slice(0, 70).replace(/\n/g, " ⏎ "),
+    latestDiff.includes(headBefore.slice(0, 7)) && latestFiles.includes("greet.txt") && latestReport.includes("打回意见已处理"),
+    latestDiff.slice(0, 70).replace(/\n/g, " ⏎ "),
+  );
+  add(
+    "历史产出仍可查：第 1 轮 diff 还在工作区历史里",
+    historicalDiff.includes(headBefore.slice(0, 7)) && historicalDiff.includes("greet.txt"),
+    historicalDiff.slice(0, 70).replace(/\n/g, " ⏎ "),
   );
   const iterations = String(await evalIn(contents, ITERATIONS_JS));
   const sessions2 = String(await evalIn(contents, SESSIONS_JS));
@@ -222,6 +242,10 @@ async function phaseReview(ctx) {
   await typeInto(contents, '[data-testid="task-sentence"]', SLOW_SENTENCE);
   await waitFor(async () => String(await evalIn(contents, `document.querySelector('[data-testid="task-playbook"]')?.textContent ?? ''`)).includes("写文档"), { timeoutMs: 3000 });
   await click(contents, '[data-testid="task-dispatch"]');
+  await waitFor(async () => {
+    const list = /** @type {any} */ (await evalIn(contents, `window.cubicle.invoke('task.list', { groupId: ${snapshot?.activeGroupId ?? 0} })`));
+    return (list?.tasks ?? []).some((/** @type {any} */ t) => t.title === SLOW_SENTENCE);
+  }, { timeoutMs: 5000 });
   const slowList = /** @type {any} */ (
     await evalIn(contents, `window.cubicle.invoke('task.list', { groupId: ${snapshot?.activeGroupId ?? 0} })`)
   );
@@ -233,6 +257,9 @@ async function phaseReview(ctx) {
   if (slowRunning) {
     await click(contents, `[data-testid="task-row"][data-task-id="${slowTaskId}"]`);
     await waitFor(async () => (await evalIn(contents, `document.querySelector('[data-testid="task-cancel"]') !== null`)) === true, { timeoutMs: 3000 });
+    await click(contents, '[data-testid="task-cancel"]');
+    // Destructive exits are a two-step arming flow (no blocking native dialog).
+    await waitFor(async () => String(await evalIn(contents, `document.querySelector('[data-testid="task-error"]')?.textContent ?? ''`)).includes("再点一次"), { timeoutMs: 3000 });
     await click(contents, '[data-testid="task-cancel"]');
     const failedShown = await waitRowStatus(contents, slowTaskId, "failed", observed, 20_000);
     add("点「取消」后运行被终止，工单标记为「失败」", failedShown, `detail=${await evalIn(contents, DETAIL_STATUS_JS)}`);
@@ -273,7 +300,7 @@ async function phaseReview(ctx) {
       tokens2,
       observed: [...observed],
       gitAudit: audit?.commands ?? [],
-      artifacts: { firstDiff, firstReport, secondDiff, secondFiles, secondReport },
+      artifacts: { firstDiff, firstReport, secondDiff: latestDiff, secondFiles: latestFiles, secondReport: latestReport, historicalDiff },
     },
   };
 }

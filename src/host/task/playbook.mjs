@@ -126,7 +126,7 @@ export function taskPrompt(task) {
     "",
     "工作方式（必须遵守）：",
     "1. 只在当前工作目录里改动，不要越出工作区。",
-    "2. 需要跑命令（测试、查询、提交）就用 bash 工具。",
+    "2. 需要跑命令（测试、查询、提交）就用 shell 工具（Windows 上是 PowerShell）。",
     "3. 改动完成后你自己提交：git add + git commit，写清楚 commit message；不要 push。",
     "4. 最后一条消息以「收尾报告」开头：完成了什么、变更了哪些文件、测试/命令的输出要点、未尽事项。",
   ].join("\n");

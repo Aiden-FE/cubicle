@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { EngineCard } from "./EngineCard.jsx";
+import { useDialog } from "./useDialog.js";
 
 // Topic name mirrored from src/shared/envelope.mjs TOPICS (process boundary).
 const RUN_TOPIC = "run.event";
@@ -24,15 +25,33 @@ export function ChatOverlay({ employee, onClose }) {
   const [draft, setDraft] = useState("");
   const [busyNote, setBusyNote] = useState(/** @type {string | null} */ (null));
   const listRef = useRef(/** @type {HTMLDivElement | null} */ (null));
+  const stickToBottom = useRef(true);
+  const pendingEvents = useRef(/** @type {{ event: EngineEvent, at: number }[]} */ ([]));
+  const flushTimer = useRef(/** @type {ReturnType<typeof setTimeout> | null} */ (null));
+
+  /** @type {(event: EngineEvent) => void} */
+  const flushEvents = useCallback(() => {
+    flushTimer.current = null;
+    const batch = pendingEvents.current;
+    pendingEvents.current = [];
+    if (batch.length === 0) return;
+    setItems((prev) => capTimeline(batch.reduce((acc, entry) => appendEvent(acc, entry.event, entry.at), prev)));
+  }, []);
 
   const applyEvent = useCallback(
-    /** @param {EngineEvent} event */
-    (event) => {
-      setItems((prev) => appendEvent(prev, event));
+    /** @param {EngineEvent} event @param {number} [at] */
+    (event, at = Date.now()) => {
       if (event.type === "session_start") setRunning(true);
       if (event.type === "agent_end") setRunning(false);
+      // Coalesce text deltas: a run can stream thousands of token events; one
+      // React commit per delta re-renders the whole drawer. 50ms is invisible
+      // to a human and cuts the render count by ~10-50x.
+      pendingEvents.current.push({ event, at });
+      if (flushTimer.current === null) {
+        flushTimer.current = setTimeout(flushEvents, 50);
+      }
     },
-    [],
+    [flushEvents],
   );
 
   /** 折叠/展开某条工具事件（index 稳定：时间线只追加与原地补全） */
@@ -47,11 +66,20 @@ export function ChatOverlay({ employee, onClose }) {
   );
 
   useEffect(() => {
+    // Re-opening the drawer for another employee must not show the previous
+    // employee's conversation.
+    setItems([]);
+    setRunning(false);
+    pendingEvents.current = [];
+    if (flushTimer.current !== null) {
+      clearTimeout(flushTimer.current);
+      flushTimer.current = null;
+    }
     let alive = true;
     const unsubscribe = window.cubicle.subscribe(RUN_TOPIC, (envelope) => {
-      const payload = /** @type {{ employeeId: number, event: EngineEvent }} */ (envelope.payload);
+      const payload = /** @type {{ employeeId: number, event: EngineEvent, at?: number }} */ (envelope.payload);
       if (payload.employeeId !== employee.id) return;
-      applyEvent(payload.event);
+      applyEvent(payload.event, payload.at);
     });
     // Re-paint the last run for late openers / after a view reload: the host
     // keeps the event tail of the most recent run per employee.
@@ -59,12 +87,21 @@ export function ChatOverlay({ employee, onClose }) {
       .invoke("run.history", { employeeId: employee.id })
       .then((result) => {
         if (!alive) return;
-        const history = /** @type {{ lastRun: { status: string } | null, events: { event: EngineEvent }[] }} */ (result);
+        const history = /** @type {{ lastRun: { status: string, prompt?: string } | null, events: { event: EngineEvent, at: number }[] }} */ (result);
         setRunning(history.lastRun?.status === "running");
         if (history.events && history.events.length > 0) {
           setItems((prev) =>
-            prev.length > 0 ? prev : history.events.reduce((acc, entry) => appendEvent(acc, entry.event), /** @type {TimelineItem[]} */ ([])),
+            prev.length > 0
+              ? prev
+              : [
+                  ...(history.lastRun?.prompt
+                    ? [/** @type {TimelineItem} */ ({ kind: "user", text: history.lastRun.prompt })]
+                    : []),
+                  ...history.events.reduce((acc, entry) => appendEvent(acc, entry.event, entry.at), /** @type {TimelineItem[]} */ ([])),
+                ],
           );
+        } else if (history.lastRun?.prompt) {
+          setItems((prev) => (prev.length > 0 ? prev : [{ kind: "user", text: /** @type {string} */ (history.lastRun?.prompt) }]));
         }
       })
       .catch(() => {
@@ -73,22 +110,39 @@ export function ChatOverlay({ employee, onClose }) {
     return () => {
       alive = false;
       unsubscribe();
+      pendingEvents.current = [];
+      if (flushTimer.current !== null) {
+        clearTimeout(flushTimer.current);
+        flushTimer.current = null;
+      }
     };
   }, [employee.id, applyEvent]);
 
   useEffect(() => {
     const list = listRef.current;
-    if (list) list.scrollTop = list.scrollHeight;
+    if (list && stickToBottom.current) list.scrollTop = list.scrollHeight;
   }, [items]);
+
+  const onScroll = () => {
+    const list = listRef.current;
+    if (!list) return;
+    stickToBottom.current = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+  };
 
   const send = async () => {
     const text = draft.trim();
     if (!text || running) return;
     setDraft("");
     setBusyNote(null);
+    stickToBottom.current = true;
+    const userItem = /** @type {TimelineItem} */ ({ kind: "user", text });
+    setItems((prev) => capTimeline([...prev, userItem]));
     try {
       await window.cubicle.invoke("run.start", { employeeId: employee.id, text });
     } catch (err) {
+      // The send failed: remove the optimistic bubble and give the text back.
+      setItems((prev) => prev.filter((item) => item !== userItem));
+      setDraft((prev) => (prev.length > 0 ? prev : text));
       const failure = /** @type {{ code?: string, message?: string }} */ (err);
       const code = failure.code ?? "run_start_failed";
       setBusyNote(
@@ -98,7 +152,9 @@ export function ChatOverlay({ employee, onClose }) {
             ? "引擎还没配好：把 BYOK 模型配置 engines/pi/models.json 放进应用数据目录后再试。"
             : code === "off_duty"
               ? failure.message ?? "公司正在下班中：先在左轨「上下班」点「立即上班」。"
-              : `没能开始：${code}`,
+              : code === "method_not_allowed"
+                ? "界面调用被 IPC 白名单拒绝。"
+                : `没能开始：${code}`,
       );
     }
   };
@@ -112,8 +168,10 @@ export function ChatOverlay({ employee, onClose }) {
     }
   };
 
+  const dialogRef = useDialog(onClose);
+
   return (
-    <aside className="chat-drawer" data-testid="chat-overlay" data-employee-id={employee.id}>
+    <aside className="chat-drawer" data-testid="chat-overlay" data-employee-id={employee.id} ref={dialogRef} role="dialog" aria-modal="true" aria-label="员工对话" tabIndex={-1}>
       <header className="chat-header">
         <div>
           <div className="chat-title" data-testid="chat-title">{employee.name}</div>
@@ -131,7 +189,7 @@ export function ChatOverlay({ employee, onClose }) {
 
       <EngineCard employee={employee} />
 
-      <div className="chat-events" data-testid="chat-events" ref={listRef}>
+      <div className="chat-events" data-testid="chat-events" ref={listRef} onScroll={onScroll}>
         {items.length === 0 ? (
           <div className="chat-empty">对 TA 说一句话，事件会按时间出现在这里。</div>
         ) : null}
@@ -151,6 +209,8 @@ export function ChatOverlay({ employee, onClose }) {
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
+            // IME composition: Enter is "commit the candidate", not "send".
+            if (event.nativeEvent.isComposing || event.keyCode === 229) return;
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
               void send();
@@ -183,6 +243,12 @@ export function ChatOverlay({ employee, onClose }) {
  */
 function EventItem({ item, onToggle }) {
   switch (item.kind) {
+    case "user":
+      return (
+        <div className="chat-item chat-user" data-testid="chat-user" data-type="user">
+          {item.text}
+        </div>
+      );
     case "text":
       return (
         <div className="chat-item chat-text" data-testid="event-item" data-type="text">
@@ -215,7 +281,7 @@ function EventItem({ item, onToggle }) {
             onClick={onToggle}
             aria-expanded={item.expanded ? "true" : "false"}
           >
-            <span className="chat-tool-icon">🔧</span>
+            <span className="chat-tool-icon" aria-hidden="true">工具</span>
             <span className="chat-tool-name">{item.toolName}</span>
             <span className="chat-tool-state">
               {item.done ? (item.isError ? "失败" : "完成") : "执行中…"}
@@ -240,6 +306,12 @@ function EventItem({ item, onToggle }) {
       return (
         <div className={`chat-item chat-meta ${item.tone ?? ""}`} data-testid="event-item" data-type={item.metaType}>
           {item.text}
+          {item.at ? (
+            <>
+              {" · "}
+              <span className="chat-time">{formatTime(item.at)}</span>
+            </>
+          ) : null}
         </div>
       );
     case "error":
@@ -259,13 +331,35 @@ function EventItem({ item, onToggle }) {
  */
 
 /**
- * @typedef {{ kind: "text", text: string }
+ * @typedef {{ kind: "user", text: string }
+ *   | { kind: "text", text: string }
  *   | { kind: "thinking", text: string }
  *   | { kind: "tool", toolCallId: string, toolName: string, args: unknown, done: boolean, isError: boolean, result: unknown, expanded: boolean }
- *   | { kind: "meta", text: string, tone?: string, metaType: string }
+ *   | { kind: "meta", text: string, tone?: string, metaType: string, at?: number }
  *   | { kind: "error", code: string, message: string }
  * } TimelineItem
  */
+
+/** @param {number} at @returns {string} */
+function formatTime(at) {
+  try {
+    return new Date(at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Keep the live timeline bounded: a long run streams thousands of deltas, and
+ * the drawer re-renders the whole list on each one.
+ *
+ * @param {TimelineItem[]} items
+ * @returns {TimelineItem[]}
+ */
+function capTimeline(items) {
+  if (items.length <= 400) return items;
+  return items.slice(items.length - 400);
+}
 
 /**
  * Fold one normalized engine event into the timeline: consecutive deltas of
@@ -275,11 +369,11 @@ function EventItem({ item, onToggle }) {
  * @param {EngineEvent} event
  * @returns {TimelineItem[]}
  */
-function appendEvent(items, event) {
+function appendEvent(items, event, at = Date.now()) {
   const next = items.slice();
   switch (event.type) {
     case "session_start":
-      next.push({ kind: "meta", text: `会话 #${event.sessionId ?? "?"} 开始`, metaType: "session_start" });
+      next.push({ kind: "meta", text: `会话 #${event.sessionId ?? "?"} 开始`, metaType: "session_start", at });
       break;
     case "text_delta":
       appendDelta(next, "text", event.text);
@@ -325,6 +419,7 @@ function appendEvent(items, event) {
         kind: "meta",
         text: `${event.status === "failed" ? "回合失败" : "回合结束"}${tokenText}`,
         metaType: "turn_end",
+        at,
         tone: event.status === "failed" ? "bad" : "",
       });
       break;
@@ -338,7 +433,7 @@ function appendEvent(items, event) {
           : event.status === "failed"
             ? "这轮结束了（中止或失败）"
             : "这轮结束了（引擎没有报告结果）";
-      next.push({ kind: "meta", text: label, metaType: "agent_end", tone: event.status === "ok" ? "ok" : "bad" });
+      next.push({ kind: "meta", text: label, metaType: "agent_end", tone: event.status === "ok" ? "ok" : "bad", at });
       break;
     }
     case "error":
@@ -350,6 +445,7 @@ function appendEvent(items, event) {
         kind: "meta",
         text: `被策略拦下：${String(event.toolName ?? "?")} — ${String(event.reason ?? "")}`,
         metaType: "policy_blocked",
+        at,
         tone: "warn",
       });
       break;

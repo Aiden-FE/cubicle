@@ -33,6 +33,12 @@ import { appError } from "../../shared/apperror.mjs";
 export function createDutyRuntime({ store, runManager, nowFn = () => Date.now(), tickMs = 1000, taskPromptFor }) {
   /** @type {NodeJS.Timeout | null} */
   let timer = null;
+  /** Per-company last clock-in resume attempt (busy employees are retried). */
+  /** @type {Map<number, number>} */
+  const lastResumeAttempt = new Map();
+  /** Companies whose clock_in/manual-on resume may still need a retry. */
+  const resumePending = new Set();
+  const RESUME_RETRY_MS = 30_000;
 
   /** @param {number} companyId @returns {DutySchedule} */
   function scheduleFor(companyId) {
@@ -50,17 +56,25 @@ export function createDutyRuntime({ store, runManager, nowFn = () => Date.now(),
    */
   function applyEffect(companyId, effect, complain) {
     if (effect === "clock_in") {
-      resumeCompany(companyId, complain);
+      // Retry only failures of THIS transition (busy employee). A boot into an
+      // already-on phase must not auto-resume tasks the boss paused by exiting
+      // or by budget — the 30s reconciliation is not a fresh clock-in.
+      resumePending.add(companyId);
+      if (resumeCompany(companyId, complain) === 0) resumePending.delete(companyId);
       return;
     }
     if (effect === "pause_runs") {
       // 单个员工的 abort 收尾；调用方（tick 循环）不等它们 — 但 store 写入
-      // 在每个 promise 里同步完成，「退出直接退」走 pauseAll 时才 await。
+      // 在每个 promise 里完成，「退出直接退」走 pauseAll 时才 await。
       for (const employeeId of activeEmployeesOfCompany(companyId)) {
         try {
-          void runManager.pause({ employeeId }).catch(complain);
+          void runManager.pause({ employeeId }).catch((err) => {
+            // The run settled between the iteration and the pause: nothing to
+            // pause. Anything else is worth a log line.
+            if (/** @type {{ code?: string }} */ (err ?? {}).code !== "no_active_run") complain(err);
+          });
         } catch (err) {
-          complain(err);
+          if (/** @type {{ code?: string }} */ (err ?? {}).code !== "no_active_run") complain(err);
         }
       }
     }
@@ -78,21 +92,42 @@ export function createDutyRuntime({ store, runManager, nowFn = () => Date.now(),
    *
    * @param {number} companyId
    * @param {(reason: unknown) => void} complain
+   * @param {{ includeInterrupted?: boolean }} [options]
+   * @returns {number} how many tasks this pass tried to start
    */
-  function resumeCompany(companyId, complain) {
+  function resumeCompany(companyId, complain, { includeInterrupted = true } = {}) {
     const promptFor = taskPromptFor ?? ((/** @type {any} */ task) => `继续完成任务：${task.title}`);
+    let attempted = 0;
     for (const task of store.listTasksForCompany({ companyId })) {
       const latest = task.latestSessionStatus ?? null;
-      const resume = task.status === "running" && (latest === "paused" || latest === "interrupted");
-      const revived = task.status === "open" && (latest === "interrupted" || latest === "paused");
+      // A crash-interrupted task is NOT silently resumed by the 30s
+      // reconciliation below: ticket 10 gives the boss the three-choice door.
+      // It may still be picked up at a real clock_in / manual 上班 boundary.
+      //
+      // A budget-paused task is not a 下班 pause either: ticket 12's soft gate
+      // owns it, and the only way forward is 「+50% 继续」. Auto-resuming it
+      // would start → trip → pause → start again forever.
+      if (latest === "paused") {
+        const summary = store.taskTokenSummary(task.id);
+        if (summary.measured === true && summary.total >= task.tokenBudget) continue;
+      }
+      const resume =
+        task.status === "running" &&
+        (latest === "paused" || (includeInterrupted && latest === "interrupted"));
+      const revived =
+        task.status === "open" &&
+        (latest === "paused" || (includeInterrupted && latest === "interrupted"));
       if (!resume && !revived) continue;
+      attempted += 1;
       try {
         runManager.start({ employeeId: task.employeeId, text: promptFor(task), task: { id: task.id }, resume: resume || undefined });
       } catch (err) {
-        // employee_busy（别的组也在跑）/ 引擎暂不可用：跳过这一张，下一轮到点再试
-        complain(err);
+        // employee_busy（别的组也在跑/聊天中）不是错误，下一轮再试；
+        // 其它失败（引擎未准入等）记日志，仍然下一轮重试。
+        if (/** @type {{ code?: string }} */ (err ?? {}).code !== "employee_busy") complain(err);
       }
     }
+    return attempted;
   }
 
   /** @param {number} companyId @returns {number[]} */
@@ -111,8 +146,10 @@ export function createDutyRuntime({ store, runManager, nowFn = () => Date.now(),
    */
   function tick() {
     const now = nowFn();
-    for (const company of store.officeSnapshot().companies) {
-      tickCompany(company.id, now);
+    // Just ids: officeSnapshot would run two full token aggregations every
+    // second for data the tick never reads.
+    for (const companyId of store.companyIds()) {
+      tickCompany(companyId, now);
     }
   }
 
@@ -144,6 +181,38 @@ export function createDutyRuntime({ store, runManager, nowFn = () => Date.now(),
     for (const effect of result.effects) {
       applyEffect(companyId, effect, (err) => logDuty(companyId, err));
     }
+
+    // Reconciliation, not just edges:
+    //  - phase is off but a run is still active (the earlier pause was
+    //    fire-and-forget or its abort hung) → pause again, idempotently;
+    //  - phase is on and the clock_in resume found the employee busy → retry
+    //    on a slow cadence, otherwise a chat at 09:00 would keep the paused
+    //    task parked until the next shift.
+    const pausedByEffect = result.effects.includes("pause_runs");
+    if (result.phase.phase === "off" && !pausedByEffect) {
+      for (const employeeId of activeEmployeesOfCompany(companyId)) {
+        try {
+          void runManager.pause({ employeeId }).catch((err) => {
+            if (/** @type {{ code?: string }} */ (err ?? {}).code !== "no_active_run") logDuty(companyId, err);
+          });
+        } catch (err) {
+          if (/** @type {{ code?: string }} */ (err ?? {}).code !== "no_active_run") logDuty(companyId, err);
+        }
+      }
+    }
+    if (result.phase.phase === "on" && !result.effects.includes("clock_in") && resumePending.has(companyId)) {
+      const last = lastResumeAttempt.get(companyId) ?? 0;
+      if (last === 0) {
+        // First observation of this phase is not a retry: seeding the clock
+        // here avoids resuming every paused task the instant the app boots.
+        lastResumeAttempt.set(companyId, now);
+      } else if (now - last >= RESUME_RETRY_MS) {
+        lastResumeAttempt.set(companyId, now);
+        if (resumeCompany(companyId, (err) => logDuty(companyId, err), { includeInterrupted: false }) === 0) {
+          resumePending.delete(companyId);
+        }
+      }
+    }
   }
 
   /**
@@ -156,15 +225,18 @@ export function createDutyRuntime({ store, runManager, nowFn = () => Date.now(),
    */
   function applyOverride(companyId, mode) {
     if (mode !== "on" && mode !== "off") throw appError("invalid_payload", "duty override mode must be on/off");
-    const exists = store.officeSnapshot().companies.some((/** @type {{ id: number }} */ c) => c.id === companyId);
+    const exists = store.companyExists(companyId);
     if (!exists) throw appError("unknown_company", `no company with id ${companyId}`);
     const now = nowFn();
     store.setDutyOverride({ companyId, mode, at: now });
+    // 「立即上班」= 立刻续跑，不依赖当前相位是不是已经 on（重启后相位可能
+    // 还是 on，没有 clock_in 边沿可等）。tickCompany 仍负责落相位。
+    if (mode === "on") {
+      lastResumeAttempt.delete(companyId);
+      resumePending.add(companyId);
+      if (resumeCompany(companyId, (err) => logDuty(companyId, err)) === 0) resumePending.delete(companyId);
+    }
     tickCompany(companyId, now);
-    // 「立即上班」永远试着激活一遍有未完成任务的员工 — 相位可能本来就在
-    // on（如重启后默认班表内），但昨晚下班暂停的任务还挂着徽标等续跑。
-    // resumeCompany 对不相关任务与忙碌员工都是跳过，重复触发无害。
-    if (mode === "on") resumeCompany(companyId, (err) => logDuty(companyId, err));
     const status = /** @type {NonNullable<ReturnType<typeof store.getDutyStatus>>} */ (store.getDutyStatus(companyId));
     return { phase: status.phase };
   }
@@ -177,8 +249,10 @@ export function createDutyRuntime({ store, runManager, nowFn = () => Date.now(),
    */
   async function pauseAll() {
     const targets = runManager.activeRuns().map((run) => run.employeeId);
-    await Promise.all(targets.map((employeeId) => runManager.pause({ employeeId }).catch(() => {})));
-    return targets.length;
+    const results = await Promise.allSettled(targets.map((employeeId) => runManager.pause({ employeeId })));
+    // Count what actually landed, not what we asked for: a failed abort is not
+    // a persisted pause.
+    return results.filter((result) => result.status === "fulfilled").length;
   }
 
   /**

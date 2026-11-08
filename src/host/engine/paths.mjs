@@ -22,6 +22,22 @@ export function engineConfigDir(dataDir, engine) {
 }
 
 /**
+ * The employee's workspace — one per employee, shared by every engine.
+ *
+ * A workspace is the employee's desk, not the engine's: switching pi → codex
+ * must not silently move the person to an empty second repo (ticket 11 review:
+ * a task created under pi used to run in codex's workspace and lose its
+ * baseHead). Engine-owned dirs (agent/sessions) stay per engine.
+ *
+ * @param {string} dataDir
+ * @param {number} employeeId
+ * @returns {string}
+ */
+export function employeeWorkspaceDir(dataDir, employeeId) {
+  return path.join(dataDir, "workspaces", `employee-${employeeId}`);
+}
+
+/**
  * @param {string} dataDir the app data root
  * @param {string} engine engine key, e.g. "pi"
  * @param {number} employeeId
@@ -33,6 +49,6 @@ export function enginePaths(dataDir, engine, employeeId) {
     root,
     agentDir: path.join(root, "agent"),
     sessionsDir: path.join(root, "sessions"),
-    workspaceDir: path.join(root, "workspace"),
+    workspaceDir: employeeWorkspaceDir(dataDir, employeeId),
   };
 }

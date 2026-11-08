@@ -42,7 +42,77 @@ export function App() {
   const [engineOpen, setEngineOpen] = useState(false);
   const [dutyOpen, setDutyOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [benchTaskId, setBenchTaskId] = useState(/** @type {number | null} */ (null));
   const lastHostState = useRef(/** @type {string | null} */ (null));
+
+  /**
+   * Left-side overlays are mutually exclusive (they share the same corner and
+   * used to stack into a 60px sliver). The right-edge 工单把手 is deliberately
+   * allowed to stay open beside the 工单台 — ticket 08's acceptance exercises
+   * both at once. Chat/hire are modal-ish and close everything.
+   */
+  const closeLeftOverlays = useCallback(() => {
+    setBenchOpen(false);
+    setRosterOpen(false);
+    setEngineOpen(false);
+    setDutyOpen(false);
+    setAboutOpen(false);
+    setBenchTaskId(null);
+  }, []);
+
+  const closeAllOverlays = useCallback(() => {
+    closeLeftOverlays();
+    setHandleOpen(false);
+    setChatEmployee(null);
+  }, [closeLeftOverlays]);
+
+  const openBench = useCallback((/** @type {number | null} */ taskId = null) => {
+    closeLeftOverlays();
+    setBenchTaskId(taskId);
+    setBenchOpen(true);
+  }, [closeLeftOverlays]);
+
+  const toggleBench = useCallback(() => {
+    if (benchOpen) {
+      setBenchOpen(false);
+      setBenchTaskId(null);
+    } else openBench(null);
+  }, [benchOpen, openBench]);
+
+  const toggleRoster = useCallback(() => {
+    const next = !rosterOpen;
+    closeLeftOverlays();
+    setRosterOpen(next);
+  }, [rosterOpen, closeLeftOverlays]);
+
+  const toggleEngine = useCallback(() => {
+    const next = !engineOpen;
+    closeLeftOverlays();
+    setEngineOpen(next);
+  }, [engineOpen, closeLeftOverlays]);
+
+  const toggleDuty = useCallback(() => {
+    const next = !dutyOpen;
+    closeLeftOverlays();
+    setDutyOpen(next);
+  }, [dutyOpen, closeLeftOverlays]);
+
+  const toggleAbout = useCallback(() => {
+    const next = !aboutOpen;
+    closeLeftOverlays();
+    setAboutOpen(next);
+  }, [aboutOpen, closeLeftOverlays]);
+
+  const toggleHandle = useCallback(() => {
+    setHandleOpen((open) => !open);
+  }, []);
+
+  /** From the handle: switch to the bench and close the handle. */
+  const openTaskFromHandle = useCallback((/** @type {number | null | undefined} */ taskId) => {
+    if (typeof taskId !== "number") return;
+    setHandleOpen(false);
+    openBench(taskId);
+  }, [openBench]);
 
   const refresh = useCallback(async () => {
     try {
@@ -66,7 +136,9 @@ export function App() {
         for (const id of seated) {
           if (!next.has(/** @type {number} */ (id))) next.set(/** @type {number} */ (id), { activity: initialDeskActivity(), motion: initialMotion(now) });
         }
-        for (const id of [...next.keys()]) if (!seated.has(id)) next.delete(id);
+        // Do NOT delete states for employees outside the active group: the
+        // snapshot only lists the active group's desks, and wiping B's live
+        // state when switching to A made a working employee look idle on return.
         return next;
       });
     } catch (err) {
@@ -87,6 +159,7 @@ export function App() {
       } else if (event.type === "agent_end") {
         motion = motionOnRelease(motion, now);
       }
+      if (activity === entry.activity && motion === entry.motion) return prev;
       const next = new Map(prev);
       next.set(employeeId, { activity, motion });
       return next;
@@ -131,29 +204,38 @@ export function App() {
       setDeskStates((prev) => {
         if (prev.size === 0) return prev;
         const now = Date.now();
+        let changed = false;
         const next = new Map();
         for (const [employeeId, entry] of prev) {
-          next.set(employeeId, {
-            activity: expireDeskBlocked(entry.activity, now),
-            motion: advanceMotion(entry.motion, now),
-          });
+          const activity = expireDeskBlocked(entry.activity, now);
+          const motion = advanceMotion(entry.motion, now);
+          if (activity === entry.activity && motion === entry.motion) {
+            next.set(employeeId, entry);
+          } else {
+            changed = true;
+            next.set(employeeId, { activity, motion });
+          }
         }
-        return next;
+        return changed ? next : prev;
       });
     }, DESK_TICK_MS);
     return () => clearInterval(timer);
   }, []);
 
   /** @param {DeskData} desk */
-  const openHire = (desk) => {
+  const openHire = useCallback((/** @type {DeskData} */ desk) => {
     if (hireDesk) return;
+    // A modal may sit above an open bench (ticket 12 deliberately keeps the
+    // bench mounted so it can receive budget_* events while hiring). Closing
+    // the bench here made the task rows disappear behind the wizard forever.
     setHireDesk(desk);
-  };
+  }, [hireDesk]);
 
   /** @param {DeskOccupantData} occupant */
-  const openChat = (occupant) => {
+  const openChat = useCallback((/** @type {DeskOccupantData} */ occupant) => {
+    closeAllOverlays();
     setChatEmployee(occupant);
-  };
+  }, [closeAllOverlays]);
 
   const setViewPref = (/** @type {keyof ViewPrefs} */ key, /** @type {boolean} */ value) => {
     setViewPrefs((prev) => {
@@ -207,17 +289,17 @@ export function App() {
         snapshot={snapshot}
         onChanged={() => void refresh()}
         benchOpen={benchOpen}
-        onToggleBench={() => setBenchOpen((open) => !open)}
+        onToggleBench={toggleBench}
         rosterOpen={rosterOpen}
-        onToggleRoster={() => setRosterOpen((open) => !open)}
+        onToggleRoster={toggleRoster}
         engineOpen={engineOpen}
-        onToggleEngine={() => setEngineOpen((open) => !open)}
+        onToggleEngine={toggleEngine}
         dutyOpen={dutyOpen}
-        onToggleDuty={() => setDutyOpen((open) => !open)}
+        onToggleDuty={toggleDuty}
         aboutOpen={aboutOpen}
-        onToggleAbout={() => setAboutOpen((open) => !open)}
+        onToggleAbout={toggleAbout}
       />
-      {benchOpen ? <TaskBench snapshot={snapshot} onClose={() => setBenchOpen(false)} /> : null}
+      {benchOpen ? <TaskBench snapshot={snapshot} initialTaskId={benchTaskId} onClose={() => { setBenchOpen(false); setBenchTaskId(null); }} /> : null}
       {rosterOpen ? <RosterPanel snapshot={snapshot} onClose={() => setRosterOpen(false)} /> : null}
       {engineOpen ? <EngineCenterPanel onClose={() => setEngineOpen(false)} /> : null}
       {dutyOpen ? <WorkClockPanel snapshot={snapshot} onClose={() => setDutyOpen(false)} /> : null}
@@ -231,13 +313,13 @@ export function App() {
         data-testid="task-handle"
         data-active={String(handleActive)}
         aria-expanded={handleOpen ? "true" : "false"}
-        onClick={() => setHandleOpen((open) => !open)}
+        onClick={toggleHandle}
         title="任务把手：进行中 / 待验收 / 档案"
       >
         工单
         <span className="handle-badge" data-testid="handle-active">{handleActive}</span>
       </button>
-      {handleOpen ? <TaskHandle snapshot={snapshot} onClose={() => setHandleOpen(false)} /> : null}
+      {handleOpen ? <TaskHandle snapshot={snapshot} onClose={() => setHandleOpen(false)} onOpenTask={openTaskFromHandle} /> : null}
       {hireDesk ? <HireModal desk={hireDesk} onClose={() => setHireDesk(null)} /> : null}
       {chatEmployee ? <ChatOverlay employee={chatEmployee} onClose={() => setChatEmployee(null)} /> : null}
     </div>

@@ -46,10 +46,12 @@ const HISTORY_CAP = 400;
  * @property {boolean} finished
  * @property {LiveSession | null} live        opened engine session for this run
  * @property {Promise<LiveSession> | null} opening in-flight adapter.open()
+ * @property {Promise<void> | null} completion the runFlow promise: cancel waits for it to drain
  * @property {import("./events.mjs").Usage} usage running fold of every turn_end usage (票 06)
  * @property {boolean} usageReported 票 12: 引擎报过 usage（哪怕全是 0）— 与「未计量」严格区分
  * @property {boolean} budgetWarned  票 12: 80% 黄点只报一次
  * @property {boolean} budgetTripped 票 12: 100% 自动暂停只触发一次
+ * @property {() => void} [clearWatchdog] run-level timeout cleanup
  */
 
 /**
@@ -64,11 +66,23 @@ const HISTORY_CAP = 400;
  * @param {ReturnType<import("../store.mjs").openStore>} options.store
  * @param {(engine: string) => {
  *   open(input: { employee: unknown, session: EmployeeSessionRow, onEvent: (event: NormalizedEvent) => void }): Promise<LiveSession>,
+ *   configFingerprint?(): string | null,
  * } | null} options.getAdapter
  * @param {(payload: { runId: number, employeeId: number, sessionId: number, at: number, event: NormalizedEvent }) => void} options.emit
- * @param {(finished: TaskRunFinished) => void} [options.onTaskRunFinished] task-runs-only hook (ticket 05 artifact collection)
+ * @param {(finished: TaskRunFinished) => void | Promise<void>} [options.onTaskRunFinished] task-runs-only hook (ticket 05 artifact collection)
+ * @param {(taskId: number) => void} [options.onTaskArtifactsReady] after an async artifact hook settles (UI refresh)
+ * @param {number} [options.drainTimeoutMs] cancel/abort waits this long for the engine's own settle before forcing the end
+ * @param {number} [options.runTimeoutMs] a run that never settles is force-cancelled after this long
  */
-export function createRunManager({ store, getAdapter, emit, onTaskRunFinished }) {
+export function createRunManager({
+  store,
+  getAdapter,
+  emit,
+  onTaskRunFinished,
+  onTaskArtifactsReady,
+  drainTimeoutMs = 4000,
+  runTimeoutMs = 30 * 60_000,
+}) {
   /** @type {Map<number, ActiveRun>} */
   const active = new Map();
   /** live engine sessions keyed by employeeSessionId — ticket 11 widened
@@ -76,17 +90,26 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
    *  entity, not just the employee. */
   /** @type {Map<number, LiveSession>} */
   const liveSessions = new Map();
+  /** models.json fingerprint that produced each live session. */
+  /** @type {Map<number, string | null>} */
+  const sessionFingerprints = new Map();
+  /** Event epoch per employee session: events from retired handles are dropped. */
+  /** @type {Map<number, number>} */
+  const sessionEpochs = new Map();
   /** @type {Map<number, { runId: number, events: { at: number, event: NormalizedEvent }[] }>} */
   const lastRunEvents = new Map();
   /** @type {Array<(value?: unknown) => void>} */
   let quietWaiters = [];
+  /** Artifact/status writes that outlive the run event (async git): whenQuiet waits for them. */
+  /** @type {Set<Promise<unknown>>} */
+  const pendingSideEffects = new Set();
   /** wire listeners (the admission probe rides the same topic the UI does) */
   /** @type {Set<(payload: { runId: number, employeeId: number, sessionId: number, at: number, event: NormalizedEvent }) => void>} */
   const listeners = new Set();
 
-  /** Resolves when no run is active — the seam's determinism handle. */
+  /** Resolves when no run is active and every artifact/status side effect landed. */
   function whenQuiet() {
-    if (active.size === 0) return Promise.resolve();
+    if (active.size === 0 && pendingSideEffects.size === 0) return Promise.resolve();
     return new Promise((resolve) => quietWaiters.push(resolve));
   }
 
@@ -113,7 +136,7 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
   }
 
   function signalQuiet() {
-    if (active.size !== 0) return;
+    if (active.size !== 0 || pendingSideEffects.size !== 0) return;
     const waiters = quietWaiters;
     quietWaiters = [];
     for (const resolve of waiters) resolve();
@@ -194,6 +217,7 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
   function finishRun(runRef, endEvent) {
     if (runRef.finished) return;
     runRef.finished = true;
+    runRef.clearWatchdog?.();
     const status = runRef.paused
       ? "paused"
       : runRef.aborted
@@ -202,6 +226,8 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
     // "unknown" (the engine settled without an agent_end) is recorded as
     // 'failed' on purpose: the protocol says every run ends with agent_end,
     // so a silent settle never counts as a clean completion.
+    // Each store write is independent: a failing pointer save must not skip
+    // the task-session close (which would leave the session running forever).
     try {
       // 票 12: 引擎报过 usage 就存（全 0 也是「计量到 0」）；没报过才是 null（未计量）。
       store.finishRun({
@@ -212,26 +238,53 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
         // 任务侧边栏读它 + 给「重试」出口。
         failReason: explainRunFailure({ status, events: runTailEvents(runRef) }),
       });
+    } catch (err) {
+      process.stderr.write(`run finish failed (${runRef.run.id}): ${err instanceof Error ? err.message : err}\n`);
+    }
+    try {
       const pointer = runRef.live?.sessionFile() ?? null;
       if (pointer) {
         store.setEmployeeSessionFile({ employeeSessionId: runRef.run.employeeSessionId, sessionFile: pointer });
       }
-      // The task session follows its run's outcome — one owner (this
-      // manager) so it can never disagree with the run row.
+    } catch (err) {
+      process.stderr.write(`resume pointer save failed (${runRef.run.id}): ${err instanceof Error ? err.message : err}\n`);
+    }
+    try {
+      // The task session follows its run's outcome — one owner (this manager)
+      // so it can never disagree with the run row.
       if (runRef.run.taskSessionId !== null) {
         store.finishTaskSession({ taskSessionId: runRef.run.taskSessionId, status });
       }
-    } catch {
-      // the store closing under a settling run (host shutdown) must not throw
+    } catch (err) {
+      process.stderr.write(`task session finish failed (${runRef.run.id}): ${err instanceof Error ? err.message : err}\n`);
     }
     if (runRef.run.taskId !== null && onTaskRunFinished) {
+      const taskId = runRef.run.taskId;
       try {
         const buffer = lastRunEvents.get(runRef.run.employeeId);
-        onTaskRunFinished({
+        const outcome = onTaskRunFinished({
           run: runRef.run,
           status,
           events: buffer && buffer.runId === runRef.run.id ? buffer.events : [],
         });
+        if (outcome && typeof (/** @type {Promise<void>} */ (outcome)).then === "function") {
+          // Async artifact collection (git is async now): whenQuiet must wait
+          // for it, otherwise tests/e2e read the task before the 四件套 land.
+          const sideEffect = Promise.resolve(outcome)
+            .catch((err) => {
+              process.stderr.write(`task artifact hook failed: ${err instanceof Error ? err.stack : err}\n`);
+            })
+            .then(() => {
+              if (status !== "paused") onTaskArtifactsReady?.(taskId);
+            })
+            .finally(() => {
+              pendingSideEffects.delete(sideEffect);
+              signalQuiet();
+            });
+          pendingSideEffects.add(sideEffect);
+        } else if (status !== "paused") {
+          onTaskArtifactsReady?.(taskId);
+        }
       } catch (err) {
         // artifact collection must never take the run loop down; stderr is
         // teed into <dataDir>/agenthost.log by the main process
@@ -283,31 +336,10 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
     if (!employee) throw appError("unknown_employee", `no employee with id ${employeeId}`);
     if (active.has(employeeId)) throw appError("employee_busy", `employee ${employeeId} is already working`);
 
-    // 票 09: 上班续跑 = 在「进行中」的任务上追加一轮会话（与打回同构）。
-    // 五状态转移表会拒绝 running→running，所以续跑走 resume 通道、跳过状态
-    // 门 — 但门必须先验：非「进行中」的任务误用 resume 一律拒绝，且不留
-    // 悬挂会话行（06 评审的同一条规矩）。
-    //
-    // 票 10 adds one accepted shape: the crash-healed interrupted task
-    // (待办 + 最近一轮 interrupted). 续跑它 means: perform the legal
-    // open→running transition first, then take the same append-a-session
-    // channel. The five-state map is untouched — the crash fact lives at
-    // task_session.interrupted, and the transition table decides legality.
-    if (task && resume) {
-      const current = store.taskById(task.id);
-      if (!current) throw appError("unknown_task", `no task with id ${task.id}`);
-      if (current.status === "running") {
-        // 09: 任务本就在进行中，无需（也不允许）再走一次转移。
-      } else if (
-        current.status === "open" &&
-        store.latestTaskSessionForTask(task.id)?.status === "interrupted"
-      ) {
-        store.setTaskStatus(task.id, "running"); // open→running 是表上的合法边
-      } else {
-        throw appError("invalid_transition", `只有「进行中」（含下班暂停）或崩溃中断落回待办的任务能续跑，这张是 ${current.status}`);
-      }
-    }
-
+    // 票 09/10 resume legality and the task's open→running transition live in
+    // store.beginTaskRun, in the SAME transaction as the task_session + run
+    // rows. A rejected dispatch can therefore never leave the task 进行中 with
+    // no run behind (the ticket-06 "no dangling rows" rule, made structural).
     const engine = employee.roleSnapshot.manifest.engine || "pi";
 
     // Ticket 11 admission gate: an engine must be enabled (probe passed, or
@@ -335,20 +367,38 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
       sessionsDir: dirs.sessionsDir,
       workspaceDir: dirs.workspaceDir,
     });
-    // A dispatched work order runs inside its own task session (GLOSSARY:
-    // 会话挂在任务下，可多条 — retry/打回 gets a fresh one). The status
-    // gate comes FIRST: an illegal dispatch must not leave a session row
-    // behind (the store's five-state map decides, ticket 06).
-    if (task && !resume) store.setTaskStatus(task.id, "running");
-    const taskSession = task ? store.openTaskSession({ taskId: task.id, employeeSessionId: session.id, engine }) : null;
-    const run = store.createRun({
-      employeeId,
-      employeeSessionId: session.id,
-      engine,
-      prompt: text.trim(),
-      taskId: task?.id ?? null,
-      taskSessionId: taskSession?.id ?? null,
-    });
+
+    // A task's workspace is pinned on the task row. Old tasks may live in the
+    // pre-fix per-engine directory; run them THERE so their recorded baseHead
+    // still resolves, even though the employee's chat workspace is shared.
+    const taskWorkspace = task ? (store.taskById(task.id)?.workspaceDir ?? null) : null;
+    const runSession =
+      taskWorkspace && taskWorkspace !== session.workspaceDir
+        ? { ...session, workspaceDir: taskWorkspace }
+        : session;
+    if (runSession.workspaceDir) mkdirSync(runSession.workspaceDir, { recursive: true });
+
+    /** @type {RunRow} */
+    let run;
+    if (task) {
+      const started = store.beginTaskRun({
+        taskId: task.id,
+        employeeSessionId: session.id,
+        engine,
+        prompt: text.trim(),
+        resume: resume === true,
+      });
+      run = started.run;
+    } else {
+      run = store.createRun({
+        employeeId,
+        employeeSessionId: session.id,
+        engine,
+        prompt: text.trim(),
+        taskId: null,
+        taskSessionId: null,
+      });
+    }
 
     /** @type {ActiveRun} */
     const runRef = {
@@ -358,6 +408,7 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
       finished: false,
       live: liveSessions.get(session.id) ?? null,
       opening: null,
+      completion: null,
       usage: zeroUsage(),
       usageReported: false,
       budgetWarned: false,
@@ -365,10 +416,29 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
     };
     active.set(employeeId, runRef);
     lastRunEvents.set(employeeId, { runId: run.id, events: [] });
+    // Run-level watchdog: an engine that never settles must not keep the
+    // employee busy forever (whenQuiet / 等完成 would hang for 30 minutes).
+    if (runTimeoutMs > 0) {
+      const watchdog = setTimeout(() => {
+        if (runRef.finished) return;
+        pushEvent(runRef, {
+          type: "error",
+          code: "run_timeout",
+          message: `本轮超过 ${Math.round(runTimeoutMs / 60_000)} 分钟没有收尾，已强制结束`,
+        });
+        void settleCancel(employeeId, false).catch(() => {});
+      }, runTimeoutMs);
+      watchdog.unref?.();
+      runRef.clearWatchdog = () => clearTimeout(watchdog);
+    }
     // The first event lands synchronously: the UI always sees life on the
     // wire, even while a cold engine session is still coming up.
     pushEvent(runRef, { type: "session_start", sessionId: String(session.id) });
-    void runFlow(runRef, employee, session, adapter);
+    runRef.completion = runFlow(runRef, employee, runSession, adapter);
+    void runRef.completion.catch(() => {
+      // runFlow owns its error path; this only prevents an unhandled rejection
+      // if a future edit ever lets one escape.
+    });
     return { run, session };
   }
 
@@ -376,7 +446,7 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
    * @param {ActiveRun} runRef
    * @param {unknown} employee
    * @param {EmployeeSessionRow} session
-   * @param {{ open(input: { employee: unknown, session: EmployeeSessionRow, onEvent: (event: NormalizedEvent) => void }): Promise<LiveSession> }} adapter
+   * @param {{ open(input: { employee: unknown, session: EmployeeSessionRow, onEvent: (event: NormalizedEvent) => void }): Promise<LiveSession>, configFingerprint?(): string | null }} adapter
    */
   async function runFlow(runRef, employee, session, adapter) {
     // 票 10: the resume pointer must survive a crash. finishRun-only persistence
@@ -396,14 +466,35 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
       }
     };
     try {
-      let handle = liveSessions.get(session.id);
+      const fingerprint =
+        typeof adapter.configFingerprint === "function" ? adapter.configFingerprint() : null;
+      let handle = liveSessions.get(session.id) ?? null;
+      if (handle && (sessionFingerprints.get(session.id) ?? null) !== fingerprint) {
+        // BYOK config changed since this engine session was opened. Retire the
+        // handle; bump the epoch first so the old session's abort events can
+        // never be attributed to the run that is starting now.
+        sessionEpochs.set(session.id, (sessionEpochs.get(session.id) ?? 0) + 1);
+        try {
+          await handle.abort?.();
+        } catch {
+          // a dead session is still retired
+        }
+        liveSessions.delete(session.id);
+        sessionFingerprints.delete(session.id);
+        handle = null;
+      }
       if (!handle) {
+        const epoch = (sessionEpochs.get(session.id) ?? 0) + 1;
+        sessionEpochs.set(session.id, epoch);
         const opening = adapter.open({
           employee,
           session,
           onEvent: (event) => {
+            // Ignore events from a retired engine session (config reload,
+            // abort, late child close).
+            if (sessionEpochs.get(session.id) !== epoch) return;
             const current = active.get(session.employeeId);
-            if (!current) return;
+            if (!current || current.finished) return;
             pushEvent(current, event);
             savePointerOnce();
             if (event.type === "agent_end") finishRun(current, event);
@@ -416,6 +507,7 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
           runRef.opening = null;
         }
         liveSessions.set(session.id, handle);
+        sessionFingerprints.set(session.id, fingerprint);
       }
       runRef.live = handle;
       savePointerOnce();
@@ -482,6 +574,18 @@ export function createRunManager({ store, getAdapter, emit, onTaskRunFinished })
         } catch {
           // a failing cancel still cancels: fall through to the forced end
         }
+      }
+      // Drain: the engine's abort() may resolve before its process/stream is
+      // actually closed. Ending the run and releasing the employee here would
+      // let a NEW run start while the OLD child is still emitting — and its
+      // late agent_end/agent_settled would land on the new run (ticket-10
+      // review: cancel → redispatch could mark a fresh task completed). Wait
+      // for runFlow to settle (or a bounded drain) before releasing the slot.
+      if (runRef.completion) {
+        await Promise.race([
+          runRef.completion.catch(() => {}),
+          new Promise((resolve) => setTimeout(resolve, drainTimeoutMs)),
+        ]);
       }
       // the engine returned from abort without settling — end the run here
       endRunSynthetically(runRef, "failed");

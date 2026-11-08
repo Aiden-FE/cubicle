@@ -29,6 +29,7 @@ import { spawn } from "node:child_process";
  * @property {number} pid
  * @property {string} name  executable name recorded at spawn (extension-lenient: "codex" matches codex.exe)
  * @property {string} startedAt ISO timestamp — recorded at spawn; the identity guard's age check
+ * @property {string} [commandLineHint] an argv substring unique to this process family (workspace dir, service name)
  * @property {string} [note]
  *
  * @typedef {{ name: string, createdAt: string | null, commandLine?: string | null }} ProcessIdentity
@@ -77,6 +78,7 @@ export function createPidLedger({ file }) {
             pid: entry.pid,
             name: String(entry.name ?? ""),
             startedAt: String(entry.startedAt ?? ""),
+            ...(entry.commandLineHint ? { commandLineHint: String(entry.commandLineHint) } : {}),
             ...(entry.note ? { note: String(entry.note) } : {}),
           }));
       } catch {
@@ -87,7 +89,13 @@ export function createPidLedger({ file }) {
     /** @param {LedgerEntry & { pid: number }} entry */
     record(entry) {
       const entries = this.read().filter((e) => e.pid !== entry.pid);
-      entries.push({ pid: entry.pid, name: entry.name, startedAt: entry.startedAt, ...(entry.note ? { note: entry.note } : {}) });
+      entries.push({
+        pid: entry.pid,
+        name: entry.name,
+        startedAt: entry.startedAt,
+        ...(entry.commandLineHint ? { commandLineHint: entry.commandLineHint } : {}),
+        ...(entry.note ? { note: entry.note } : {}),
+      });
       save(entries);
     },
 
@@ -127,6 +135,12 @@ export function identityMatches(entry, probed) {
     const born = Date.parse(probed.createdAt);
     if (!Number.isFinite(recorded) || !Number.isFinite(born)) return false;
     if (Math.abs(born - recorded) > IDENTITY_AGE_TOLERANCE_MS) return false;
+  }
+  // A process whose argv does not contain the recorded unique substring is a
+  // recycled pid / another instance — do not touch it. Probes that cannot
+  // read a command line stay conservative (name + age only).
+  if (entry.commandLineHint && probed.commandLine && !probed.commandLine.includes(entry.commandLineHint)) {
+    return false;
   }
   return true;
 }
@@ -169,6 +183,14 @@ export function defaultProbeProcess(pid) {
 
 /** @param {number} pid @param {(err: Error | null, stdout: string) => void} cb */
 function spawnProbe(pid, cb) {
+  // A hung PowerShell must not hang app boot: the probe has a hard timeout.
+  let settled = false;
+  /** @param {Error | null} err @param {string} stdout */
+  const finish = (err, stdout) => {
+    if (settled) return;
+    settled = true;
+    cb(err, stdout);
+  };
   // ProcessId is an integer literal — the pid came from our own ledger, and
   // the filter string keeps it out of any shell quoting games.
   const ps = spawn(
@@ -182,11 +204,27 @@ function spawnProbe(pid, cb) {
     { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] },
   );
   let stdout = "";
+  const timer = setTimeout(() => {
+    try {
+      ps.kill();
+    } catch {
+      // already gone
+    }
+    finish(new Error("probe timeout"), stdout);
+  }, 3000);
+  timer.unref?.();
+  ps.stdout?.setEncoding?.("utf8");
   ps.stdout?.on("data", (chunk) => {
     stdout += String(chunk);
   });
-  ps.on("error", () => cb(new Error("powershell spawn failed"), ""));
-  ps.on("close", (code) => cb(code === 0 ? null : new Error(`probe exit ${code}`), stdout));
+  ps.on("error", () => {
+    clearTimeout(timer);
+    finish(new Error("powershell spawn failed"), "");
+  });
+  ps.on("close", (code) => {
+    clearTimeout(timer);
+    finish(code === 0 ? null : new Error(`probe exit ${code}`), stdout);
+  });
 }
 
 /**
@@ -197,51 +235,88 @@ function spawnProbe(pid, cb) {
  * @returns {Promise<void>}
  */
 export function defaultKillProcess(pid) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const killer = spawn("taskkill", ["/pid", String(Math.trunc(pid)), "/T", "/F"], {
       windowsHide: true,
       stdio: "ignore",
     });
-    killer.on("error", () => resolve());
-    killer.on("close", () => resolve());
+    killer.on("error", (err) => reject(err));
+    const timer = setTimeout(() => {
+      try {
+        killer.kill();
+      } catch {
+        // already gone
+      }
+      reject(new Error("taskkill timeout"));
+    }, 5000);
+    timer.unref?.();
+    killer.on("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve();
+      else reject(new Error(`taskkill exited ${code ?? "?"}`));
+    });
   });
 }
 
 /**
  * List the direct children of a pid (CIM; the app's own taskkill /T needs a
  * LIVE parent — a DEAD ledger pid's orphans must be enumerated and killed one
- * by one). Used by the sweep when a ledger entry's process itself already died.
+ * by one). Creation time rides along so the sweep can refuse an orphan that
+ * predates the crash window.
  *
  * @param {number} pid
- * @returns {Promise<{ pid: number, name: string }[]>}
+ * @returns {Promise<{ pid: number, name: string, createdAt?: string | null }[]>}
  */
 export function defaultListChildProcesses(pid) {
   return new Promise((resolve) => {
+    let settled = false;
+    /** @param {{ pid: number, name: string, createdAt?: string | null }[]} kids */
+    const done = (kids) => {
+      if (settled) return;
+      settled = true;
+      resolve(kids);
+    };
     const ps = spawn(
       "powershell.exe",
       [
         "-NoProfile",
         "-NonInteractive",
         "-Command",
-        `Get-CimInstance Win32_Process -Filter "ParentProcessId=${Math.trunc(pid)}" | ForEach-Object { '{0}|{1}' -f $_.Name, $_.ProcessId }`,
+        `Get-CimInstance Win32_Process -Filter "ParentProcessId=${Math.trunc(pid)}" | ForEach-Object { '{0}|{1}|{2:o}' -f $_.Name, $_.ProcessId, $_.CreationDate }`,
       ],
       { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] },
     );
     let stdout = "";
+    const timer = setTimeout(() => {
+      try {
+        ps.kill();
+      } catch {
+        // already gone
+      }
+      done([]);
+    }, 3000);
+    timer.unref?.();
+    ps.stdout?.setEncoding?.("utf8");
     ps.stdout?.on("data", (chunk) => {
       stdout += String(chunk);
     });
-    ps.on("error", () => resolve([]));
+    ps.on("error", () => {
+      clearTimeout(timer);
+      done([]);
+    });
     ps.on("close", () => {
+      clearTimeout(timer);
       const kids = [];
       for (const line of String(stdout).split(/\r?\n/)) {
-        const sep = line.indexOf("|");
-        if (sep === -1) continue;
-        const name = line.slice(0, sep).trim();
-        const childPid = Number(line.slice(sep + 1).trim());
-        if (name.length > 0 && Number.isInteger(childPid) && childPid > 0) kids.push({ pid: childPid, name });
+        const first = line.indexOf("|");
+        const second = line.indexOf("|", first + 1);
+        if (first === -1) continue;
+        const name = line.slice(0, first).trim();
+        const childPid = Number(line.slice(first + 1, second === -1 ? undefined : second).trim());
+        const createdAt = second === -1 ? null : line.slice(second + 1).trim() || null;
+        if (name.length > 0 && Number.isInteger(childPid) && childPid > 0) kids.push({ pid: childPid, name, createdAt });
       }
-      resolve(kids);
+      done(kids);
     });
   });
 }
@@ -258,7 +333,7 @@ export function defaultListChildProcesses(pid) {
  *   file: string,
  *   probeProcess?: (pid: number) => Promise<ProcessIdentity | null>,
  *   killProcess?: (pid: number) => Promise<void>,
- *   listChildren?: (pid: number) => Promise<{ pid: number, name: string }[]>,
+ *   listChildren?: (pid: number) => Promise<{ pid: number, name: string, createdAt?: string | null }[]>,
  *   log?: (message: string) => void,
  * }} options
  * @returns {Promise<{ checked: number, killed: number, orphanChildren: number, stale: number }>}
@@ -309,7 +384,16 @@ export async function sweepPidLedger({
     // parents queryable, so the enumeration finds exactly the leftovers.)
     try {
       const kids = await listChildren(entry.pid);
+      const entryBorn = Date.parse(entry.startedAt);
       for (const kid of kids) {
+        // A child that predates the crash window cannot be this crash's
+        // orphan; killing it by ParentProcessId alone would be pid-reuse
+        // roulette with an unrelated process tree.
+        const kidBorn = kid.createdAt ? Date.parse(kid.createdAt) : NaN;
+        if (Number.isFinite(entryBorn) && Number.isFinite(kidBorn) && kidBorn < entryBorn - 60_000) {
+          log?.(`skipped old child pid=${kid.pid} (${kid.name}) of dead ledger pid=${entry.pid}`);
+          continue;
+        }
         try {
           await killProcess(kid.pid);
           outcome.orphanChildren += 1;

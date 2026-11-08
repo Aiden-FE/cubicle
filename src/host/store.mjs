@@ -8,7 +8,7 @@
  * has something to show.
  */
 import { DatabaseSync } from "node:sqlite";
-import { existsSync, mkdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import path from "node:path";
 
 import { appError } from "../shared/apperror.mjs";
@@ -201,7 +201,7 @@ CREATE TABLE IF NOT EXISTS desk (
   label TEXT NOT NULL,
   x REAL NOT NULL,
   y REAL NOT NULL,
-  employee_id INTEGER
+  employee_id INTEGER UNIQUE REFERENCES employee(id)
 );
 CREATE TABLE IF NOT EXISTS role (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -304,6 +304,28 @@ CREATE TABLE IF NOT EXISTS engine_state (
   probe_at TEXT,
   updated_at TEXT NOT NULL
 );
+`;
+
+/**
+ * Hot-path indexes. Created after the table-rebuild migrations (a rebuild
+ * drops them). Every lookup the host runs per turn/event has a matching index;
+ * `run` and `artifact` grow forever, so "small for now" is not a defence.
+ */
+const INDEXES = `
+CREATE INDEX IF NOT EXISTS idx_project_group_company ON project_group(company_id);
+CREATE INDEX IF NOT EXISTS idx_desk_group ON desk(group_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_desk_employee_unique ON desk(employee_id) WHERE employee_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_employee_company ON employee(company_id);
+CREATE INDEX IF NOT EXISTS idx_employee_session_employee ON employee_session(employee_id);
+CREATE INDEX IF NOT EXISTS idx_task_group ON task(group_id);
+CREATE INDEX IF NOT EXISTS idx_task_employee ON task(employee_id);
+CREATE INDEX IF NOT EXISTS idx_task_status ON task(status);
+CREATE INDEX IF NOT EXISTS idx_task_session_task ON task_session(task_id);
+CREATE INDEX IF NOT EXISTS idx_run_task ON run(task_id);
+CREATE INDEX IF NOT EXISTS idx_run_employee ON run(employee_id);
+CREATE INDEX IF NOT EXISTS idx_run_task_session ON run(task_session_id);
+CREATE INDEX IF NOT EXISTS idx_run_status ON run(status);
+CREATE INDEX IF NOT EXISTS idx_artifact_task ON artifact(task_id);
 `;
 
 /**
@@ -422,6 +444,42 @@ function toCompany(row) {
 }
 
 /**
+ * Corrupt JSON in a column must degrade, never take the whole office down:
+ * the same rule toTask/parseUsage already follow.
+ *
+ * @template T
+ * @param {unknown} value
+ * @param {T} fallback
+ * @returns {T}
+ */
+function parseJsonOr(value, fallback) {
+  if (typeof value !== "string" || value.length === 0) return fallback;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed === null || parsed === undefined ? fallback : /** @type {T} */ (parsed);
+  } catch {
+    return fallback;
+  }
+}
+
+/** The snapshot a corrupt employee row degrades to: a readable unknown role. */
+/** @type {RoleSnapshot} */
+const UNKNOWN_ROLE_SNAPSHOT = {
+  key: "unknown",
+  name: "未知角色",
+  tagline: "",
+  manifest: {
+    persona: "",
+    skills: [],
+    tools: [],
+    mcpServers: [],
+    engine: "pi",
+    model: "default",
+    cost: { tokenBudgetPerTask: DEFAULT_TASK_TOKEN_BUDGET },
+  },
+};
+
+/**
  * @param {Record<string, unknown>} row
  * @returns {GroupRow}
  */
@@ -459,7 +517,7 @@ function toDesk(row) {
             name: String(row.e_name),
             roleId: Number(row.e_role_id),
             hiredAt: String(row.e_hired_at),
-            roleSnapshot: /** @type {RoleSnapshot} */ (JSON.parse(String(row.e_role_snapshot))),
+            roleSnapshot: /** @type {RoleSnapshot} */ (parseJsonOr(row.e_role_snapshot, UNKNOWN_ROLE_SNAPSHOT)),
           },
   };
 }
@@ -474,7 +532,7 @@ function toRole(row) {
     key: String(row.key),
     name: String(row.name),
     tagline: String(row.tagline),
-    manifest: /** @type {RoleManifest} */ (JSON.parse(String(row.manifest))),
+    manifest: /** @type {RoleManifest} */ (parseJsonOr(row.manifest, {})),
   };
 }
 
@@ -703,6 +761,12 @@ function seedEngineStates(db) {
  * session row was impossible. Rebuild with UNIQUE (employee_id, engine),
  * keeping ids — run rows reference them.
  *
+ * Rebuild order matters: NEVER rename the old table first. With foreign_keys
+ * OFF, SQLite does not rewrite child REFERENCES, and a `RENAME` would leave
+ * run/task_session pointing at a table that is then dropped. Build the new
+ * table under a temporary name, copy, drop the old, rename the new one into
+ * the original name — the child REFERENCES keep pointing at the right name.
+ *
  * @param {DatabaseSync} db
  */
 function migrateEmployeeSessionPerEngine(db) {
@@ -711,13 +775,13 @@ function migrateEmployeeSessionPerEngine(db) {
   if (!/employee_id\s+INTEGER\s+NOT\s+NULL\s+UNIQUE/i.test(sql)) return;
   db.exec("BEGIN");
   try {
-    db.exec("ALTER TABLE employee_session RENAME TO employee_session_pre11");
-    db.exec(SCHEMA_SESSION_ONLY);
+    db.exec(SCHEMA_SESSION_ONLY.replace("CREATE TABLE employee_session", "CREATE TABLE employee_session_new"));
     db.exec(`
-      INSERT INTO employee_session (id, employee_id, engine, agent_dir, sessions_dir, workspace_dir, session_file, updated_at)
-      SELECT id, employee_id, engine, agent_dir, sessions_dir, workspace_dir, session_file, updated_at FROM employee_session_pre11
+      INSERT INTO employee_session_new (id, employee_id, engine, agent_dir, sessions_dir, workspace_dir, session_file, updated_at)
+      SELECT id, employee_id, engine, agent_dir, sessions_dir, workspace_dir, session_file, updated_at FROM employee_session
     `);
-    db.exec("DROP TABLE employee_session_pre11");
+    db.exec("DROP TABLE employee_session");
+    db.exec("ALTER TABLE employee_session_new RENAME TO employee_session");
     db.exec("COMMIT");
   } catch (err) {
     db.exec("ROLLBACK");
@@ -767,16 +831,45 @@ export function openStore({ dataDir }) {
 
   const db = new DatabaseSync(dbPath);
   db.exec("PRAGMA journal_mode = WAL;");
+  // A second process can briefly hold the WAL (crash residue, backup tooling).
+  // The single-writer design makes this rare, not impossible: wait instead of
+  // throwing SQLITE_BUSY on the first tick.
+  db.exec("PRAGMA busy_timeout = 5000;");
   db.exec(SCHEMA);
-  migrateRunTaskColumns(db);
-  migrateTaskStateMachine(db);
-  migrateRunPauseState(db);
-  // Ticket 11 widens employee_session from one-per-employee to one-per
-  // employee × engine (switching engines keeps each engine's resume story).
-  // Databases built before that carry the UNIQUE on the column itself —
-  // rebuild them in place, ids first (run rows reference those ids).
-  migrateEmployeeSessionPerEngine(db);
-  migrateCostColumns(db);
+  // node:sqlite enables foreign keys by default. Several migrations rebuild
+  // parent tables (task / run / task_session / employee_session) whose child
+  // rows still reference them; with FK enforcement on, `DROP TABLE` fails and
+  // the host crash-loops on every launch. Run migrations with FK off, then
+  // verify the result with foreign_key_check. (PRAGMA cannot be toggled inside
+  // a transaction, so this sits outside the per-migration BEGIN/COMMIT.)
+  db.exec("PRAGMA foreign_keys = OFF;");
+  try {
+    migrateRunTaskColumns(db);
+    migrateTaskStateMachine(db);
+    migrateRunPauseState(db);
+    // Ticket 11 widens employee_session from one-per-employee to one-per
+    // employee × engine (switching engines keeps each engine's resume story).
+    // Databases built before that carry the UNIQUE on the column itself —
+    // rebuild them in place, ids first (run rows reference those ids).
+    migrateEmployeeSessionPerEngine(db);
+    migrateCostColumns(db);
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON;");
+  }
+  const orphans = db.prepare("PRAGMA foreign_key_check").all();
+  if (orphans.length > 0) {
+    throw new Error(`store migration left ${orphans.length} orphan foreign-key rows`);
+  }
+  assertRequiredColumns(db);
+  // Indexes are created AFTER the rebuild migrations: dropping a table drops
+  // its indexes with it. Hot paths (turn_end → run.task_id, listTasks →
+  // task_session.task_id) would otherwise scan the whole table.
+  db.exec(INDEXES);
+  // A workspace belongs to the employee, not to the engine (see
+  // engine/paths.mjs). Older databases kept one workspace per engine; move the
+  // employee's current workspace to the shared location once, then point every
+  // engine session (and tasks recorded in that workspace) at it.
+  migrateEmployeeWorkspaces(db, dataDir);
   // A host that died (or was killed) mid-run must not leave phantom 'running'
   // rows behind: they become 'interrupted' the moment a host opens the store.
   markInterruptedRuns(db);
@@ -807,6 +900,24 @@ export function openStore({ dataDir }) {
       const createdAt = new Date().toISOString();
       const info = db.prepare("INSERT INTO company (name, created_at) VALUES (?, ?)").run(name, createdAt);
       return { id: Number(info.lastInsertRowid), name, createdAt };
+    },
+
+    /** @param {number} companyId @returns {boolean} */
+    companyExists(companyId) {
+      return db.prepare("SELECT 1 AS ok FROM company WHERE id = ?").get(companyId) !== undefined;
+    },
+
+    /**
+     * Just the company ids. The duty tick and existence checks must not pay for
+     * a full office snapshot (two run-table token scans) every second.
+     *
+     * @returns {number[]}
+     */
+    companyIds() {
+      return db
+        .prepare("SELECT id FROM company ORDER BY id")
+        .all()
+        .map((row) => Number(/** @type {Record<string, unknown>} */ (row).id));
     },
 
     /** @param {{ companyId: number, name: string }} input @returns {GroupRow} */
@@ -912,6 +1023,38 @@ export function openStore({ dataDir }) {
     },
 
     /**
+     * Every seated employee of a company, across its project groups — the
+     * 花名册 is a company roster, not "the active group's desks".
+     *
+     * @param {{ companyId: number }} input
+     * @returns {{ id: number, name: string, roleName: string, deskLabel: string, groupName: string }[]}
+     */
+    listEmployeesForCompany({ companyId }) {
+      const rows = db
+        .prepare(
+          `SELECT e.id AS id, e.name AS name, e.role_snapshot AS role_snapshot,
+                  d.label AS desk_label, g.name AS group_name
+           FROM employee e
+           JOIN desk d ON d.employee_id = e.id
+           JOIN project_group g ON g.id = d.group_id
+           WHERE e.company_id = ?
+           ORDER BY e.id`,
+        )
+        .all(companyId);
+      return rows.map((raw) => {
+        const row = /** @type {Record<string, unknown>} */ (raw);
+        const snapshot = /** @type {RoleSnapshot} */ (parseJsonOr(row.role_snapshot, UNKNOWN_ROLE_SNAPSHOT));
+        return {
+          id: Number(row.id),
+          name: String(row.name),
+          roleName: String(snapshot.name ?? "未知角色"),
+          deskLabel: String(row.desk_label),
+          groupName: String(row.group_name),
+        };
+      });
+    },
+
+    /**
      * @param {number} employeeId
      * @returns {(EmployeeOccupant & { companyId: number }) | null}
      */
@@ -925,7 +1068,7 @@ export function openStore({ dataDir }) {
         companyId: Number(row.company_id),
         name: String(row.name),
         roleId: Number(row.role_id),
-        roleSnapshot: /** @type {RoleSnapshot} */ (JSON.parse(String(row.role_snapshot))),
+        roleSnapshot: /** @type {RoleSnapshot} */ (parseJsonOr(row.role_snapshot, UNKNOWN_ROLE_SNAPSHOT)),
         hiredAt: String(row.hired_at),
       };
     },
@@ -1006,13 +1149,12 @@ export function openStore({ dataDir }) {
       // 票 12: usage 的三态在这里定型 —— 引擎报了什么就存什么（全 0 也是「计量到 0」），
       // 只有「从没报过」才留 null（未计量）。把 0 塌回 null 会毁掉缺失/0 的区分。
       const usageJson = usage ? JSON.stringify(usage) : null;
-      db.prepare("UPDATE run SET status = ?, ended_at = ?, usage = ?, fail_reason = ? WHERE id = ? AND status = 'running'").run(
-        status,
-        new Date().toISOString(),
-        usageJson,
-        failReason ?? null,
-        runId,
-      );
+      const info = db
+        .prepare("UPDATE run SET status = ?, ended_at = ?, usage = ?, fail_reason = ? WHERE id = ? AND status = 'running'")
+        .run(status, new Date().toISOString(), usageJson, failReason ?? null, runId);
+      if (info.changes !== 1) {
+        throw appError("run_already_settled", `run ${runId} was no longer running when it tried to finish as ${status}`);
+      }
       const row = db.prepare("SELECT * FROM run WHERE id = ?").get(runId);
       if (!row) throw appError("unknown_run", `no run with id ${runId}`);
       return toRun(/** @type {Record<string, unknown>} */ (row));
@@ -1246,6 +1388,52 @@ export function openStore({ dataDir }) {
     },
 
     /**
+     * One transaction for the whole "a task run begins" story: legal state
+     * transition + task_session row + run row. Any failure rolls all three
+     * back, so a rejected dispatch can never leave a task 进行中 with no run
+     * (or a half-written session) behind — the ticket-06 "no dangling rows"
+     * rule made structural.
+     *
+     * @param {{ taskId: number, employeeSessionId: number, engine: string, prompt: string, resume?: boolean }} input
+     * @returns {{ task: TaskRow, taskSession: TaskSessionRow, run: RunRow }}
+     */
+    beginTaskRun({ taskId, employeeSessionId, engine, prompt, resume = false }) {
+      db.exec("BEGIN");
+      try {
+        const task = this.taskById(taskId);
+        if (!task) throw appError("unknown_task", `no task with id ${taskId}`);
+        if (resume) {
+          if (task.status !== "running") {
+            if (task.status === "open" && this.latestTaskSessionForTask(taskId)?.status === "interrupted") {
+              this.setTaskStatus(taskId, "running");
+            } else {
+              throw appError(
+                "invalid_transition",
+                `只有「进行中」（含下班暂停）或崩溃中断落回待办的任务能续跑，这张是 ${task.status}`,
+              );
+            }
+          }
+        } else {
+          this.setTaskStatus(taskId, "running");
+        }
+        const taskSession = this.openTaskSession({ taskId, employeeSessionId, engine });
+        const run = this.createRun({
+          employeeId: task.employeeId,
+          employeeSessionId,
+          engine,
+          prompt,
+          taskId,
+          taskSessionId: taskSession.id,
+        });
+        db.exec("COMMIT");
+        return { task: /** @type {TaskRow} */ (this.taskById(taskId)), taskSession, run };
+      } catch (err) {
+        db.exec("ROLLBACK");
+        throw err;
+      }
+    },
+
+    /**
      * The task-level Session entity (GLOSSARY: 会话挂在任务下，可多条):
      * one per dispatch/retry, wrapping the engine run and its outcome.
      *
@@ -1272,11 +1460,17 @@ export function openStore({ dataDir }) {
       if (!TERMINAL_RUN_STATUSES.has(status)) {
         throw appError("invalid_payload", `task session cannot finish with status ${status}`);
       }
-      db.prepare("UPDATE task_session SET status = ?, ended_at = ? WHERE id = ? AND status = 'running'").run(
+      const info = db.prepare("UPDATE task_session SET status = ?, ended_at = ? WHERE id = ? AND status = 'running'").run(
         status,
         new Date().toISOString(),
         taskSessionId,
       );
+      if (info.changes !== 1) {
+        throw appError(
+          "task_session_already_settled",
+          `task session ${taskSessionId} was no longer running when it tried to finish as ${status}`,
+        );
+      }
       const row = db.prepare("SELECT * FROM task_session WHERE id = ?").get(taskSessionId);
       if (!row) throw appError("unknown_task_session", `no task session with id ${taskSessionId}`);
       return toTaskSession(/** @type {Record<string, unknown>} */ (row));
@@ -1325,8 +1519,18 @@ export function openStore({ dataDir }) {
       );
     },
 
-    /** @param {{ taskId: number }} input @returns {ArtifactRow[]} creation order */
-    listArtifacts({ taskId }) {
+    /** @param {{ taskId: number, latestRunOnly?: boolean }} input @returns {ArtifactRow[]} creation order */
+    listArtifacts({ taskId, latestRunOnly = false }) {
+      if (latestRunOnly) {
+        const latest = db
+          .prepare("SELECT id FROM run WHERE task_id = ? AND status <> 'running' ORDER BY id DESC LIMIT 1")
+          .get(taskId);
+        if (!latest) return [];
+        const rows = db
+          .prepare("SELECT * FROM artifact WHERE task_id = ? AND run_id = ? ORDER BY id")
+          .all(taskId, Number(/** @type {Record<string, unknown>} */ (latest).id));
+        return rows.map((row) => toArtifact(/** @type {Record<string, unknown>} */ (row)));
+      }
       const rows = db.prepare("SELECT * FROM artifact WHERE task_id = ? ORDER BY id").all(taskId);
       return rows.map((row) => toArtifact(/** @type {Record<string, unknown>} */ (row)));
     },
@@ -1362,9 +1566,11 @@ export function openStore({ dataDir }) {
     // — 失败与成本 (ticket 12: 人话失败原因 / 任务预算 / 三层 token 聚合) —
 
     /**
-     * 票 12 验收 1: the human reason of the task's LATEST failed/aborted session's
-     * run. Reads back through the session (one owner of the run lifecycle: the
-     * run manager), so the UI never re-derives anything.
+     * 票 12 验收 1: the human reason of the task's LATEST session's run.
+     * Only failed/aborted runs carry a reason, so a retry that is running or
+     * completed naturally reads null — the failure box only renders for a
+     * failed task anyway. Reads back through the session (one owner of the
+     * run lifecycle: the run manager), so the UI never re-derives anything.
      *
      * @param {number} taskId
      * @returns {string | null}
@@ -1558,7 +1764,7 @@ export function openStore({ dataDir }) {
         companyId: Number(row.company_id),
         name: String(row.name),
         roleId: Number(row.role_id),
-        roleSnapshot: /** @type {RoleSnapshot} */ (JSON.parse(String(row.role_snapshot))),
+        roleSnapshot: /** @type {RoleSnapshot} */ (parseJsonOr(row.role_snapshot, UNKNOWN_ROLE_SNAPSHOT)),
         hiredAt: String(row.hired_at),
       };
     },
@@ -1657,11 +1863,25 @@ export function openStore({ dataDir }) {
     setEmployeeEngine({ employeeId, engine }) {
       const row = db.prepare("SELECT role_snapshot FROM employee WHERE id = ?").get(employeeId);
       if (!row) throw appError("unknown_employee", `no employee with id ${employeeId}`);
-      const snapshot = JSON.parse(String(row.role_snapshot));
+      const snapshot = /** @type {any} */ (parseJsonOr(row.role_snapshot, { manifest: {} }));
       if (!snapshot.manifest || typeof snapshot.manifest !== "object") snapshot.manifest = {};
       snapshot.manifest.engine = engine;
       db.prepare("UPDATE employee SET role_snapshot = ? WHERE id = ?").run(JSON.stringify(snapshot), employeeId);
       return /** @type {any} */ (this.employeeById(employeeId));
+    },
+
+    /**
+     * The project group the view currently follows, without building a whole
+     * office snapshot (that would run two full token aggregations).
+     *
+     * @returns {number | null}
+     */
+    activeGroupId() {
+      const active = readActive(db);
+      const groups = this.listGroups({ companyId: active.companyId });
+      const chosen = active.groups[active.companyId];
+      if (groups.some((group) => group.id === chosen)) return chosen;
+      return groups.at(-1)?.id ?? null;
     },
 
     /**
@@ -1720,6 +1940,85 @@ export function openStore({ dataDir }) {
 }
 
 /**
+ * One employee → one workspace. Pre-fix databases had
+ * `engines/<engine>/employee-<id>/workspace` per engine; a task created under
+ * pi then dispatched after switching to codex ran in a different, empty repo.
+ * Move the current engine's workspace to `<dataDir>/workspaces/employee-<id>`,
+ * point every engine session at it, and rewrite the tasks that were recorded
+ * in the moved directory. Best-effort: a locked workspace is copied, not
+ * deleted; the old directory is left for the user.
+ *
+ * @param {DatabaseSync} db
+ * @param {string} dataDir
+ */
+function migrateEmployeeWorkspaces(db, dataDir) {
+  const employees = db.prepare("SELECT id, role_snapshot FROM employee").all();
+  if (employees.length === 0) return;
+  const sessionsFor = db.prepare("SELECT id, engine, workspace_dir FROM employee_session WHERE employee_id = ?");
+  const updateSessions = db.prepare("UPDATE employee_session SET workspace_dir = ?, updated_at = ? WHERE employee_id = ?");
+  const updateTasks = db.prepare("UPDATE task SET workspace_dir = ? WHERE employee_id = ? AND workspace_dir = ?");
+  const now = new Date().toISOString();
+
+  for (const raw of employees) {
+    const employeeId = Number(/** @type {Record<string, unknown>} */ (raw).id);
+    const stable = path.join(dataDir, "workspaces", `employee-${employeeId}`);
+    const sessions = sessionsFor.all(employeeId).map((row) => ({
+      engine: String(/** @type {Record<string, unknown>} */ (row).engine),
+      workspaceDir: String(/** @type {Record<string, unknown>} */ (row).workspace_dir ?? ""),
+    }));
+    if (sessions.length === 0) continue;
+    if (sessions.every((session) => session.workspaceDir === stable)) continue;
+
+    const snapshot = /** @type {any} */ (parseJsonOr(/** @type {Record<string, unknown>} */ (raw).role_snapshot, UNKNOWN_ROLE_SNAPSHOT));
+    const currentEngine = snapshot?.manifest?.engine ?? "pi";
+    const preferred =
+      sessions.find((session) => session.engine === currentEngine && existsSync(session.workspaceDir)) ??
+      sessions.find((session) => existsSync(session.workspaceDir));
+    let movedFrom = null;
+    if (!existsSync(stable) && preferred) {
+      try {
+        mkdirSync(path.dirname(stable), { recursive: true });
+        renameSync(preferred.workspaceDir, stable);
+        movedFrom = preferred.workspaceDir;
+      } catch {
+        try {
+          cpSync(preferred.workspaceDir, stable, { recursive: true });
+          movedFrom = preferred.workspaceDir;
+        } catch {
+          // a locked old workspace: keep the old path, just repoint sessions
+        }
+      }
+    }
+    if (!existsSync(stable)) mkdirSync(stable, { recursive: true });
+    updateSessions.run(stable, now, employeeId);
+    if (movedFrom) updateTasks.run(stable, employeeId, movedFrom);
+  }
+}
+
+/**
+ * Migrations rebuild tables by hand; a missing column would otherwise be a
+ * silent runtime failure far from the schema. Assert the contract at open.
+ *
+ * @param {DatabaseSync} db
+ */
+function assertRequiredColumns(db) {
+  /** @type {Record<string, string[]>} */
+  const required = {
+    task: ["group_id", "employee_id", "workspace_dir", "status", "base_head", "token_budget"],
+    task_session: ["task_id", "employee_session_id", "engine", "status"],
+    run: ["employee_session_id", "employee_id", "engine", "status", "usage", "task_id", "task_session_id", "fail_reason"],
+    employee_session: ["employee_id", "engine", "agent_dir", "sessions_dir", "workspace_dir", "session_file"],
+    artifact: ["task_id", "run_id", "kind", "content"],
+  };
+  for (const [table, columns] of Object.entries(required)) {
+    const present = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((row) => String(/** @type {Record<string, unknown>} */ (row).name)));
+    for (const column of columns) {
+      if (!present.has(column)) throw new Error(`store schema drift: ${table}.${column} is missing after migrations`);
+    }
+  }
+}
+
+/**
  * Runs left 'running' belong to a host that is no longer alive: close that
  * chapter before any new host starts. Ticket 10 (crash recovery) builds the
  * resume story on top of this marker. Task sessions follow their runs, and
@@ -1734,25 +2033,27 @@ export function openStore({ dataDir }) {
  * @param {DatabaseSync} db
  */
 function markInterruptedRuns(db) {
-  const running = db.prepare("SELECT id FROM run WHERE status = 'running'").all();
-  const interruptSessions = db.prepare("UPDATE task_session SET status = 'interrupted', ended_at = ? WHERE status = 'running'");
-  const reopenTasks = db.prepare(
-    `UPDATE task SET status = 'open'
-     WHERE status = 'running'
-       AND id NOT IN (SELECT task_id FROM task_session WHERE status = 'paused')`,
-  );
-  if (running.length === 0) {
-    // No orphan runs — task sessions/tasks can still be orphaned if the host
-    // died between opening a session and creating its run; heal those too.
-    interruptSessions.run(new Date().toISOString());
+  db.exec("BEGIN");
+  try {
+    const running = db.prepare("SELECT id FROM run WHERE status = 'running'").all();
+    const interruptSessions = db.prepare("UPDATE task_session SET status = 'interrupted', ended_at = ? WHERE status = 'running'");
+    const reopenTasks = db.prepare(
+      `UPDATE task SET status = 'open'
+       WHERE status = 'running'
+         AND id NOT IN (SELECT task_id FROM task_session WHERE status = 'paused')`,
+    );
+    const endedAt = new Date().toISOString();
+    if (running.length > 0) {
+      const finish = db.prepare("UPDATE run SET status = 'interrupted', ended_at = ? WHERE id = ?");
+      for (const row of running) finish.run(endedAt, Number(/** @type {Record<string, unknown>} */ (row).id));
+    }
+    interruptSessions.run(endedAt);
     reopenTasks.run();
-    return;
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
   }
-  const endedAt = new Date().toISOString();
-  const finish = db.prepare("UPDATE run SET status = 'interrupted', ended_at = ? WHERE id = ?");
-  for (const row of running) finish.run(endedAt, Number(/** @type {Record<string, unknown>} */ (row).id));
-  interruptSessions.run(endedAt);
-  reopenTasks.run();
 }
 
 /**
@@ -1899,10 +2200,10 @@ function markInterruptedProbes(db) {
   if (stale.length === 0) return;
   const now = new Date().toISOString();
   const update = db.prepare(
-    "UPDATE engine_state SET probe_status = 'failed', probe_json = ?, probe_at = ?, updated_at = ? WHERE engine = ?",
+    "UPDATE engine_state SET probe_status = 'failed', probe_json = ?, updated_at = ? WHERE engine = ?",
   );
   const reason = JSON.stringify({ verdicts: null, error: "上一次探针随 AgentHost 一起结束，没有拿到结论" });
-  for (const row of stale) update.run(reason, now, now, String(/** @type {Record<string, unknown>} */ (row).engine));
+  for (const row of stale) update.run(reason, now, String(/** @type {Record<string, unknown>} */ (row).engine));
 }
 
 /**
@@ -2016,22 +2317,35 @@ function writeActive(db, active) {
 }
 
 /**
- * Insert any preset role this database is missing (by key). Runs on every
- * open, so upgrading an older database picks up the factory roster without
- * touching rows users may already reference.
+ * Bump whenever PRESET_ROLES changes in a way existing databases must receive
+ * (new tool, new cost field, engine default). Hired snapshots stay frozen.
+ */
+const ROLE_SEED_REV = 2;
+
+/**
+ * Insert or refresh the preset roster. Runs on every open; a versioned meta
+ * key makes the refresh a one-shot upgrade rather than a write per launch.
+ * Existing hires keep their frozen snapshots — only the role library moves.
  *
  * @param {DatabaseSync} db
  */
 function seedRoles(db) {
+  const seeded = db.prepare("SELECT value FROM meta WHERE key = 'role_seed_rev'").get();
+  if (String(/** @type {Record<string, unknown>} */ (seeded ?? {}).value ?? "") === String(ROLE_SEED_REV)) return;
   const createdAt = new Date().toISOString();
-  const insert = db.prepare(
-    "INSERT INTO role (key, name, tagline, manifest, created_at) VALUES (?, ?, ?, ?, ?)",
+  const upsert = db.prepare(
+    `INSERT INTO role (key, name, tagline, manifest, created_at) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET
+       name = excluded.name,
+       tagline = excluded.tagline,
+       manifest = excluded.manifest`,
   );
-  const exists = db.prepare("SELECT 1 FROM role WHERE key = ?");
   for (const preset of PRESET_ROLES) {
-    if (exists.get(preset.key)) continue;
-    insert.run(preset.key, preset.name, preset.tagline, JSON.stringify(preset.manifest), createdAt);
+    upsert.run(preset.key, preset.name, preset.tagline, JSON.stringify(preset.manifest), createdAt);
   }
+  db.prepare(
+    "INSERT INTO meta (key, value) VALUES ('role_seed_rev', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+  ).run(String(ROLE_SEED_REV));
 }
 
 /**

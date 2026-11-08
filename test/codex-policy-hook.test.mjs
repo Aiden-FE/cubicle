@@ -6,16 +6,15 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { startPolicyBridge } from "../src/host/engine/codex/bridge.mjs";
+import { decideToolAccess } from "../src/host/engine/policy.mjs";
 
 const hookSource = new URL("../src/host/engine/codex/policy-hook.mjs", import.meta.url);
-const policySource = new URL("../src/host/engine/policy.mjs", import.meta.url);
 
-/** Copy the hook + the live policy table like the adapter does, then run the hook for one stdin JSON. */
+/** Copy the thin hook like the adapter does, then run it for one stdin JSON. */
 async function runHook(/** @type {string} */ stdinJson, extraEnv = {}) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "cubicle-hook-"));
   try {
     copyFileSync(hookSource, path.join(dir, "policy-hook.mjs"));
-    copyFileSync(policySource, path.join(dir, "policy.mjs"));
     const child = spawn(process.execPath, [path.join(dir, "policy-hook.mjs")], {
       env: { ...process.env, ...extraEnv },
       stdio: ["pipe", "pipe", "pipe"],
@@ -31,31 +30,56 @@ async function runHook(/** @type {string} */ stdinJson, extraEnv = {}) {
   }
 }
 
-test("the hook denies exactly what the host policy denies, in codex wire format", async () => {
-  const { output } = await runHook(
-    JSON.stringify({
-      session_id: "s1",
-      tool_name: "Bash",
-      tool_use_id: "call_1",
-      tool_input: { command: "Remove-Item -Recurse -Force notes" },
-    }),
-  );
-  assert.equal(output.hookSpecificOutput.hookEventName, "PreToolUse");
-  assert.equal(output.hookSpecificOutput.permissionDecision, "deny");
-  assert.match(output.hookSpecificOutput.permissionDecisionReason, /策略拦截（recursive-force-delete）/);
+/** A bridge whose decision is the real host policy, pinned to a test workspace. */
+async function policyBridge(/** @type {(verdict: any) => void} */ onVerdict = () => {}) {
+  return startPolicyBridge({
+    onVerdict,
+    decide: (question) =>
+      decideToolAccess({
+        toolName: question.tool_name,
+        args: question.tool_input,
+        workspaceDir: path.join(os.tmpdir(), "cubicle-hook-workspace"),
+      }),
+  });
+}
+
+test("the hook asks the host and returns its deny in codex wire format", async () => {
+  const bridge = await policyBridge();
+  try {
+    const { output } = await runHook(
+      JSON.stringify({
+        session_id: "s1",
+        tool_name: "Bash",
+        tool_use_id: "call_1",
+        tool_input: { command: "Remove-Item -Recurse -Force notes" },
+      }),
+      { CUBICLE_POLICY_BRIDGE_URL: bridge.url, CUBICLE_POLICY_TOKEN: bridge.token },
+    );
+    assert.equal(output.hookSpecificOutput.hookEventName, "PreToolUse");
+    assert.equal(output.hookSpecificOutput.permissionDecision, "deny");
+    assert.match(output.hookSpecificOutput.permissionDecisionReason, /策略拦截（recursive-force-delete）/);
+  } finally {
+    await bridge.close();
+  }
 });
 
-test("ordinary calls pass with an explicit allow", async () => {
-  const { output } = await runHook(
-    JSON.stringify({ session_id: "s1", tool_name: "Bash", tool_use_id: "c", tool_input: { command: "echo hi" } }),
-  );
-  assert.equal(output.hookSpecificOutput.permissionDecision, "allow");
+test("ordinary calls pass with an explicit allow from the host", async () => {
+  const bridge = await policyBridge();
+  try {
+    const { output } = await runHook(
+      JSON.stringify({ session_id: "s1", tool_name: "Bash", tool_use_id: "c", tool_input: { command: "echo hi" } }),
+      { CUBICLE_POLICY_BRIDGE_URL: bridge.url, CUBICLE_POLICY_TOKEN: bridge.token },
+    );
+    assert.equal(output.hookSpecificOutput.permissionDecision, "allow");
+  } finally {
+    await bridge.close();
+  }
 });
 
 test("deny verdicts are reported to the bridge alongside the block", async () => {
   /** @type {any[]} */
   const received = [];
-  const bridge = await startPolicyBridge((v) => received.push(v));
+  const bridge = await policyBridge((v) => received.push(v));
   try {
     await runHook(
       JSON.stringify({
@@ -77,15 +101,35 @@ test("deny verdicts are reported to the bridge alongside the block", async () =>
   }
 });
 
-test("without a bridge the gate still blocks (defense in depth)", async () => {
+test("a file write outside the workspace is denied by the host, not by a copy of the rules", async () => {
+  const bridge = await policyBridge();
+  try {
+    const { output } = await runHook(
+      JSON.stringify({
+        session_id: "s1",
+        tool_name: "Write",
+        tool_use_id: "call_write",
+        tool_input: { path: "..\\..\\Windows\\System32\\evil.txt" },
+      }),
+      { CUBICLE_POLICY_BRIDGE_URL: bridge.url, CUBICLE_POLICY_TOKEN: bridge.token },
+    );
+    assert.equal(output.hookSpecificOutput.permissionDecision, "deny");
+    assert.match(output.hookSpecificOutput.permissionDecisionReason, /outside-workspace/);
+  } finally {
+    await bridge.close();
+  }
+});
+
+test("without a bridge the gate fails closed", async () => {
   const { output } = await runHook(
     JSON.stringify({ session_id: "s1", tool_name: "Bash", tool_use_id: "c", tool_input: { command: "format c:" } }),
   );
   assert.equal(output.hookSpecificOutput.permissionDecision, "deny");
-  assert.match(output.hookSpecificOutput.permissionDecisionReason, /disk-destruction/);
+  assert.match(output.hookSpecificOutput.permissionDecisionReason, /策略桥不可用/);
 });
 
-test("a malformed stdin fails open, like the pi extension on parse trouble", async () => {
+test("a malformed stdin fails closed", async () => {
   const { output } = await runHook("this is not json");
-  assert.equal(output.hookSpecificOutput.permissionDecision, "allow");
+  assert.equal(output.hookSpecificOutput.permissionDecision, "deny");
+  assert.match(output.hookSpecificOutput.permissionDecisionReason, /无法解析/);
 });

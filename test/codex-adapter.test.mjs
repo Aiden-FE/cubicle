@@ -174,8 +174,14 @@ test("the CLI launch keeps the app-private CODEX_HOME, absolute -C, and the hook
     // variant ("missing field `command` in `hooks`") — both keys must ship.
     assert.match(config, /^command = "node /m);
     assert.match(config, /^commandWindows = "node /m);
+    assert.match(config, /\[shell_environment_policy\]/);
+    assert.match(config, /exclude = \["CUBICLE_CODEX_KEY"\]/, "shell 子进程不继承 BYOK key");
     assert.ok(existsSync(path.join(engineRoot, "hooks", "policy-hook.mjs")));
-    assert.ok(existsSync(path.join(engineRoot, "hooks", "policy.mjs")));
+    assert.equal(
+      existsSync(path.join(engineRoot, "hooks", "policy.mjs")),
+      false,
+      "规则表不落在员工可写的引擎目录：hook 只问宿主 /decide",
+    );
 
     // The persona injection landed in the employee's private workspace.
     const agents = readFileSync(path.join(session.workspaceDir, "AGENTS.md"), "utf8");
@@ -295,6 +301,74 @@ test("codex dying before its first JSONL line reports why instead of settling qu
     assert.equal(failure.code, "engine_exec_failed");
     assert.match(failure.message, /missing field .command./);
     assert.equal(events.filter((e) => e.type === "agent_end").length, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a non-zero exit after a completed turn still fails the run", async () => {
+  const dir = tempDir();
+  try {
+    seedModels(dir);
+    const events = /** @type {any[]} */ ([]);
+    let spawned = /** @type {any} */ (null);
+    const adapter = createCodexAdapter({
+      dataDir: dir,
+      killTree: () => {},
+      spawnProcess: () => {
+        spawned = fakeChild();
+        return spawned;
+      },
+    });
+    const live = await adapter.open({
+      employee: { name: "甲", roleSnapshot: { manifest: {} } },
+      session: sessionFixture(dir),
+      onEvent: (event) => events.push(event),
+    });
+    const done = live.prompt("说一句");
+    spawned.stdout.write('{"type":"thread.started","thread_id":"thread-1"}\n');
+    spawned.stdout.write('{"type":"turn.started"}\n');
+    spawned.stdout.write('{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":3}}\n');
+    spawned.stdin.end();
+    spawned.stdout.end();
+    spawned.stderr.end();
+    spawned.emit("close", 1);
+    await done;
+
+    assert.equal(events.find((e) => e.type === "error")?.code, "engine_exec_failed");
+    assert.equal(events.find((e) => e.type === "agent_end")?.status, "failed", "半成功也必须是失败收尾");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("abort resolves only after the child really closed", async () => {
+  const dir = tempDir();
+  try {
+    seedModels(dir);
+    let spawned = /** @type {any} */ (null);
+    let closedAt = 0;
+    const adapter = createCodexAdapter({
+      dataDir: dir,
+      killTree: () => {},
+      spawnProcess: () => {
+        spawned = fakeChild();
+        spawned.on("close", () => {
+          closedAt = Date.now();
+        });
+        return spawned;
+      },
+    });
+    const live = await adapter.open({
+      employee: { name: "甲", roleSnapshot: { manifest: {} } },
+      session: sessionFixture(dir),
+      onEvent: () => {},
+    });
+    const done = live.prompt("慢慢跑");
+    await live.abort();
+    await done;
+    assert.ok(closedAt > 0, "子进程已经 close");
+    assert.ok(Date.now() >= closedAt, "abort 在 close 之后才返回");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

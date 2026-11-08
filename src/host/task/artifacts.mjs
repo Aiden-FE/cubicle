@@ -18,6 +18,8 @@
  * @typedef {{ run: RunRow, status: "completed" | "aborted" | "failed" | "paused", events: TimedEvent[] }} TaskRunFinished
  */
 
+import { redactSecrets } from "../../shared/redact.mjs";
+
 /** Keep artifacts viewable through IPC: generous, but bounded. */
 const TEXT_CAP = 20_000;
 
@@ -54,6 +56,8 @@ function resultText(result) {
         : null
     );
     if (structured && typeof structured.output === "string") return structured.output;
+    // codex's command_execution result is { output, exitCode, status }.
+    if (typeof envelope.output === "string") return envelope.output;
     if (Array.isArray(envelope.content)) {
       const text = envelope.content
         .map((part) => (typeof part === "object" && part !== null ? String(/** @type {Record<string, unknown>} */ (part).text ?? "") : ""))
@@ -70,7 +74,7 @@ function resultText(result) {
 }
 
 /** Tool names that mean “the employee ran a command”. */
-const COMMAND_TOOLS = new Set(["bash", "powershell"]);
+const COMMAND_TOOLS = new Set(["bash", "powershell", "shell"]);
 
 /**
  * Every command the run executed (bash or powershell), with its output —
@@ -127,7 +131,7 @@ export function finalReport(events) {
  * @returns {(finished: TaskRunFinished) => void}
  */
 export function createTaskRunHook({ store, git }) {
-  return ({ run, status, events }) => {
+  return async ({ run, status, events }) => {
     if (run.taskId === null) return;
     // 票 09: paused（下班落盘）不是交付也不是失败 — 这一轮合上、任务留在
     // 「进行中」挂暂停徽标，四件套留给上班续跑后的那轮收尾。
@@ -139,7 +143,9 @@ export function createTaskRunHook({ store, git }) {
     /** @type {string[]} */
     let fileLines = ["无法列出变更：缺少任务记录。"];
     if (task) {
-      const info = git.diffInfo(task.workspaceDir, task.baseHead);
+      // Async git: artifact collection no longer freezes the single-writer
+      // host for up to 4 × 15s while the engine could be serving other runs.
+      const info = await git.diffInfo(task.workspaceDir, task.baseHead);
       if (info.ok) {
         diffLines = [
           `起点 ${short(task.baseHead)} → 当前 ${short(info.headNow)}`,
@@ -157,14 +163,14 @@ export function createTaskRunHook({ store, git }) {
     }
 
     const report = finalReport(events);
-    store.createArtifact({ taskId: run.taskId, runId: run.id, kind: "diff_summary", content: cap(diffLines.join("\n")) });
-    store.createArtifact({ taskId: run.taskId, runId: run.id, kind: "changed_files", content: cap(fileLines.join("\n")) });
-    store.createArtifact({ taskId: run.taskId, runId: run.id, kind: "command_output", content: cap(commandTranscript(events)) });
+    store.createArtifact({ taskId: run.taskId, runId: run.id, kind: "diff_summary", content: cap(redactSecrets(diffLines.join("\n"))) });
+    store.createArtifact({ taskId: run.taskId, runId: run.id, kind: "changed_files", content: cap(redactSecrets(fileLines.join("\n"))) });
+    store.createArtifact({ taskId: run.taskId, runId: run.id, kind: "command_output", content: cap(redactSecrets(commandTranscript(events))) });
     store.createArtifact({
       taskId: run.taskId,
       runId: run.id,
       kind: "report",
-      content: cap(report.length > 0 ? report : "（引擎没有留下收尾报告）"),
+      content: cap(redactSecrets(report.length > 0 ? report : "（引擎没有留下收尾报告）")),
     });
 
     // The task session row is closed by the run manager (single owner of the

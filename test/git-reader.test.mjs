@@ -47,7 +47,7 @@ test("head resolves the current commit of a real repository", async () => {
   try {
     await writeFile(path.join(workspace, "a.txt"), "one\n", "utf8");
     const short = commitAll(git, "initial");
-    const result = reader.head(workspace);
+    const result = await reader.head(workspace);
     assert.equal(result.ok, true);
     assert.equal(/** @type {{ sha: string }} */ (result).sha.startsWith(short.slice(0, 7)), true);
     assert.equal(/** @type {{ sha: string }} */ (result).sha.length, 40);
@@ -60,7 +60,7 @@ test("head on a plain directory says it is not a git workspace", async () => {
   const { workspace, dispose } = await withRepo("plain");
   const reader = createGitReader();
   try {
-    const result = reader.head(workspace);
+    const result = await reader.head(workspace);
     assert.equal(result.ok, false);
     assert.equal(/** @type {{ code: string }} */ (result).code, "not_a_git_workspace");
   } finally {
@@ -68,9 +68,9 @@ test("head on a plain directory says it is not a git workspace", async () => {
   }
 });
 
-test("a workspace directory that does not exist reads as not a git workspace too", () => {
+test("a workspace directory that does not exist reads as not a git workspace too", async () => {
   const reader = createGitReader();
-  const result = reader.head(path.join(tmpdir(), `cubicle-git-missing-${Date.now()}`));
+  const result = await reader.head(path.join(tmpdir(), `cubicle-git-missing-${Date.now()}`));
   assert.equal(result.ok, false);
   assert.equal(/** @type {{ code: string }} */ (result).code, "not_a_git_workspace");
 });
@@ -80,7 +80,7 @@ test("head on a repository without commits is reported distinctly", async () => 
   const reader = createGitReader();
   try {
     git(["init", "-q", "-b", "main"]);
-    const result = reader.head(workspace);
+    const result = await reader.head(workspace);
     assert.equal(result.ok, false);
     assert.equal(/** @type {{ code: string }} */ (result).code, "no_head_commit");
   } finally {
@@ -105,7 +105,7 @@ test("diffInfo lists everything changed since the recorded start HEAD, committed
     commitAll(git, "add b");
     await writeFile(path.join(workspace, "a.txt"), "one\ntwo\nthree\n", "utf8");
 
-    const info = reader.diffInfo(workspace, base);
+    const info = await reader.diffInfo(workspace, base);
     assert.equal(info.ok, true);
     const result = /** @type {{ headNow: string, stat: string, nameStatus: { status: string, path: string }[], porcelain: string }} */ (info);
     assert.equal(result.headNow.length, 40);
@@ -145,11 +145,11 @@ test("the reader refuses every non-read-only git command without spawning it", a
   }
 });
 
-test("git missing on the machine surfaces as git_unavailable, not a crash", () => {
+test("git missing on the machine surfaces as git_unavailable, not a crash", async () => {
   const reader = createGitReader({
     runCommand: () => ({ status: -1, stdout: "", stderr: "", failedToStart: true }),
   });
-  const result = reader.head("C:\\somewhere");
+  const result = await reader.head("C:\\somewhere");
   assert.equal(result.ok, false);
   assert.equal(/** @type {{ code: string }} */ (result).code, "git_unavailable");
 });
@@ -164,7 +164,7 @@ test("every command the app ran is on the audit log, and all are read-only", asy
     const base = commitAll(git, "base");
     await writeFile(path.join(workspace, "a.txt"), "one\ntwo\n", "utf8");
     commitAll(git, "second");
-    reader.diffInfo(workspace, base);
+    await reader.diffInfo(workspace, base);
     const commands = reader.audit();
     assert.ok(commands.length >= 3);
     assert.ok(commands.every((line) => line.startsWith(`git -C ${workspace} `)));

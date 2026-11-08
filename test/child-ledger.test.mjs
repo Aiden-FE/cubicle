@@ -154,6 +154,32 @@ test("清扫：账本条目已死时，它名下还活着的孤儿孩子也要�
   }
 });
 
+test("清扫：死账本条目只杀崩溃窗口内出生的孩子，老进程不因 ParentProcessId 被误杀", async () => {
+  const { dir, dispose } = await withTempDir("old-child-guard");
+  try {
+    const file = LEDGER_FILE(dir);
+    const ledger = createPidLedger({ file });
+    ledger.record({ pid: 4001, name: "codex", startedAt: "2026-11-07T10:00:00.000Z" });
+    /** @type {number[]} */
+    const killed = [];
+    const outcome = await sweepPidLedger({
+      file,
+      probeProcess: async () => null,
+      listChildren: async () => [
+        { pid: 4101, name: "old.exe", createdAt: "2026-11-07T09:58:00.000Z" },
+        { pid: 4102, name: "fresh.exe", createdAt: "2026-11-07T10:00:05.000Z" },
+      ],
+      killProcess: async (pid) => {
+        killed.push(pid);
+      },
+    });
+    assert.deepEqual(killed, [4102], "只杀账本 startedAt 之后/附近出生的孩子");
+    assert.equal(outcome.orphanChildren, 1);
+  } finally {
+    await dispose();
+  }
+});
+
 test("真机 smoke：默认 CIM 探针 + taskkill 杀掉一个真孤儿进程", async () => {
   if (process.platform !== "win32") {
     return; // 账本机制跨平台，默认探针/杀手是 Windows 实现（taskkill/CIM）
@@ -204,4 +230,20 @@ test("身份守卫导出：同名但出生时间对不上（pid 复用）不算�
   assert.equal(identityMatches({ pid: 1, name: "codex", startedAt: "2026-11-07T10:00:00.000Z" }, { name: "codex.exe", createdAt: "2026-11-07T12:00:00.000Z" }), false, "同名但出生差 2 小时 = pid 复用，不是它");
   assert.equal(identityMatches({ pid: 1, name: "codex", startedAt: "2026-11-07T10:00:00.000Z" }, { name: "codex.exe", createdAt: null }), true, "探针给不出出生时间时按名字放行（保守只影响多杀与否的窗口，日志会带 note）");
   assert.equal(identityMatches({ pid: 1, name: "codex", startedAt: "2026-11-07T10:00:00.000Z" }, null), false);
+  assert.equal(
+    identityMatches(
+      { pid: 1, name: "codex", startedAt: "2026-11-07T10:00:00.000Z", commandLineHint: "workspace-a" },
+      { name: "codex.exe", createdAt: "2026-11-07T10:00:02.000Z", commandLine: "codex exec -C C:\\a\\workspace-a" },
+    ),
+    true,
+    "argv 里带着记录时的唯一线索 → 是它",
+  );
+  assert.equal(
+    identityMatches(
+      { pid: 1, name: "codex", startedAt: "2026-11-07T10:00:00.000Z", commandLineHint: "workspace-a" },
+      { name: "codex.exe", createdAt: "2026-11-07T10:00:02.000Z", commandLine: "codex exec -C C:\\b\\workspace-b" },
+    ),
+    false,
+    "同名同龄但 argv 是另一份工作区 → pid 复用，不杀",
+  );
 });

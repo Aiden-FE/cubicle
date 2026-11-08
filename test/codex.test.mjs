@@ -56,6 +56,12 @@ test("codex JSONL becomes the normalized event stream", async () => {
   ]);
 });
 
+test("turn.completed without usage stays 未计量 (no fabricated 0); end(false) fails the run", () => {
+  const normalizer = createCodexNormalizer();
+  assert.deepEqual(normalizer.push('{"type":"turn.completed"}'), [{ type: "turn_end", status: "ok" }]);
+  assert.deepEqual(normalizer.end(false), [{ type: "agent_end", status: "failed" }]);
+});
+
 test("push streams each line's events as they arrive — the desk must animate live", () => {
   // Ticket 11: the CLI host's events drive the SAME 07 reducer while the run
   // is in flight. Handing everything over at exit would flash the whole run

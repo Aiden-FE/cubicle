@@ -55,6 +55,11 @@ export function OfficeFloor({ snapshot, status, bridgeError, onHireAt, onTalkTo,
           />
         ))}
       </div>
+      {snapshot && snapshot.desks.length > 0 && snapshot.desks.every((desk) => desk.occupant === null) ? (
+        <div className="office-onboarding" data-testid="office-onboarding">
+          点空工位招聘第一位员工，然后用「工单台」派活。
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -69,7 +74,8 @@ export function OfficeFloor({ snapshot, status, bridgeError, onHireAt, onTalkTo,
  *   viewPrefs: import("./App.jsx").ViewPrefs,
  * }} props
  */
-function DeskCard({ desk, onHireAt, onTalkTo, deskState, tokenSummary, viewPrefs }) {
+const DeskCard = React.memo(function DeskCard(/** @type {any} */ props) {
+  const { desk, onHireAt, onTalkTo, deskState, tokenSummary, viewPrefs } = props;
   const occupant = desk.occupant;
   const empty = occupant === null;
   const openDesk = empty ? () => onHireAt(desk) : occupant ? () => onTalkTo(occupant) : undefined;
@@ -111,7 +117,7 @@ function DeskCard({ desk, onHireAt, onTalkTo, deskState, tokenSummary, viewPrefs
     >
       {/* Layer order paints the seated person INTO the chair: desk &
           monitor → chair seat → person (back view) → chair backrest/base. */}
-      <DeskArtSvg activity={activity} />
+      <DeskArtSvg activity={activity} uid={`desk-${desk.id}`} />
       <ChairSeatSvg />
       {!empty && !awayFromDesk ? (
         <SeatedPersonSvg roleKey={occupant.roleSnapshot.key} posture={motion.posture} working={working} />
@@ -130,7 +136,7 @@ function DeskCard({ desk, onHireAt, onTalkTo, deskState, tokenSummary, viewPrefs
               title={`被策略拦下：${activity.blocked.reason}`}
               aria-label="被策略拦下"
             >
-              ✋
+              <span aria-hidden="true">禁</span>
             </div>
           ) : null}
         </>
@@ -148,7 +154,7 @@ function DeskCard({ desk, onHireAt, onTalkTo, deskState, tokenSummary, viewPrefs
           data-testid="desk-occupant"
           title={`${occupant.name} · ${occupant.roleSnapshot.name}`}
         >
-          {working ? "干活中…" : `${occupant.name} · ${occupant.roleSnapshot.name}`}
+          {occupant.name} · {working ? "干活中…" : occupant.roleSnapshot.name}
           {/* 票 12 验收 3: 员工名牌上的员工级 token 聚合（host 聚合走信封）；
               未计量的引擎显示「未计量」，不是 0。 */}
           <span
@@ -156,14 +162,14 @@ function DeskCard({ desk, onHireAt, onTalkTo, deskState, tokenSummary, viewPrefs
             data-testid="desk-token"
             data-measured={tokenSummary?.measured === true ? "true" : "false"}
           >
-            {tokenText(tokenSummary)}
+            {tokenSummary?.measured === true ? compactToken(tokenSummary.total) : tokenText(tokenSummary)}
           </span>
         </div>
       ) : null}
-      {empty ? <div className="desk-plate desk-plate-empty">{desk.label} · 空闲</div> : null}
+      {empty ? <div className="desk-plate desk-plate-empty">{desk.label} · 空位 · 点击招聘</div> : null}
     </div>
   );
-}
+});
 
 /**
  * Stylized workstation: desk with legs + shadow, monitor on a stand,
@@ -172,21 +178,21 @@ function DeskCard({ desk, onHireAt, onTalkTo, deskState, tokenSummary, viewPrefs
  * activity: 读/写/执行/测试 each get their own picture, 测试结果 turns the
  * whole screen 红/绿.
  *
- * @param {{ activity: import("./scene/deskActivity.js").DeskActivityState }} props
+ * @param {{ activity: import("./scene/deskActivity.js").DeskActivityState, uid: string }} props
  */
-function DeskArtSvg({ activity }) {
+function DeskArtSvg({ activity, uid }) {
   return (
     <svg className="desk-art" viewBox="0 0 170 152" aria-hidden="true">
       <defs>
-        <linearGradient id="desk-top" x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id={`${uid}-desk-top`} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="#d5c4a5" />
           <stop offset="1" stopColor="#c2ad88" />
         </linearGradient>
-        <linearGradient id="desk-screen" x1="0" y1="0" x2="1" y2="1">
+        <linearGradient id={`${uid}-desk-screen`} x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="#566054" />
           <stop offset="1" stopColor="#3d453c" />
         </linearGradient>
-        <linearGradient id="imac-shell" x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id={`${uid}-imac-shell`} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="#dcded8" />
           <stop offset="1" stopColor="#b7bab2" />
         </linearGradient>
@@ -198,15 +204,15 @@ function DeskArtSvg({ activity }) {
       {/* desk legs + top */}
       <rect x="26" y="60" width="7" height="30" rx="2" fill="#b39d78" />
       <rect x="137" y="60" width="7" height="30" rx="2" fill="#b39d78" />
-      <rect x="14" y="48" width="142" height="13" rx="4" fill="url(#desk-top)" />
+      <rect x="14" y="48" width="142" height="13" rx="4" fill={`url(#${uid}-desk-top)`} />
 
       {/* iMac: aluminum base plate + L stand, silver body, dark screen, chin */}
       <g className="imac">
         <rect x="66" y="49" width="38" height="5" rx="2.5" fill="#c7cac3" />
         <path d="M77 50 L93 50 L90 30 L80 30 Z" fill="#cfd2cb" />
         <path d="M77 50 L93 50 L91.5 41 L78.5 41 Z" fill="#c1c4bd" />
-        <rect x="37" y="1" width="96" height="48" rx="6" fill="url(#imac-shell)" />
-        <rect x="41" y="5" width="88" height="36" rx="3" fill="url(#desk-screen)" />
+        <rect x="37" y="1" width="96" height="48" rx="6" fill={`url(#${uid}-imac-shell)`} />
+        <rect x="41" y="5" width="88" height="36" rx="3" fill={`url(#${uid}-desk-screen)`} />
         <ScreenPicture activity={activity} />
         <rect x="41" y="5" width="88" height="36" rx="3" fill="none" stroke="#1f231e" strokeWidth="1.2" />
         <path d="M41 36 Q85 44 129 36 L129 41 Q85 41 41 41 Z" fill="rgba(255,255,255,0.05)" />
@@ -405,8 +411,7 @@ function CoffeeChairSvg() {
  *
  * @param {{ roleKey: string, posture: "idle" | "slack" | "coffee" | "work", working: boolean }} props
  */
-function SeatedPersonSvg({ roleKey, posture, working }) {
-  const color = appearanceFor(roleKey);
+function SeatedPersonSvg({ roleKey, posture, working }) {  const color = appearanceFor(roleKey);
   const slacking = posture === "slack";
   return (
     <svg
@@ -462,4 +467,17 @@ function SeatedPersonSvg({ roleKey, posture, working }) {
       )}
     </svg>
   );
+}
+
+/**
+ * A 52,345-token badge is unreadable on a 12px nameplate; full numbers remain
+ * in the task detail / company panel. e2e-12's plate assertion accepts both.
+ *
+ * @param {number} total
+ * @returns {string}
+ */
+function compactToken(total) {
+  if (total >= 1_000_000) return `${(total / 1_000_000).toFixed(1)}m`;
+  if (total >= 10_000) return `${(total / 1000).toFixed(1)}k`;
+  return String(total);
 }

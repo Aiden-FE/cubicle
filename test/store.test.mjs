@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -530,6 +531,99 @@ test("a task records its git start HEAD, playbook and editable acceptance, and s
     assert.equal(again.goal, "给 greet.txt 加一行欢迎语，并保证测试通过");
     assert.equal(again.baseHead, task.baseHead);
     reopened.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("旧库的 per-engine workspace 迁移到员工共享目录，任务路径跟着走", async () => {
+  const { dataDir, dispose } = await withTempDir("workspace-migration");
+  try {
+    const store = openStore({ dataDir });
+    const employee = hireProgrammer(store);
+    const oldWorkspace = path.join(dataDir, "engines", "pi", `employee-${employee.id}`, "workspace");
+    mkdirSync(oldWorkspace, { recursive: true });
+    writeFileSync(path.join(oldWorkspace, "keep.txt"), "workspace files survive the move", "utf8");
+    const session = store.getOrCreateEmployeeSession({
+      employeeId: employee.id,
+      engine: "pi",
+      agentDir: "a",
+      sessionsDir: "s",
+      workspaceDir: oldWorkspace,
+    });
+    const task = store.createTask({
+      groupId: store.officeSnapshot().groups[0].id,
+      employeeId: employee.id,
+      workspaceDir: oldWorkspace,
+      title: "旧任务",
+      goal: "旧任务",
+      playbook: "free",
+      acceptance: [],
+      baseHead: "a".repeat(40),
+    });
+    store.close();
+
+    const reopened = openStore({ dataDir });
+    const stable = path.join(dataDir, "workspaces", `employee-${employee.id}`);
+    assert.equal(reopened.employeeSessionById(session.id)?.workspaceDir, stable);
+    assert.equal(reopened.taskById(task.id)?.workspaceDir, stable, "同一工作区里的旧任务跟着搬家");
+    assert.equal(readFileSync(path.join(stable, "keep.txt"), "utf8"), "workspace files survive the move");
+    assert.equal(existsSync(oldWorkspace), false, "rename 成功时旧目录不残留");
+    reopened.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("beginTaskRun 是事务：被拒的派单不留下 running 任务/悬挂会话，成功路径三行一起落", async () => {
+  const { dataDir, dispose } = await withTempDir("begin-task-run");
+  try {
+    const store = openStore({ dataDir });
+    const employee = hireProgrammer(store);
+    const task = makeTask(store, employee);
+    const session = store.getOrCreateEmployeeSession({
+      employeeId: employee.id,
+      engine: "pi",
+      agentDir: "a",
+      sessionsDir: "s",
+      workspaceDir: "w",
+    });
+    store.setTaskStatus(task.id, "running");
+
+    // running → running is not a legal non-resume transition: roll everything back.
+    assert.throws(
+      () =>
+        store.beginTaskRun({
+          taskId: task.id,
+          employeeSessionId: session.id,
+          engine: "pi",
+          prompt: "重复派单",
+        }),
+      (err) => /** @type {{ code?: string }} */ (err).code === "invalid_transition",
+    );
+    assert.equal(/** @type {any} */ (store.taskById(task.id)).status, "running");
+    assert.equal(store.latestTaskSessionForTask(task.id), null, "被拒的派单没有留下 task_session");
+    assert.equal(store.latestRunForEmployee(employee.id), null, "被拒的派单没有留下 run");
+
+    // 09 resume channel: running + resume appends a session and a run atomically.
+    const started = store.beginTaskRun({
+      taskId: task.id,
+      employeeSessionId: session.id,
+      engine: "pi",
+      prompt: "续跑",
+      resume: true,
+    });
+    assert.equal(started.task.status, "running");
+    assert.equal(started.run.taskId, task.id);
+    assert.equal(started.run.taskSessionId, started.taskSession.id);
+
+    // A second finish is a contract error, not a silent success with a stale row.
+    store.finishRun({ runId: started.run.id, status: "completed" });
+    assert.throws(
+      () => store.finishRun({ runId: started.run.id, status: "failed" }),
+      (err) => /** @type {{ code?: string }} */ (err).code === "run_already_settled",
+    );
+    store.close();
   } finally {
     await dispose();
   }
@@ -1178,10 +1272,15 @@ test("旧库（run/task_session CHECK 没有 paused）开库时表重建，pause
     const task = makeTask(store, employee);
     store.setTaskStatus(task.id, "running");
     const { taskSession, run } = pauseTaskRun(store, task);
+    // A real pre-09 database has artifacts referencing the run. The old
+    // migration fixtures omitted them, which is exactly why the FK failure
+    // never showed up in CI.
+    store.createArtifact({ taskId: task.id, runId: run.id, kind: "report", content: "迁移前留下的产出" });
     store.close();
 
     // Rewind to the pre-09 CHECK: neither run nor task_session knows 'paused'.
     const raw = new DatabaseSync(path.join(dataDir, "cubicle.db"));
+    raw.exec("PRAGMA foreign_keys = OFF;");
     raw.exec(`
       CREATE TABLE run_old (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1215,6 +1314,10 @@ test("旧库（run/task_session CHECK 没有 paused）开库时表重建，pause
     raw.close();
 
     const reopened = openStore({ dataDir });
+    // The artifact (a child of run) survived the rebuild; the old run healed
+    // to interrupted as before.
+    assert.equal(/** @type {any} */ (reopened.runById(run.id)).status, "interrupted");
+    assert.equal(reopened.listArtifacts({ taskId: task.id })[0].content, "迁移前留下的产出");
     // 开库自愈先把遗留的 running 行翻成 interrupted（04 语义），所以这里
     // 新开一轮再落 paused：迁移的意义在于 CHECK 已放宽、paused 写进得去。
     const nextSession = reopened.openTaskSession({
@@ -1244,6 +1347,89 @@ test("旧库（run/task_session CHECK 没有 paused）开库时表重建，pause
 });
 
 // — 票 12: 失败人话原因 / 任务级 token 预算 / 三层聚合的未计量三态 —
+
+test("pre-ticket-11 employee_session（列上 UNIQUE）带子 run 也能重建，并接受第二个引擎", async () => {
+  const { dataDir, dispose } = await withTempDir("employee-session-migration");
+  try {
+    const store = openStore({ dataDir });
+    const employee = hireProgrammer(store);
+    const session = store.getOrCreateEmployeeSession({
+      employeeId: employee.id,
+      engine: "pi",
+      agentDir: "a",
+      sessionsDir: "s",
+      workspaceDir: "w",
+    });
+    const run = store.createRun({ employeeId: employee.id, employeeSessionId: session.id, engine: "pi", prompt: "旧行" });
+    store.close();
+
+    const raw = new DatabaseSync(path.join(dataDir, "cubicle.db"));
+    raw.exec("PRAGMA foreign_keys = OFF;");
+    raw.exec(`
+      CREATE TABLE employee_session_pre11 (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_id INTEGER NOT NULL UNIQUE REFERENCES employee(id),
+        engine TEXT NOT NULL,
+        agent_dir TEXT NOT NULL,
+        sessions_dir TEXT NOT NULL,
+        workspace_dir TEXT NOT NULL,
+        session_file TEXT,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO employee_session_pre11
+        SELECT id, employee_id, engine, agent_dir, sessions_dir, workspace_dir, session_file, updated_at FROM employee_session;
+      DROP TABLE employee_session;
+      ALTER TABLE employee_session_pre11 RENAME TO employee_session;
+    `);
+    raw.close();
+
+    const reopened = openStore({ dataDir });
+    assert.equal(/** @type {any} */ (reopened.runById(run.id)).prompt, "旧行", "子 run 行在父表重建后仍可读");
+    const codexSession = reopened.getOrCreateEmployeeSession({
+      employeeId: employee.id,
+      engine: "codex",
+      agentDir: "a2",
+      sessionsDir: "s2",
+      workspaceDir: "w2",
+    });
+    assert.notEqual(codexSession.id, session.id, "同一员工可以拥有第二引擎的会话行");
+    assert.equal(codexSession.engine, "codex");
+    reopened.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("旧库角色 manifest 在一次升级里补齐新工具与 cost，已录用快照不变", async () => {
+  const { dataDir, dispose } = await withTempDir("role-seed-upgrade");
+  try {
+    const store = openStore({ dataDir });
+    const employee = hireProgrammer(store);
+    store.close();
+
+    const raw = new DatabaseSync(path.join(dataDir, "cubicle.db"));
+    raw.exec(`
+      UPDATE role SET manifest = '{"persona":"旧人格","skills":[],"tools":["bash"],"mcpServers":[],"engine":"pi","model":"default"}'
+      WHERE key = 'programmer';
+      DELETE FROM meta WHERE key = 'role_seed_rev';
+    `);
+    raw.close();
+
+    const reopened = openStore({ dataDir });
+    const programmer = reopened.listRoles().find((role) => role.key === "programmer");
+    assert.ok(programmer?.manifest.tools.includes("powershell"), "旧库角色库补上了 ticket 07 的 powershell");
+    assert.equal(programmer?.manifest.cost.tokenBudgetPerTask, 500000, "旧库角色库补上了 ticket 12 的 cost");
+    const frozen = /** @type {any} */ (reopened.employeeById(employee.id));
+    assert.deepEqual(
+      frozen.roleSnapshot.manifest.tools,
+      ["read", "write", "edit", "powershell", "grep"],
+      "已录用员工的冻结快照不随角色库升级而变",
+    );
+    reopened.close();
+  } finally {
+    await dispose();
+  }
+});
 
 /** Open a task session + run under a task (票 12 helper mirrors pauseTaskRun). */
 function runUnderTask(

@@ -146,6 +146,12 @@ async function phaseDuty(ctx) {
   await waitFor(async () => String(await evalIn(contents, `document.querySelector('[data-testid="task-playbook"]')?.textContent ?? ''`)).includes("写文档"), { timeoutMs: 3000 });
   await setSelect(contents, '[data-testid="task-employee"]', String(workerId));
   await click(contents, '[data-testid="task-dispatch"]');
+  // task.create is async (git is async): wait for the row before reading the
+  // list, otherwise slowTaskId=0 and every later selector targets task 0.
+  await waitFor(async () => {
+    const list = /** @type {any} */ (await evalIn(contents, `window.cubicle.invoke('task.list', { groupId: ${groupId} })`));
+    return (list?.tasks ?? []).length > 0;
+  }, { timeoutMs: 5000 });
   const taskList = /** @type {any} */ (await evalIn(contents, `window.cubicle.invoke('task.list', { groupId: ${groupId} })`));
   const slowTaskId = Number((taskList?.tasks ?? [])[0]?.id ?? 0);
   add("慢活工单已派出", slowTaskId > 0, `taskId=${slowTaskId}`);

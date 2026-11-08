@@ -17,11 +17,27 @@ const STATE_LABEL = {
  */
 export function StatusChip({ status }) {
   const [open, setOpen] = React.useState(false);
+  const zoneRef = React.useRef(/** @type {HTMLDivElement | null} */ (null));
   const [, tick] = React.useReducer((n) => n + 1, 0);
   React.useEffect(() => {
     const timer = setInterval(tick, 1000);
     return () => clearInterval(timer);
   }, []);
+  React.useEffect(() => {
+    if (!open) return;
+    const onDown = (/** @type {MouseEvent} */ event) => {
+      if (zoneRef.current && !zoneRef.current.contains(/** @type {Node} */ (event.target))) setOpen(false);
+    };
+    const onKey = (/** @type {KeyboardEvent} */ event) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
 
   const online = status.state === "online";
   const problem = status.state === "offline" || status.state === "starting" || status.state === "stopped";
@@ -30,7 +46,7 @@ export function StatusChip({ status }) {
     : null;
 
   return (
-    <div className="status-zone">
+    <div className="status-zone" ref={zoneRef}>
       <button
         type="button"
         className="status-dot-button"
@@ -38,6 +54,7 @@ export function StatusChip({ status }) {
         data-online={online ? "true" : "false"}
         data-state={status.state}
         title={STATE_LABEL[status.state] ?? status.state}
+        aria-label={`应用状态：${STATE_LABEL[status.state] ?? status.state}`}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >

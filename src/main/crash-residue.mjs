@@ -16,7 +16,6 @@
  * with CIM samples that the scene is zero.
  */
 import path from "node:path";
-
 import { sweepPidLedger, createPidLedger, engineLedgerFile } from "../host/engine/child-ledger.mjs";
 
 /**
@@ -34,13 +33,18 @@ export function hostPidFile(dataDir) {
  * entry when the supervisor restarts, and the orphans under THAT dead pid
  * (engine children, pi tool shells) would have no ledger to be swept by.
  *
- * @param {{ dataDir: string, pid: number | undefined, startedAt?: string }} input
+ * @param {{ dataDir: string, pid: number | undefined, startedAt?: string, exeName?: string }} input
  */
-export function recordHostPid({ dataDir, pid, startedAt }) {
+export function recordHostPid({ dataDir, pid, startedAt, exeName }) {
   if (!pid) return;
+  // utilityProcess is the app's own executable: electron.exe in dev,
+  // cubicle.exe in a packaged build. Derive it instead of hard-coding
+  // "electron" — otherwise the identity guard never matches the packaged host
+  // and the sweep silently forgets a live orphan (two SQLite writers).
+  const name = (exeName ?? path.basename(process.execPath)).replace(/\.exe$/i, "").toLowerCase();
   createPidLedger({ file: hostPidFile(dataDir) }).record({
     pid,
-    name: "electron", // utilityProcess is electron.exe; the identity guard's extension leniency matches it
+    name,
     startedAt: startedAt ?? new Date().toISOString(),
   });
 }

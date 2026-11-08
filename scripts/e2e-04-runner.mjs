@@ -235,12 +235,15 @@ async function phaseTalk(ctx) {
   const eventsBefore = Number(await evalIn(win.webContents, EVENT_COUNT_JS("")));
   await sendMessage(win.webContents, MSG_SECOND);
   await waitFor(async () => (await evalIn(win.webContents, EVENT_COUNT_JS("agent_end"))) >= 2, { timeoutMs: 60_000 });
-  const startLabels = String(
+  const startLabelsRaw = String(
     await evalIn(
       win.webContents,
       `Array.from(document.querySelectorAll('[data-testid="event-item"][data-type="session_start"]')).map((n) => n.textContent).join("|")`,
     ),
   ).split("|");
+  // 票 12/UI review: meta lines now carry a local clock time ("会话 #1 开始 · 11:58").
+  // The identity assertion is about the session id, not the timestamp.
+  const startLabels = startLabelsRaw.map((label) => label.replace(/\s*·\s*\d{1,2}:\d{2}\s*$/, "").trim());
   const sessionFiles2 = await sessionFiles(dirs.sessionsDir);
   const sameSession =
     startLabels.length === 2 && /^会话 #\d+ 开始$/.test(startLabels[0]) && startLabels[0] === startLabels[1];

@@ -95,4 +95,24 @@ contextBridge.exposeInMainWorld("cubicle", {
   appInfo() {
     return ipcRenderer.invoke("cubicle:app-info");
   },
+
+  /**
+   * Open an employee's workspace folder. The main process derives the path
+   * from the employee id; the renderer never supplies a path.
+   * @param {number} employeeId
+   * @returns {Promise<string>}
+   */
+  openWorkspace(employeeId) {
+    return ipcRenderer.invoke("cubicle:open-workspace", employeeId);
+  },
+
+  /**
+   * Open an engine's BYOK config directory. Main derives the path from dataDir
+   * and the engine name; the renderer never supplies a path.
+   * @param {string} engine
+   * @returns {Promise<string>}
+   */
+  openEngineDir(engine) {
+    return ipcRenderer.invoke("cubicle:open-engine-dir", engine);
+  },
 });

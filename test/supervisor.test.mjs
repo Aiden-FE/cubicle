@@ -58,10 +58,13 @@ function fakeTimers() {
     pendingCount() {
       return pending.length;
     },
+    nextDelay() {
+      return pending[0]?.ms ?? null;
+    },
   };
 }
 
-function setup() {
+function setup(options = {}) {
   const timers = fakeTimers();
   /** @type {{ path: string, options: Record<string, unknown> }[]} */
   const forks = [];
@@ -80,6 +83,7 @@ function setup() {
     restartDelayMs: 1000,
     setTimeoutFn: timers.setTimeoutFn,
     clearTimeoutFn: timers.clearTimeoutFn,
+    ...options,
   });
   supervisor.subscribe((/** @type {unknown} */ status) => statusLog.push(status));
   return { supervisor, forks, children, timers, statusLog };
@@ -136,6 +140,45 @@ test("stop() kills the host after the grace window if it never exits", () => {
   assert.equal(children[0].child.killed, false, "not killed before the grace window");
   timers.runDue(); // grace elapses with no exit event
   assert.equal(children[0].child.killed, true, "uncooperative host is killed after grace");
+});
+
+test("a crash loop backs off exponentially instead of respawning every second", () => {
+  const { supervisor, children, timers } = setup();
+  supervisor.start();
+  children[0].child.emit("exit", 1);
+  assert.equal(timers.nextDelay(), 1000, "first crash: base delay");
+  timers.runDue();
+  children[1].child.emit("exit", 1);
+  assert.equal(timers.nextDelay(), 2000, "second crash in a row: doubled");
+  timers.runDue();
+  children[2].child.emit("exit", 1);
+  assert.equal(timers.nextDelay(), 4000, "third crash: doubled again");
+  timers.runDue();
+  children[3].child.emit("message", {});
+  children[3].child.emit("exit", 1);
+  assert.equal(timers.nextDelay(), 1000, "a healthy host resets the attempt counter");
+});
+
+test("onExit fires when the host dies (pending main→host calls can be rejected)", () => {
+  let exits = 0;
+  const { supervisor, children } = setup({ onExit: () => (exits += 1) });
+  supervisor.start();
+  children[0].child.emit("exit", 1);
+  assert.equal(exits, 1);
+});
+
+test("stop() resolves only after the host is gone", async () => {
+  const { supervisor, children, timers } = setup();
+  supervisor.start();
+  let resolved = false;
+  const stopping = supervisor.stop().then(() => {
+    resolved = true;
+  });
+  assert.equal(resolved, false, "stop is awaiting the host");
+  children[0].child.emit("exit", 0);
+  await stopping;
+  assert.equal(resolved, true);
+  assert.equal(timers.pendingCount(), 0, "grace timer cleared by the exit");
 });
 
 test("a healthy restart cycle reports starting then online again", () => {

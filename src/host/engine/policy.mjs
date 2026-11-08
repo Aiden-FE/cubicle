@@ -6,17 +6,21 @@
  * decides whether a GIVEN call may run). The pi adapter enforces it through
  * the SDK's inline-extension `tool_call` hook (block: true), then rides the
  * verdict onto the normalized stream as a `policy_blocked` event so the desk
- * shows it — the拒绝 is never silent. CLI hosts (ticket 11) reuse this exact
- * decision function at their own choke point.
+ * shows it — the拒绝 is never silent. Codex CLI asks the host over the
+ * loopback bridge (`/decide`), so the rule table stays in the host process
+ * and the agent cannot edit it in its own engine dir.
  *
  * v1 starter rules, deliberately small and reviewable: a工位 must not wreck
  * the machine — no recursive force-deletes, no disk destruction, no writes
- * into system paths. Everything else works.
+ * into system paths, and (when the caller supplies a workspace) no file
+ * writes outside the employee's own workspace. Shell-string containment is
+ * best-effort; the honest boundary is OS-level isolation.
  *
  * @typedef {{ verdict: "allow" }} AllowVerdict
  * @typedef {{ verdict: "deny", rule: string, reason: string }} DenyVerdict
  * @typedef {AllowVerdict | DenyVerdict} ToolAccessVerdict
  */
+import path from "node:path";
 
 /** @type {ReadonlySet<string>} */
 const SHELL_TOOLS = new Set(["bash", "powershell", "exec", "shell"]);
@@ -36,15 +40,28 @@ const SHELL_RULES = [
     reason: "工位上禁止递归强制删除（会连工作区一起毁掉）",
     patterns: [
       /\brm\s+(-{1,2}\w*r\w*f|-{1,2}\w*f\w*r|-r\s+-f|-f\s+-r)\b/i,
+      /\brm\s+--recursive(\s+--force)?\b/i,
       /\b(?:rd|rmdir)\s+\/s\b/i,
       /\b(?:del|erase)\s+\/s\b/i,
       /\bremove-item\b[^\n]*-recurse/i,
+      /\b(?:ri|rm)\b[^\n]*-recurse[^\n]*-force/i,
+      /\bgit\s+clean\b[^\n]*-[a-z]*[xdf]/i,
     ],
   },
   {
     rule: "disk-destruction",
     reason: "工位上禁止格式化 / 分区 / 写裸设备级别的命令",
-    patterns: [/\bformat\s+[a-z]:/i, /\bdiskpart\b/i, /\bmkfs(\.\w+)?\b/i, /\bdd\s+[^\n]*\bof=\/dev\//i],
+    patterns: [
+      /\bformat\s+[a-z]:/i,
+      /\bdiskpart\b/i,
+      /\bmkfs(\.\w+)?\b/i,
+      /\bdd\s+[^\n]*\bof=\/dev\//i,
+    ],
+  },
+  {
+    rule: "encoded-command",
+    reason: "工位上禁止用 -EncodedCommand / -enc 隐藏实际执行的命令",
+    patterns: [/\s-(?:enc|encodedcommand)\b/i],
   },
 ];
 
@@ -53,15 +70,27 @@ const PATH_RULES = [
   {
     rule: "system-path-write",
     reason: "工位只许写自己工作区里的文件，不许写系统目录",
-    patterns: [/^[a-z]:\\windows\b/i, /^[a-z]:\\program files( \(x86\))?\\/i, /^[a-z]:\\programdata\b/i, /^\/etc\b/, /^\/boot\b/, /^\/usr\b/, /^\/bin\b/, /^\/sbin\b/, /^\/sys\b/, /^\/proc\b/, /^\/dev\b/],
+    patterns: [
+      /^[a-z]:\\windows\b/i,
+      /^[a-z]:\\program files( \(x86\))?\\/i,
+      /^[a-z]:\\programdata\b/i,
+      /^\/etc\b/,
+      /^\/boot\b/,
+      /^\/usr\b/,
+      /^\/bin\b/,
+      /^\/sbin\b/,
+      /^\/sys\b/,
+      /^\/proc\b/,
+      /^\/dev\b/,
+    ],
   },
 ];
 
 /**
- * @param {{ toolName: unknown, args: unknown }} call
+ * @param {{ toolName: unknown, args: unknown, workspaceDir?: string | null }} call
  * @returns {ToolAccessVerdict}
  */
-export function decideToolAccess({ toolName, args }) {
+export function decideToolAccess({ toolName, args, workspaceDir }) {
   const name = typeof toolName === "string" ? toolName.toLowerCase() : "";
 
   if (SHELL_TOOLS.has(name)) {
@@ -76,10 +105,20 @@ export function decideToolAccess({ toolName, args }) {
   }
 
   if (PATH_TOOLS.has(name)) {
-    const path = stringField(args, "path");
-    if (path) {
+    const requested = stringField(args, "path");
+    if (requested) {
+      const normalized = requested.replace(/^\\\\\?\\/, "");
+      // A workspace-relative path that escapes the workspace (`..\..\Windows`)
+      // is denied by containment, not by a prefix blacklist.
+      if (workspaceDir) {
+        const root = path.resolve(workspaceDir);
+        const resolved = path.resolve(root, normalized);
+        if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+          return { verdict: "deny", rule: "outside-workspace", reason: "工位只能写自己的工作区" };
+        }
+      }
       for (const rule of PATH_RULES) {
-        if (rule.patterns.some((pattern) => pattern.test(path))) {
+        if (rule.patterns.some((pattern) => pattern.test(normalized))) {
           return { verdict: "deny", rule: rule.rule, reason: rule.reason };
         }
       }

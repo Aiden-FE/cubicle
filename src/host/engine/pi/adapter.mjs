@@ -23,7 +23,7 @@
  * session file) is re-opened after a host restart, so a conversation can
  * continue (票 04: 可续).
  */
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 
 import { appError } from "../../../shared/apperror.mjs";
@@ -88,12 +88,13 @@ export function createPiAdapter({ dataDir, moduleImporter }) {
    * normalized stream (票 07: 被策略拒绝时工位有可见提示，不静默).
    *
    * @param {(event: import("../events.mjs").NormalizedEvent) => void} onEvent
+   * @param {string} workspaceDir the employee workspace this session is pinned to
    * @returns {(piRuntime: any) => void}
    */
-  function policyExtension(onEvent) {
+  function policyExtension(onEvent, workspaceDir) {
     return (piRuntime) => {
       piRuntime.on("tool_call", (/** @type {any} */ event) => {
-        const verdict = decideToolAccess({ toolName: event.toolName, args: event.input });
+        const verdict = decideToolAccess({ toolName: event.toolName, args: event.input, workspaceDir });
         if (verdict.verdict === "deny") {
           onEvent({
             type: "policy_blocked",
@@ -156,7 +157,7 @@ export function createPiAdapter({ dataDir, moduleImporter }) {
         ? [`你是员工「${employeeName}」，角色：${roleLabel}。${persona}`]
         : [`你是员工「${employeeName}」，角色：${roleLabel}。`],
       noExtensions: true,
-      extensionFactories: [policyExtension(onEvent)],
+      extensionFactories: [policyExtension(onEvent, session.workspaceDir)],
     });
     await resourceLoader.reload();
 
@@ -192,6 +193,20 @@ export function createPiAdapter({ dataDir, moduleImporter }) {
 
   return {
     open,
+    /**
+     * models.json 指纹：run-manager 用它判断已打开的 SDK 会话是否还代表
+     * 当前 BYOK 配置（否则改模型后要到重启才生效）。
+     *
+     * @returns {string | null}
+     */
+    configFingerprint() {
+      try {
+        const stat = statSync(path.join(dataDir, "engines", "pi", "models.json"));
+        return `${stat.mtimeMs}:${stat.size}`;
+      } catch {
+        return null;
+      }
+    },
     /**
      * 票 10 capability: pi persists its conversation as a session file and
      * re-opens it (SessionManager.open / continueRecent — proven across host

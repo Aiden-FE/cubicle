@@ -12,6 +12,8 @@
  * failed session.
  */
 
+import { redactSecrets } from "../../shared/redact.mjs";
+
 /**
  * @typedef {import("./events.mjs").NormalizedEvent} NormalizedEvent
  */
@@ -33,7 +35,7 @@ const KNOWN_CODES = /** @type {Record<string, string>} */ ({
  * @returns {string} one line, no stack, capped
  */
 function oneLine(value) {
-  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  const text = redactSecrets(String(value ?? "")).replace(/\s+/g, " ").trim();
   return text.length > 200 ? `${text.slice(0, 200)}…` : text;
 }
 

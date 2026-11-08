@@ -61,7 +61,7 @@ async function withRuntime(name, { tickMs = 1000 } = {}) {
       const programmer = /** @type {any} */ (store.listRoles().find((r) => r.key === "programmer"));
       return store.hireEmployee({ deskId: desks[deskIndex].id, roleId: programmer.id, name: employeeName }).employee;
     },
-    makeRunningPausedTask: (/** @type {any} */ employee, /** @type {number} */ groupId, /** @type {string} */ title) => {
+    makeRunningPausedTask: (/** @type {any} */ employee, /** @type {number} */ groupId, /** @type {string} */ title, /** @type {any} */ usage = null) => {
       const task = store.createTask({
         groupId,
         employeeId: employee.id,
@@ -89,7 +89,7 @@ async function withRuntime(name, { tickMs = 1000 } = {}) {
         taskId: task.id,
         taskSessionId: taskSession.id,
       });
-      store.finishRun({ runId: run.id, status: "paused" });
+      store.finishRun({ runId: run.id, status: "paused", usage });
       store.finishTaskSession({ taskSessionId: taskSession.id, status: "paused" });
       return task;
     },
@@ -100,6 +100,49 @@ async function withRuntime(name, { tickMs = 1000 } = {}) {
     },
   };
 }
+
+test("重启进入已 on 相位：不自动续跑下班暂停的任务；『立即上班』才续跑", async () => {
+  const ctx = await withRuntime("boot-on-no-autoresume");
+  try {
+    const group = ctx.store.officeSnapshot().groups[0];
+    const company = ctx.store.officeSnapshot().companies[0];
+    const worker = ctx.hireAt(0, "小停", group.id);
+    const task = ctx.makeRunningPausedTask(worker, group.id, "重启前被下班暂停");
+    ctx.store.setDutyStatus({ companyId: company.id, phase: "on", phaseSince: ctx.at(10), graceUntil: null });
+
+    ctx.runtime.tick();
+    ctx.runtime.tick();
+    assert.equal(ctx.started.length, 0, "开机第一次 tick 不能把 paused 当成 clock_in 自动续跑");
+
+    ctx.runtime.applyOverride(company.id, "on");
+    assert.equal(ctx.started.filter((s) => s.resume).length, 1, "手动上班才是续跑边界");
+    assert.equal(ctx.started[0].taskId, task.id);
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("预算到顶的 paused 不被上班续跑自动拉起（+50% 才是出口）", async () => {
+  const ctx = await withRuntime("budget-paused-not-resumed");
+  try {
+    const group = ctx.store.officeSnapshot().groups[0];
+    const company = ctx.store.officeSnapshot().companies[0];
+    const worker = ctx.hireAt(0, "小钱", group.id);
+    const task = ctx.makeRunningPausedTask(worker, group.id, "烧到预算的活", {
+      input: 600,
+      cachedInput: 0,
+      cacheWrite: 0,
+      output: 0,
+      reasoning: 0,
+    });
+    ctx.store.setTaskTokenBudget(task.id, 500);
+
+    ctx.runtime.applyOverride(company.id, "on");
+    assert.equal(ctx.started.length, 0, "预算暂停不是下班暂停：立即上班也不能续跑");
+  } finally {
+    await ctx.dispose();
+  }
+});
 
 test("到点上班：running+paused 与 崩溃回待办 的任务都被激活续跑；从没派过的待办不被擅自开工", async () => {
   const ctx = await withRuntime("clock-in");

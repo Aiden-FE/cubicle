@@ -66,7 +66,7 @@ const BUDGET_LINE_JS = `document.querySelector('[data-testid="task-budget-line"]
 const FAIL_REASON_JS = `document.querySelector('[data-testid="task-fail-reason"]')?.textContent ?? ''`;
 const ITERATIONS_JS = `document.querySelector('[data-testid="task-iterations"]')?.textContent ?? ''`;
 const SESSIONS_JS = `Array.from(document.querySelectorAll('[data-testid^="task-session-"]')).map((el) => el.textContent).join(' | ')`;
-const ARTIFACT_COUNT_JS = `document.querySelectorAll('[data-testid="task-detail"] [data-testid^="artifact-"]').length`;
+const ARTIFACT_COUNT_JS = `document.querySelectorAll('[data-testid="task-detail"] [data-testid^="artifact-"], [data-testid="task-detail"] [data-testid^="history-artifact-"]').length`;
 
 /**
  * Open the task detail through the real drawer: make sure the list is showing,
@@ -299,7 +299,7 @@ async function phaseCost(ctx, checks, evidence) {
   );
   const plateE1 = plates.find((p) => p.measured === "true");
   const plateE2 = plates.find((p) => p.token === "未计量");
-  add("D · 员工名牌（甲）显示员工级 token 聚合（计量过）", Boolean(plateE1) && /^\d+$/.test(plateE1?.token ?? ""), JSON.stringify(plateE1));
+  add("D · 员工名牌（甲）显示员工级 token 聚合（计量过）", Boolean(plateE1) && /^\d+(\.\d+[km])?$/.test(plateE1?.token ?? ""), JSON.stringify(plateE1));
   add("D · 员工名牌（乙）显示「未计量」（不是 0）", Boolean(plateE2), JSON.stringify(plateE2));
 
   await click(contents, '[data-testid="company-switcher"]');

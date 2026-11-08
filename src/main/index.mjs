@@ -9,7 +9,8 @@
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
-import { app, BrowserWindow, Menu, ipcMain, utilityProcess, dialog } from "electron";
+import { app, BrowserWindow, Menu, ipcMain, utilityProcess, dialog, shell } from "electron";
+import { employeeWorkspaceDir, engineConfigDir } from "../host/engine/paths.mjs";
 
 import { createHostSupervisor } from "./supervisor.mjs";
 import { createEventCoalescer } from "./coalescer.mjs";
@@ -17,6 +18,7 @@ import { createExitCoordinator } from "./exit-coordinator.mjs";
 import { createSingleInstanceGuard, focusMainWindow } from "./single-instance.mjs";
 import { readPackageVersion, resolveAboutVersion } from "./app-version.mjs";
 import { recordHostPid, sweepCrashResidue } from "./crash-residue.mjs";
+import { RENDERER_METHODS } from "../shared/ipc-methods.mjs";
 import { createInvoke, createEvent, createErrorReply, parseEnvelope, TOPICS } from "../shared/envelope.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -168,6 +170,7 @@ const supervisor = createHostSupervisor({
       sendToRenderer("cubicle:reply", envelope);
     }
   },
+  onExit: () => rejectPendingHostInvocations(),
 });
 supervisor.subscribe(publishHostStatus);
 
@@ -204,21 +207,48 @@ function createMainWindow() {
     }
   });
   mainWindow.loadFile(path.join(rootDir, "dist", "renderer", "index.html"));
+  // The preload bridge is webContents-level: it survives navigation. A dropped
+  // link or a location change would hand the full bridge to a foreign document.
+  // This app only ever renders its own office document.
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  mainWindow.webContents.on("will-navigate", (event) => event.preventDefault());
+  mainWindow.webContents.on("will-frame-navigate", (event) => event.preventDefault());
+  mainWindow.webContents.on("will-attach-webview", (event) => event.preventDefault());
   // 票 09: 关窗先过三选（直接退 / 等完成 / 取消）。「直接退」在销毁窗口前
   // 等 AgentHost 把下班落盘（paused）写进库；「取消」窗口照开。
   mainWindow.on("close", (event) => {
     if (exitCoordinator.exiting) return;
     event.preventDefault();
-    void exitCoordinator.requestClose();
+    void exitCoordinator.requestClose().catch((err) => {
+      try {
+        appendFileSync(path.join(resolveDataDir(), "agenthost.log"), `exit flow failed: ${String(err)}\n`);
+      } catch {
+        // logging must never take the app down
+      }
+    });
   });
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
 }
 
-ipcMain.on("cubicle:invoke", (_event, raw) => {
+ipcMain.on("cubicle:invoke", (event, raw) => {
+  // Only the app window's main frame may use the bridge. A navigated document
+  // or a future webview inherits the preload; these two checks keep the host
+  // bus (including its lifecycle doors) out of reach.
+  if (event.senderFrame !== mainWindow?.webContents.mainFrame) return;
   const envelope = parseEnvelope(raw);
   if (!envelope || envelope.kind !== "invoke") return;
+  if (!RENDERER_METHODS.has(envelope.method)) {
+    sendToRenderer(
+      "cubicle:reply",
+      createErrorReply(envelope, {
+        code: "method_not_allowed",
+        message: `${envelope.method} 不在渲染进程可用方法白名单里`,
+      }),
+    );
+    return;
+  }
   if (supervisor.state === "offline" || supervisor.state === "stopped" || !supervisor.send(envelope)) {
     sendToRenderer(
       "cubicle:reply",
@@ -230,7 +260,8 @@ ipcMain.on("cubicle:invoke", (_event, raw) => {
 // 票 13 验收 5：关于页的版本号。app.getVersion() 是权威（打包后 = exe 的
 // metadata），主进程顺手对表 asar/仓库里的 package.json —— 漂移要诚实上报
 // （这是 main 的业务：窗口与偏好，不经过 AgentHost 信封总线）。
-ipcMain.handle("cubicle:app-info", () => {
+ipcMain.handle("cubicle:app-info", (event) => {
+  if (event.senderFrame !== mainWindow?.webContents.mainFrame) return null;
   const pkgFile = path.join(rootDir, "package.json");
   const packageVersion = existsSync(pkgFile) ? readPackageVersion(readFileSync(pkgFile, "utf8")) : null;
   const about = resolveAboutVersion({ appVersion: app.getVersion(), packageVersion });
@@ -244,12 +275,44 @@ ipcMain.handle("cubicle:app-info", () => {
   };
 });
 
-// — 退出三选 (ticket 09) — 主进程自己也要敲 AgentHost 的门（下班落盘 /
-//   等完成），按回包 id 关联；渲染进程的 reply 转发不受影响。
+/**
+ * Open an employee's workspace in Explorer. The renderer only sends the
+ * employee id; the main process derives the path from dataDir, so a compromised
+ * view cannot turn this into "open arbitrary path".
+ */
+ipcMain.handle("cubicle:open-workspace", (event, employeeId) => {
+  if (event.senderFrame !== mainWindow?.webContents.mainFrame) return "forbidden";
+  if (typeof employeeId !== "number" || !Number.isInteger(employeeId) || employeeId <= 0) return "invalid_employee";
+  const dir = employeeWorkspaceDir(resolveDataDir(), employeeId);
+  mkdirSync(dir, { recursive: true });
+  return shell.openPath(dir);
+});
+
+/** Open the engine's BYOK config directory (the renderer never supplies a path). */
+ipcMain.handle("cubicle:open-engine-dir", (event, engine) => {
+  if (event.senderFrame !== mainWindow?.webContents.mainFrame) return "forbidden";
+  if (typeof engine !== "string" || !/^[a-z0-9-]+$/i.test(engine)) return "invalid_engine";
+  const dir = engineConfigDir(resolveDataDir(), engine);
+  mkdirSync(dir, { recursive: true });
+  return shell.openPath(dir);
+});
 
 /** @type {Map<string, { resolve: (payload: unknown) => void, reject: (err: Error) => void, timer: NodeJS.Timeout }>} */
 const hostInvocations = new Map();
 let hostInvokeSeq = 0;
+
+/**
+ * The host process died: every main→host call that was still in flight can
+ * never receive its reply. Reject them now instead of waiting for the 30-minute
+ * 「等完成」 timeout while the exit dialog looks frozen.
+ */
+function rejectPendingHostInvocations() {
+  for (const [, pending] of hostInvocations) {
+    clearTimeout(pending.timer);
+    pending.reject(new Error("host_exited"));
+  }
+  hostInvocations.clear();
+}
 
 /**
  * @param {string} method
@@ -337,44 +400,62 @@ const exitCoordinator = createExitCoordinator({
 
 app.whenReady().then(async () => {
   if (instanceGuard.role !== "primary") return; // second instance: the holder owns the data dir — do NOT sweep, do NOT spawn
+  // Open the window first: the crash sweep spawns one PowerShell probe per
+  // ledger entry and must never be what keeps the user staring at no window.
+  createMainWindow();
   // 票 10: sweep crash residue BEFORE the first host spawns — an orphaned
   // AgentHost from a force-killed launch is a second SQLite writer, and its
   // engine children are the orphan processes the ticket forbids. (The single-
   // instance lock above guarantees any live host in the ledgers IS residue.)
+  // Bounded: a hung probe must not defer the host forever; each probe also has
+  // its own 3s timeout inside child-ledger.
   try {
-    const swept = await sweepCrashResidue({
-      dataDir: resolveDataDir(),
-      log: (message) => {
-        try {
-          appendFileSync(path.join(resolveDataDir(), "agenthost.log"), `crash sweep: ${message}\n`);
-        } catch {
-          // evidence is best-effort
-        }
-      },
-    });
-    if (swept.host.checked > 0 || Object.values(swept.engines).some((outcome) => outcome.checked > 0)) {
+    const swept = await Promise.race([
+      sweepCrashResidue({
+        dataDir: resolveDataDir(),
+        log: (message) => {
+          try {
+            appendFileSync(path.join(resolveDataDir(), "agenthost.log"), `crash sweep: ${message}\n`);
+          } catch {
+            // evidence is best-effort
+          }
+        },
+      }),
+      new Promise((resolve) => setTimeout(() => resolve(null), 8000)),
+    ]);
+    if (swept && (swept.host.checked > 0 || Object.values(swept.engines).some((outcome) => outcome.checked > 0))) {
       console.log(`crash residue swept: host=${JSON.stringify(swept.host)} engines=${JSON.stringify(swept.engines)}`);
     }
   } catch {
     // residue sweep must never block boot; the ledgers stay for next launch
   }
   supervisor.start();
-  createMainWindow();
 
   if (e2eEnabled) {
     // The acceptance runner lives under scripts/ (main stays business-free);
     // the orchestrator picks which ticket's runner to drive.
     const runnerRelative = process.env.CUBICLE_E2E_RUNNER ?? path.join("scripts", "e2e-02-runner.mjs");
     const { runE2E } = await import(pathToFileURL(path.join(rootDir, runnerRelative)).href);
-    const exitCode = await runE2E({
-      app,
-      getMainWindow: () => mainWindow,
-      supervisor,
-      dataDir: resolveDataDir(),
-      bootStartMs,
-      phase: e2ePhase,
-      outDir: process.env.CUBICLE_E2E_OUT_DIR ?? path.join(rootDir, "tmp", "e2e-02"),
-    });
+    let exitCode = 1;
+    try {
+      exitCode = await runE2E({
+        app,
+        getMainWindow: () => mainWindow,
+        supervisor,
+        dataDir: resolveDataDir(),
+        bootStartMs,
+        phase: e2ePhase,
+        outDir: process.env.CUBICLE_E2E_OUT_DIR ?? path.join(rootDir, "tmp", "e2e-02"),
+      });
+    } catch (err) {
+      // A thrown runner must fail the phase instead of leaving Electron alive
+      // forever (the orchestrator has no IPC to notice a hung window).
+      process.stderr.write(`e2e runner threw: ${err instanceof Error ? err.stack ?? err.message : err}\n`);
+      exitCode = 1;
+    }
+    // app.exit() bypasses will-quit: reclaim the host explicitly or every e2e
+    // run leaves one behind.
+    await supervisor.stop();
     app.exit(exitCode);
   }
 });
@@ -385,6 +466,13 @@ app.on("window-all-closed", () => {
   app.quit();
 });
 
-app.on("before-quit", () => {
-  supervisor.stop();
+let quitting = false;
+app.on("will-quit", (event) => {
+  if (quitting) return;
+  // Before-quit is synchronous: a stop() that merely schedules a 600ms kill
+  // never gets to run. Hold the quit until the host is actually gone (graceful
+  // ack or the kill timer), then let the second will-quit through.
+  event.preventDefault();
+  quitting = true;
+  void supervisor.stop().finally(() => app.quit());
 });
