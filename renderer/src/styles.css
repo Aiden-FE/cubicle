@@ -2262,15 +2262,28 @@ body {
 }
 
 /* Left rail: six vertical entries + switcher exceed a 600px window; the flex
-   children used to shrink and wrap vertical text into two broken columns. */
+   children used to shrink and wrap vertical text into two broken columns.
+   Only the entry column may scroll — the rail itself must stay overflow:visible.
+   The company/group panels are absolutely positioned at 100% + 6px and would be
+   clipped to a ~4px sliver (plus a stray horizontal scrollbar) by a scrolling
+   rail. Every other left-rail popover is a sibling drawer, not a child panel. */
 .left-rail {
   width: 120px;
-  overflow-y: auto;
-  scrollbar-width: thin;
+  overflow: visible;
 }
 .rail-switcher,
 .rail-button {
   flex: 0 0 auto;
+}
+.rail-entries {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 .rail-button {
   white-space: nowrap;
@@ -2293,6 +2306,9 @@ body {
   .left-rail {
     gap: 6px;
     padding: 10px 8px;
+  }
+  .rail-entries {
+    gap: 6px;
   }
   .rail-button {
     padding: 10px 7px;

@@ -30,53 +30,57 @@ export function LeftRail({ snapshot, onChanged, benchOpen, onToggleBench, roster
       <div className="rail-switcher">
         <Switcher snapshot={snapshot} onChanged={onChanged} />
       </div>
-      <button
-        type="button"
-        className="rail-button"
-        data-testid="task-rail"
-        aria-expanded={benchOpen ? "true" : "false"}
-        onClick={onToggleBench}
-      >
-        工单台
-      </button>
-      <button
-        type="button"
-        className="rail-button"
-        data-testid="rail-roster"
-        aria-expanded={rosterOpen ? "true" : "false"}
-        onClick={onToggleRoster}
-      >
-        花名册
-      </button>
-      <button
-        type="button"
-        className="rail-button"
-        data-testid="rail-engine"
-        aria-expanded={engineOpen ? "true" : "false"}
-        onClick={onToggleEngine}
-      >
-        引擎中心
-      </button>
-      {/* 票 09: 上下班 — 时间表配置 + 手动 override + 当前相位，全是浮层。 */}
-      <button
-        type="button"
-        className="rail-button"
-        data-testid="rail-duty"
-        aria-expanded={dutyOpen ? "true" : "false"}
-        onClick={onToggleDuty}
-      >
-        上下班
-      </button>
-      {/* 票 13: 关于页 — 版本号（安装包 metadata）浮层，入口排左轨末尾。 */}
-      <button
-        type="button"
-        className="rail-button"
-        data-testid="rail-about"
-        aria-expanded={aboutOpen ? "true" : "false"}
-        onClick={onToggleAbout}
-      >
-        关于
-      </button>
+      {/* 只有入口列滚动：切换器必须留在滚动容器外，否则它向右弹出的
+          公司/项目组面板会被滚动容器的 overflow 裁掉（只剩 4px）。 */}
+      <div className="rail-entries">
+        <button
+          type="button"
+          className="rail-button"
+          data-testid="task-rail"
+          aria-expanded={benchOpen ? "true" : "false"}
+          onClick={onToggleBench}
+        >
+          工单台
+        </button>
+        <button
+          type="button"
+          className="rail-button"
+          data-testid="rail-roster"
+          aria-expanded={rosterOpen ? "true" : "false"}
+          onClick={onToggleRoster}
+        >
+          花名册
+        </button>
+        <button
+          type="button"
+          className="rail-button"
+          data-testid="rail-engine"
+          aria-expanded={engineOpen ? "true" : "false"}
+          onClick={onToggleEngine}
+        >
+          引擎中心
+        </button>
+        {/* 票 09: 上下班 — 时间表配置 + 手动 override + 当前相位，全是浮层。 */}
+        <button
+          type="button"
+          className="rail-button"
+          data-testid="rail-duty"
+          aria-expanded={dutyOpen ? "true" : "false"}
+          onClick={onToggleDuty}
+        >
+          上下班
+        </button>
+        {/* 票 13: 关于页 — 版本号（安装包 metadata）浮层，入口排左轨末尾。 */}
+        <button
+          type="button"
+          className="rail-button"
+          data-testid="rail-about"
+          aria-expanded={aboutOpen ? "true" : "false"}
+          onClick={onToggleAbout}
+        >
+          关于
+        </button>
+      </div>
     </nav>
   );
 }

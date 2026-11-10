@@ -120,7 +120,7 @@
 
 | # | 问题 | 修复 | 证据 |
 |---|---|---|---|
-| U-P1-1 | 900×600 下左轨 flex 子项被压 → 竖排文字折成两列、裁切 | 左轨固定 120px + `overflow-y:auto`；rail 子项 `flex:0 0 auto` + `nowrap`；低高度媒体查询缩小 padding/字号 | `13-narrow-office.png` |
+| U-P1-1 | 900×600 下左轨 flex 子项被压 → 竖排文字折成两列、裁切 | 左轨固定 120px；只有入口列 `.rail-entries` 滚动，rail 自身 `overflow:visible`（否则切换器面板被裁）；rail 子项 `flex:0 0 auto` + `nowrap`；低高度媒体查询缩小 padding/字号 | `13-narrow-office.png`、`24-narrow-company-panel.png` |
 | U-P1-2 | 公司/项目组切换器两行文字换行/溢出 | `switcher-value` 省略号 + `title` + `aria-label`；13px 字号；切换器宽度 100px | `17-status-fixed.png` |
 | U-P1-3 | 详情操作在折叠线下（918 视口 actionsTop=648/771），产出在决策之后 | 详情态隐藏派单表单；顺序改为目标→验收→起点/成本→证据→决策；`task-decision-bar` sticky 底部；详情标题/分节标签 | `11-detail-tall.png`（artifactsTop 417、actionsTop 673 且 sticky） |
 | U-P1-4 | 对话只有助手输出，没有用户消息 | 发送时乐观用户气泡；`run.history.lastRun.prompt` 回放；失败回滚并回填草稿 | `12-chat-tall.png`、e2e-04 |
@@ -172,6 +172,12 @@
 5. **插画色/圆角仍有一批字面量**；语义色（warn/ok/bad/review/muted/danger）与 8/12/16/999 圆角已收敛为 token。插画调色板与纸张纹理是一次性视觉资产，继续 token 化的收益很低。
 6. **codex 仍以 `danger-full-access` 运行，hook 文件仍可能被员工改写**。本机 `-s workspace-write` 被 Windows 策略拒绝（CreateProcess blocked by policy），OS 沙箱不可用（票 11 已记录的硬环境边界）。已做的补偿：判定搬回宿主 `/decide`、hook 超时/错包一律 deny、每轮 prompt 重写 config+hook、路径工具做 resolve 后包含判定、BYOK key 从子进程环境排除、产出落库前脱敏。残留风险是「员工在同一用户权限下改写 hook/config」；真正的修法是 OS ACL/独立用户/可用沙箱，超出本机约束。替代方案：接受当前边界并把 UI 文案保持为「宿主策略」；若要强隔离，换一台能起 codex sandbox 的机器或换引擎运行方式。
 7. **codex 的真实拒绝仍依赖 hook 进程**：这是 6 的直接结果；策略表本身在宿主，hook 只是传输层。
+
+## 验收阶段反馈（2026-11-10）
+
+| # | 反馈 | 根因 | 修复 | 回归 |
+|---|---|---|---|---|
+| 1 | 左上角公司 / 项目组点击后弹窗被遮挡、看不见 | 左轨此前为修低高度折行加了 `overflow-y:auto`，CSS 会把另一轴也算成 `auto`，于是 `left:calc(100% + 6px)` 的 272px 面板被裁在 120px 的左轨内（只剩约 4px），底部还多出一条横向滚动条 | 把五个入口按钮收进新的 `.rail-entries` 滚动列；切换器留在滚动容器外；`.left-rail` 恢复 `overflow:visible`。低高度仍由入口列自己滚动 | e2e-08 新增“公司面板 / 项目组面板浮出左轨且可命中”检查（`elementFromPoint` 命中面板，裁剪时会命中 `office-floor`）；截图 `22-company-panel-after.png`、`23-group-panel-after.png`、`24-narrow-company-panel.png` |
 
 ## 结论
 

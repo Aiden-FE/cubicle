@@ -68,6 +68,31 @@ const HANDLE_ROWS_JS = (section) =>
   `Array.from(document.querySelectorAll('[data-testid="${section}"] [data-testid="handle-row"]')).map((el) => el.dataset.taskId).join(',')`;
 
 /**
+ * 左轨公司/项目组面板必须真正浮出左轨。只看 getBoundingClientRect 会撒谎 —
+ * 祖先 overflow 裁剪时 rect 仍是完整 272px。用 elementFromPoint 打命中测试：
+ * 被裁掉/被盖住时命中的是 office-floor，而不是面板内的元素。
+ * @param {string} testId
+ */
+const POPOVER_VISIBLE_JS = (testId) =>
+  `(() => {
+    const panel = document.querySelector('[data-testid="${testId}"]');
+    const rail = document.querySelector('[data-testid="left-rail"]');
+    if (!panel || !rail) return { ok: false, reason: 'missing' };
+    const r = panel.getBoundingClientRect();
+    const rr = rail.getBoundingClientRect();
+    const x = Math.round(r.left + Math.min(8, r.width / 2));
+    const y = Math.round(r.top + Math.min(8, r.height / 2));
+    const hit = document.elementFromPoint(x, y);
+    return {
+      ok: r.width > 200 && r.right > rr.right + 100 && Boolean(hit && panel.contains(hit)),
+      left: Math.round(r.left),
+      right: Math.round(r.right),
+      railRight: Math.round(rr.right),
+      hit: hit ? String(hit.className).slice(0, 48) : null,
+    };
+  })()`;
+
+/**
  * @param {import("electron").WebContents} contents
  * @param {number} taskId
  * @param {string} wanted
@@ -270,6 +295,17 @@ async function phaseShell(ctx) {
   await click(contents, '[data-testid="task-close"]'); // 关掉工单台，左轨可达
   await click(contents, '[data-testid="company-switcher"]');
   await waitFor(async () => (await evalIn(contents, `document.querySelector('[data-testid="company-panel"]') !== null`)) === true, { timeoutMs: 3000 });
+  const companyPopover = /** @type {any} */ (await evalIn(contents, POPOVER_VISIBLE_JS("company-panel")));
+  add("公司面板浮出左轨、可命中（不被滚动容器的 overflow 裁成细条）", companyPopover?.ok === true, JSON.stringify(companyPopover));
+
+  // 项目组面板共用同一套弹出位置，同样必须跳出左轨
+  await click(contents, '[data-testid="group-switcher"]');
+  await waitFor(async () => (await evalIn(contents, `document.querySelector('[data-testid="group-panel"]') !== null`)) === true, { timeoutMs: 3000 });
+  const groupPopover = /** @type {any} */ (await evalIn(contents, POPOVER_VISIBLE_JS("group-panel")));
+  add("项目组面板浮出左轨、可命中", groupPopover?.ok === true, JSON.stringify(groupPopover));
+  await click(contents, '[data-testid="company-switcher"]'); // 回到公司面板继续新建公司
+  await waitFor(async () => (await evalIn(contents, `document.querySelector('[data-testid="company-panel"]') !== null`)) === true, { timeoutMs: 3000 });
+
   const companyCounts = /** @type {any} */ (
     await evalIn(
       contents,
