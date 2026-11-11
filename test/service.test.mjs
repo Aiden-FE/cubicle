@@ -86,7 +86,7 @@ test("office.get answers with the seeded office and host info", async () => {
     const snapshot = /** @type {any} */ (reply.payload);
     assert.equal(snapshot.host.pid, 4242);
     assert.equal(snapshot.host.startedAt, "2026-11-05T09:00:00.000Z");
-    assert.equal(snapshot.desks.length, 4);
+    assert.equal(snapshot.desks.length, 8);
     assert.equal(snapshot.companies[0].name, "默认公司");
   } finally {
     await dispose();
@@ -111,7 +111,7 @@ test("company.create answers with the new company and emits domain.changed", asy
   }
 });
 
-test("projectGroup.create answers with group and its four desks, and emits domain.changed", async () => {
+test("projectGroup.create answers with group and its eight desks, and emits domain.changed", async () => {
   const { service, dispose } = await withService("group");
   try {
     const created = service.handle(createInvoke("r3", "company.create", { name: "灯塔组" }));
@@ -121,7 +121,7 @@ test("projectGroup.create answers with group and its four desks, and emits domai
     );
     assert.equal(reply.ok, true);
     assert.equal(/** @type {any} */ (reply.payload).group.name, "编辑器组");
-    assert.equal(/** @type {any} */ (reply.payload).desks.length, 4);
+    assert.equal(/** @type {any} */ (reply.payload).desks.length, 8);
     assert.equal(events[0].topic, "domain.changed");
   } finally {
     await dispose();
@@ -958,7 +958,7 @@ test("switching company only moves the view: other companies' tasks and counts s
     assert.equal(back.reply.ok, true);
     const after = /** @type {any} */ (service.handle(createInvoke("v7", "office.get", {})).reply.payload);
     assert.notEqual(after.activeCompanyId, companyB.id);
-    assert.equal(after.desks.length, 4, "切回 A 画布回到 A 的四个工位");
+    assert.equal(after.desks.length, 8, "切回 A 画布回到 A 的八个工位");
     assert.equal(/** @type {any} */ (store.taskById(created.id)).status, "running");
     await runManager.whenQuiet();
   } finally {

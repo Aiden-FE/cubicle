@@ -429,12 +429,21 @@ const PRESET_ROLES = [
   },
 ];
 
-/** Layout slots for the four desks every project group owns. */
+/**
+ * Eight desk bays (4×2) every project group owns. The order is row-major:
+ * back row first, then the front row. It is mirrored by DESK_LAYOUT in
+ * renderer/src/scene/Office3D.jsx and by the Desk1..Desk8 names in the
+ * Blender scene; changing one without the others breaks the 3D anchors.
+ */
 const DESK_SLOTS = [
-  { x: 140, y: 140 },
-  { x: 380, y: 140 },
-  { x: 140, y: 300 },
-  { x: 380, y: 300 },
+  { x: 100, y: 150 },
+  { x: 260, y: 150 },
+  { x: 420, y: 150 },
+  { x: 580, y: 150 },
+  { x: 100, y: 320 },
+  { x: 260, y: 320 },
+  { x: 420, y: 320 },
+  { x: 580, y: 320 },
 ];
 
 /**
@@ -883,6 +892,9 @@ export function openStore({ dataDir }) {
   seedIfFirstRun(db);
   seedRoles(db);
   seedEngineStates(db);
+  // Ticket 14 widened the office from 4 to 8 bays. Older databases keep
+  // their existing desks and gain the missing back/front-row bays in place.
+  ensureDeskCapacity(db);
 
   return {
     dataDir,
@@ -2411,6 +2423,31 @@ function seedRoles(db) {
   db.prepare(
     "INSERT INTO meta (key, value) VALUES ('role_seed_rev', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
   ).run(String(ROLE_SEED_REV));
+}
+
+/**
+ * Heal old databases that still have the pre-8-bay layout. Existing desk ids
+ * and occupants are untouched; only missing slot indexes are appended.
+ * @param {DatabaseSync} db
+ */
+function ensureDeskCapacity(db) {
+  const groups = /** @type {{ id: number }[]} */ (db.prepare("SELECT id FROM project_group ORDER BY id").all());
+  const insert = db.prepare("INSERT INTO desk (group_id, label, x, y) VALUES (?, ?, ?, ?)");
+  for (const group of groups) {
+    const desks = /** @type {{ id: number }[]} */ (db.prepare("SELECT id FROM desk WHERE group_id = ? ORDER BY id").all(group.id));
+    if (desks.length >= DESK_SLOTS.length) continue;
+    db.exec("BEGIN");
+    try {
+      for (let index = desks.length; index < DESK_SLOTS.length; index += 1) {
+        const slot = DESK_SLOTS[index];
+        insert.run(group.id, `工位 ${index + 1}`, slot.x, slot.y);
+      }
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+  }
 }
 
 /**

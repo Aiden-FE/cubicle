@@ -227,10 +227,10 @@ export async function bootAndShowOffice(ctx, add) {
   add("主窗口存在", true);
 
   const desksShown = await waitFor(
-    async () => (await evalIn(win.webContents, DESK_COUNT_JS)) === 4,
+    async () => (await evalIn(win.webContents, DESK_COUNT_JS)) === 8,
     { timeoutMs: 15_000 },
   );
-  add("办公室显示 4 个工位（来自数据库）", desksShown, `${Date.now() - ctx.bootStartMs}ms after boot`);
+  add("办公室显示 8 个工位（来自数据库）", desksShown, `${Date.now() - ctx.bootStartMs}ms after boot`);
 
   const onlineBadge = await waitFor(async () => (await evalIn(win.webContents, BADGE_ONLINE_JS)) === "true", {
     timeoutMs: 4000,

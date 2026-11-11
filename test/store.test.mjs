@@ -30,7 +30,7 @@ async function withTempDir(name) {
   return { dataDir, dispose };
 }
 
-test("a fresh store seeds one default company, one project group and four empty desks", async () => {
+test("a fresh store seeds one default company, one project group and eight empty desks", async () => {
   const { dataDir, dispose } = await withTempDir("seed");
   try {
     const store = openStore({ dataDir });
@@ -39,10 +39,10 @@ test("a fresh store seeds one default company, one project group and four empty 
     assert.equal(snapshot.companies[0].name, "默认公司");
     assert.equal(snapshot.groups.length, 1);
     assert.equal(snapshot.groups[0].name, "默认项目组");
-    assert.equal(snapshot.desks.length, 4);
+    assert.equal(snapshot.desks.length, 8);
     assert.deepEqual(
       snapshot.desks.map((desk) => desk.label),
-      ["工位 1", "工位 2", "工位 3", "工位 4"],
+      ["工位 1", "工位 2", "工位 3", "工位 4", "工位 5", "工位 6", "工位 7", "工位 8"],
     );
     for (const desk of snapshot.desks) {
       assert.equal(typeof desk.x, "number");
@@ -74,10 +74,10 @@ test("creating a company and a project group survives closing and reopening the 
     assert.equal(groups[0].id, group.id);
     assert.equal(groups[0].name, "看板组");
     const desks = second.listDesks({ groupId: group.id });
-    assert.equal(desks.length, 4);
+    assert.equal(desks.length, 8);
     assert.deepEqual(
       desks.map((d) => d.label),
-      ["工位 1", "工位 2", "工位 3", "工位 4"],
+      ["工位 1", "工位 2", "工位 3", "工位 4", "工位 5", "工位 6", "工位 7", "工位 8"],
     );
     second.close();
   } finally {
@@ -100,16 +100,38 @@ test("seeding does not repeat on reopen", async () => {
   }
 });
 
-test("createProjectGroup seeds four empty desks for the new group", async () => {
+test("createProjectGroup seeds eight empty desks for the new group", async () => {
   const { dataDir, dispose } = await withTempDir("group-desks");
   try {
     const store = openStore({ dataDir });
     const company = store.createCompany({ name: "灯塔组" });
     const group = store.createProjectGroup({ companyId: company.id, name: "编辑器" });
     const desks = store.listDesks({ groupId: group.id });
-    assert.equal(desks.length, 4);
+    assert.equal(desks.length, 8);
     assert.ok(desks.every((desk) => desk.groupId === group.id && desk.occupant === null));
     store.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("reopening a legacy four-desk group heals it to eight without replacing existing desks", async () => {
+  const { dataDir, dispose } = await withTempDir("desk-migration");
+  try {
+    const first = openStore({ dataDir });
+    const before = first.officeSnapshot().desks.map((desk) => desk.id);
+    first.close();
+
+    const raw = new DatabaseSync(path.join(dataDir, "cubicle.db"));
+    raw.exec("DELETE FROM desk WHERE id NOT IN (SELECT id FROM desk ORDER BY id LIMIT 4)");
+    raw.close();
+
+    const second = openStore({ dataDir });
+    const after = second.officeSnapshot().desks;
+    assert.equal(after.length, 8);
+    assert.deepEqual(after.slice(0, 4).map((desk) => desk.id), before.slice(0, 4));
+    assert.deepEqual(after.map((desk) => desk.label), ["工位 1", "工位 2", "工位 3", "工位 4", "工位 5", "工位 6", "工位 7", "工位 8"]);
+    second.close();
   } finally {
     await dispose();
   }
@@ -132,7 +154,7 @@ test("officeSnapshot points at the first company and its most recent project gro
     assert.equal(snapshot.activeGroupId, newerGroup.id);
     assert.deepEqual(
       snapshot.desks.map((d) => d.groupId),
-      [newerGroup.id, newerGroup.id, newerGroup.id, newerGroup.id],
+      [newerGroup.id, newerGroup.id, newerGroup.id, newerGroup.id, newerGroup.id, newerGroup.id, newerGroup.id, newerGroup.id],
     );
     store.close();
   } finally {

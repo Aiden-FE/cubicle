@@ -3,14 +3,14 @@
  * parked under scripts/ (main stays business-free).
  *
  * Phase "shell" (one continuous office story in one 1280×800 window):
- *   boot → 左轨四入口可用（公司切换 / 工单台 / 花名册 / 引擎中心）
+ *   boot → 左轨入口可用（公司切换 / 工单台 / 花名册 / 引擎中心）
  *   → 招一名程序员（工单 owner）→ 花名册列出 TA（花名/角色/在岗）
  *   → 引擎中心显示 pi + 配置目录 + 票 11 插槽
  *   → 工单台浮层开合，画布始终满窗（浮层不挤压画布）
  *   → 快活工单跑完点「通过」→ 档案里多一条完成
  *   → 慢活工单跑着：公司切换器显示 A 的活跃数（进行中 1）→ 新建并切到公司 B
  *     （画布仍是 100%，A 的 run 事件继续进 host，taskCounts[A] 跨公司可见）
- *   → 切回 A：四个工位还在、TA 还在岗、工位重新亮「干活」（新事件继续驱动）
+ *   → 切回 A：八个工位还在、TA 还在岗、工位重新亮「干活」（新事件继续驱动）
  *   → 右把手徽标 = 活跃数；拉开三段：进行中(慢活) / 待验收(空→跑完后) / 档案(快活)
  *   → 慢活跑完自动待验收（把手里段落实时搬家）→ 通过 → 徽标归 0、档案 ×2
  *
@@ -135,9 +135,9 @@ async function phaseShell(ctx) {
     baseCanvas.innerW >= 1200 && baseCanvas.floorW === baseCanvas.innerW && baseCanvas.floorH === baseCanvas.innerH,
     JSON.stringify(baseCanvas),
   );
-  add("房间（room）在画布主体位置（宽 500–800）", baseCanvas.roomW >= 500 && baseCanvas.roomW <= 800, `roomW=${baseCanvas.roomW}`);
+  add("房间（room）在画布主体位置（宽 500–1000）", baseCanvas.roomW >= 500 && baseCanvas.roomW <= 1000, `roomW=${baseCanvas.roomW}`);
 
-  // ── 左轨四入口可用 ───────────────────────────────────────────────
+  // ── 左轨入口可用 ───────────────────────────────────────────────
   const rail = /** @type {any} */ (
     await evalIn(
       contents,
@@ -154,9 +154,34 @@ async function phaseShell(ctx) {
     )
   );
   add(
-    "左轨四入口 = 公司切换 / 工单台 / 花名册 / 上下班；引擎中心/关于已收进设置",
+    "左轨入口 = 公司切换 / 工单台 / 花名册 / 上下班；引擎中心/关于已收进设置",
     rail.rail && rail.company && rail.bench && rail.roster && rail.duty && rail.settings && rail.noEngineRail && rail.noAboutRail,
     JSON.stringify(rail),
+  );
+
+  // ── 3D 场景：WebGL 画布、8 个工位、咖啡机/饮水机 ───────────────
+  const scene3d = await waitFor(
+    async () => {
+      const state = /** @type {any} */ (
+        await evalIn(
+          contents,
+          `(() => ({
+            canvas: document.querySelector('[data-testid="office-3d"] canvas') !== null,
+            canvasW: document.querySelector('[data-testid="office-3d"] canvas')?.clientWidth ?? 0,
+            desks: document.querySelectorAll('[data-testid="desk"]').length,
+            coffee: document.querySelector('[data-testid="amenity-coffee"]') !== null,
+            water: document.querySelector('[data-testid="amenity-water"]') !== null,
+          }))()`,
+        )
+      );
+      return state.canvas && state.canvasW > 0 && state.desks === 8 && state.coffee && state.water ? state : null;
+    },
+    { timeoutMs: 8000 },
+  );
+  add(
+    "3D 办公室：WebGL 画布 + 8 工位 + 咖啡机/饮水机",
+    Boolean(scene3d),
+    JSON.stringify(scene3d),
   );
 
   // ── 招一名程序员（工单 owner）───────────────────────────────────
@@ -365,8 +390,8 @@ async function phaseShell(ctx) {
       item?.click();
     })()`,
   );
-  const backToA = await waitFor(async () => (await evalIn(contents, `document.querySelectorAll('[data-testid="desk"]').length`)) === 4, { timeoutMs: 5000 });
-  add("切回 A：四个工位回来了", backToA);
+  const backToA = await waitFor(async () => (await evalIn(contents, `document.querySelectorAll('[data-testid="desk"]').length`)) === 8, { timeoutMs: 5000 });
+  add("切回 A：八个工位回来了", backToA);
   const busyAgain = await waitFor(
     async () => (await evalIn(contents, `document.querySelector('[data-testid="desk"][data-empty="false"]')?.dataset.busy ?? ''`)) === "true",
     { timeoutMs: 12_000, intervalMs: 300 },

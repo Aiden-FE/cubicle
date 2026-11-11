@@ -75,10 +75,10 @@ async function bootAndShowOffice(ctx) {
   add("主窗口存在", true);
 
   const desksShown = await waitFor(
-    async () => (await evalIn(win.webContents, DESK_COUNT_JS)) === 4,
+    async () => (await evalIn(win.webContents, DESK_COUNT_JS)) === 8,
     { timeoutMs: 5000 },
   );
-  add("办公室画面显示 4 个工位（来自数据库）", desksShown, `${Date.now() - ctx.bootStartMs}ms after boot`);
+  add("办公室画面显示 8 个工位（来自数据库）", desksShown, `${Date.now() - ctx.bootStartMs}ms after boot`);
 
   const onlineBadge = await waitFor(async () => (await evalIn(win.webContents, BADGE_ONLINE_JS)) === "true", {
     timeoutMs: 4000,
@@ -152,13 +152,13 @@ async function phaseCreate(ctx) {
       '[data-testid="group-create"]',
     );
   }
-  // The canvas must follow the database: the new group's four desks appear.
+  // The canvas must follow the database: the new group's eight desks appear.
   const canvasFollowsDb = await waitFor(async () => {
     const caption = await evalIn(win.webContents, GROUP_NAME_JS);
     const desks = await evalIn(win.webContents, DESK_COUNT_JS);
-    return caption === E2E_GROUP && desks === 4;
+    return caption === E2E_GROUP && desks === 8;
   }, { timeoutMs: 4000 });
-  add("画布切到新项目组的 4 个工位（数据库变更直达视图）", canvasFollowsDb);
+  add("画布切到新项目组的 8 个工位（数据库变更直达视图）", canvasFollowsDb);
 
   const listsShowBoth = await waitFor(async () => {
     await evalIn(win.webContents, `document.querySelector('[data-testid="company-switcher"]')?.click()`);
@@ -177,7 +177,7 @@ async function phaseCreate(ctx) {
   const pidBefore = ctx.supervisor.pid;
   win.webContents.reload();
   const desksAfterReload = await waitFor(
-    async () => (await evalIn(win.webContents, DESK_COUNT_JS)) === 4,
+    async () => (await evalIn(win.webContents, DESK_COUNT_JS)) === 8,
     { timeoutMs: 5000 },
   );
   // The fresh view only learns "online" when the next heartbeat lands (≤2s).

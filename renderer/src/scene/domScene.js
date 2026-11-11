@@ -31,3 +31,21 @@ export function deskStyle(desk) {
     zIndex: desk.y,
   };
 }
+
+/**
+ * Position the interactive/label layer over the real 3D scene. Coordinates
+ * are projected by Office3D (already in room-local CSS pixels); the fallback
+ * keeps labels usable while the GLB is still loading.
+ *
+ * @param {{ id: number, x: number, y: number }} desk
+ * @param {Record<number, { x: number, y: number }> | null} projected
+ */
+export function projectedDeskStyle(desk, projected) {
+  const point = projected?.[desk.id];
+  if (!point) return deskStyle(desk);
+  return {
+    left: `${point.x - ANCHOR.x}px`,
+    top: `${point.y - ANCHOR.y}px`,
+    zIndex: Math.round(point.y),
+  };
+}

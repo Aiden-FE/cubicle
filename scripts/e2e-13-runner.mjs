@@ -70,6 +70,23 @@ async function phaseBoot(ctx, add) {
   const missing = missingDataEntries(layout, (p) => existsSync(p));
   add("数据目录按清单创建（cubicle.db + artifacts/engines/renders）", missing.length === 0, missing.join(",") || "全部在场");
 
+  const scene3d = await waitFor(
+    async () =>
+      (await evalIn(
+        contents,
+        `(() => ({
+          canvas: document.querySelector('[data-testid="office-3d"] canvas') !== null,
+          desks: document.querySelectorAll('[data-testid="desk"]').length,
+          coffee: document.querySelector('[data-testid="amenity-coffee"]') !== null,
+          water: document.querySelector('[data-testid="amenity-water"]') !== null,
+        }))()`,
+      )).canvas === true &&
+      (await evalIn(contents, `document.querySelectorAll('[data-testid="desk"]').length`)) === 8 &&
+      (await evalIn(contents, `document.querySelector('[data-testid="amenity-coffee"]') !== null`)) === true,
+    { timeoutMs: 8000 },
+  );
+  add("打包形态：3D 场景从 asar 加载（WebGL 画布 + 8 工位 + 咖啡机/饮水机）", scene3d);
+
   // 验收 5：关于页显示版本号；三方一致 = exe metadata(app.getVersion) =
   // asar package.json（主进程 app-info IPC 对表）= 关于页 DOM。期望版本由
   // 编排器从安装包外独立读取（package.json 原文）经 env 传入。
