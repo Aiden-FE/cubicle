@@ -56,12 +56,75 @@ const DETAIL_STATUS_JS = `document.querySelector('[data-testid="task-status"]')?
 const CANVAS_JS = `(() => {
   const floor = document.querySelector('[data-testid="office-floor"]');
   const room = document.querySelector('[data-testid="room"]');
+  const rr = room?.getBoundingClientRect();
   return {
     innerW: window.innerWidth, innerH: window.innerHeight,
     floorW: floor ? floor.clientWidth : 0, floorH: floor ? floor.clientHeight : 0,
     roomW: room ? room.clientWidth : 0, roomH: room ? room.clientHeight : 0,
+    roomRectW: rr ? Math.round(rr.width) : 0, roomRectH: rr ? Math.round(rr.height) : 0,
   };
 })()`;
+
+const VIEW_JS = `(() => {
+  const room = document.querySelector('[data-testid="room"]');
+  const controls = document.querySelector('[data-testid="zoom-controls"]');
+  const settings = document.querySelector('[data-testid="settings-open"]');
+  const percent = document.querySelector('[data-testid="zoom-percent"]');
+  const desk = document.querySelector('[data-testid="desk"]');
+  const hit = desk?.querySelector('[data-testid="desk-hit"]');
+  const rr = room?.getBoundingClientRect();
+  const cr = controls?.getBoundingClientRect();
+  const sr = settings?.getBoundingClientRect();
+  const hr = hit?.getBoundingClientRect();
+  const dr = desk?.getBoundingClientRect();
+  const inside = (outer, inner) => outer && inner
+    ? inner.left >= outer.left && inner.right <= outer.right && inner.top >= outer.top && inner.bottom <= outer.bottom
+    : false;
+  return {
+    inner: [window.innerWidth, window.innerHeight],
+    room: rr ? [Math.round(rr.width), Math.round(rr.height), Math.round(rr.left), Math.round(rr.top)] : null,
+    controls: cr ? [Math.round(cr.left), Math.round(cr.top), Math.round(cr.right), Math.round(cr.bottom)] : null,
+    settings: sr ? [Math.round(sr.left), Math.round(sr.top), Math.round(sr.right), Math.round(sr.bottom)] : null,
+    percent: percent?.textContent ?? '',
+    zoom: room?.dataset.zoom ?? '',
+    canIn: !document.querySelector('[data-testid="zoom-in"]')?.disabled,
+    canOut: !document.querySelector('[data-testid="zoom-out"]')?.disabled,
+    hit: hr ? [Math.round(hr.width), Math.round(hr.height)] : null,
+    deskCard: dr ? [Math.round(dr.width), Math.round(dr.height)] : null,
+    controlsInsideRoom: inside(rr, cr),
+    overlapSettings: cr && sr
+      ? !(cr.right <= sr.left || cr.left >= sr.right || cr.bottom <= sr.top || cr.top >= sr.bottom)
+      : null,
+    labels: [...document.querySelectorAll('[data-testid="desk"]')].map((el) => {
+      const r = el.getBoundingClientRect();
+      return [Number(el.dataset.deskId), Math.round(r.left), Math.round(r.top)];
+    }),
+  };
+})()`;
+
+const ZOOM_JS = `document.querySelector('[data-testid="zoom-percent"]')?.textContent ?? ''`;
+
+/**
+ * Best-effort screenshot. A service-session Electron may have no display
+ * surface; assertions still decide the run, the image is human evidence.
+ * @param {E2EContext} ctx @param {import("electron").BrowserWindow} win @param {string} name
+ */
+async function shot(ctx, win, name) {
+  try {
+    const image = await win.webContents.capturePage();
+    await writeFile(path.join(ctx.outDir, `${name}.png`), image.toPNG());
+    return `${name}.png`;
+  } catch (err) {
+    out(`E2E WARN screenshot ${name} failed: ${String(err)}`);
+    return null;
+  }
+}
+
+/** @param {import("electron").BrowserWindow} win @param {number} width @param {number} height */
+async function resizeWindow(win, width, height) {
+  win.setSize(width, height);
+  await sleep(900);
+}
 
 /** @param {string} section @returns {string} */
 const HANDLE_ROWS_JS = (section) =>
@@ -126,6 +189,24 @@ async function phaseShell(ctx) {
   const { win } = await bootAndShowOffice(ctx, add);
   if (!win) return { checks };
   const contents = win.webContents;
+  /** @returns {Promise<any>} */
+  const readView = async () => /** @type {any} */ (await evalIn(contents, VIEW_JS));
+  /**
+   * @param {(view: any) => boolean} predicate
+   * @param {number} [timeoutMs]
+   * @returns {Promise<any>}
+   */
+  const waitView = async (predicate, timeoutMs = 2000) => {
+    let latest = await readView();
+    await waitFor(
+      async () => {
+        latest = await readView();
+        return predicate(latest);
+      },
+      { timeoutMs },
+    );
+    return latest;
+  };
   await ensureAllDaySchedule(win.webContents); // 票 09: 默认班表 09:00–18:00 下班中有 off_duty 闸；e2e 全天班表
 
   // ── 画布基线：1280 窗口里画布满窗，工位房间在主体位置 ──────────────
@@ -135,7 +216,11 @@ async function phaseShell(ctx) {
     baseCanvas.innerW >= 1200 && baseCanvas.floorW === baseCanvas.innerW && baseCanvas.floorH === baseCanvas.innerH,
     JSON.stringify(baseCanvas),
   );
-  add("房间（room）在画布主体位置（宽 500–1000）", baseCanvas.roomW >= 500 && baseCanvas.roomW <= 1000, `roomW=${baseCanvas.roomW}`);
+  add(
+    "默认 1280×800 房间铺满主体（≥1000×680）",
+    baseCanvas.roomRectW >= 1000 && baseCanvas.roomRectH >= 680,
+    JSON.stringify(baseCanvas),
+  );
 
   // ── 左轨入口可用 ───────────────────────────────────────────────
   const rail = /** @type {any} */ (
@@ -203,6 +288,248 @@ async function phaseShell(ctx) {
   const dirs = enginePaths(ctx.dataDir, "pi", programmerId);
   const { headBefore } = seedGitWorkspace(dirs.workspaceDir, execFileSync);
   add("程序员工作区被种成 git 仓库（fixture，非应用行为）", /^[0-9a-f]{40}$/.test(headBefore), `head=${headBefore.slice(0, 7)}`);
+
+  // ── 票 16：窗口自适应 + 放大/滚轮/平移/复位 ─────────────────────
+  const initialView = await waitView((view) => view.percent === "100%" && Boolean(view.room) && Boolean(view.controls), 3000);
+  add(
+    "缩放控件在房间右上角、默认 100%、减号禁用，不遮设置",
+    initialView.controlsInsideRoom === true &&
+      initialView.overlapSettings === false &&
+      initialView.canIn === true &&
+      initialView.canOut === false,
+    JSON.stringify(initialView),
+  );
+  await shot(ctx, win, "16-zoom-1280-fit");
+
+  await click(contents, '[data-testid="zoom-in"]');
+  const afterButton = await waitView((view) => view.percent === "125%");
+  add(
+    "加号把相机推到 125%，房间外框不变",
+    afterButton.room[0] === initialView.room[0] && afterButton.canOut === true,
+    JSON.stringify(afterButton),
+  );
+
+  await click(contents, '[data-testid="zoom-in"]'); // 156%: enough separation for wheel/anchor tests
+  const wheelPoint = await evalIn(
+    contents,
+    `(() => {
+      const desk = document.querySelector('[data-testid="desk"][data-desk-id="1"]');
+      const r = desk.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    })()`,
+  );
+  const beforeWheel = /** @type {any} */ (await evalIn(contents, VIEW_JS));
+  await evalIn(
+    contents,
+    `(() => {
+      const room = document.querySelector('[data-testid="room"]');
+      room.dispatchEvent(new WheelEvent("wheel", {
+        deltaY: -240, deltaMode: 0, clientX: ${wheelPoint.x}, clientY: ${wheelPoint.y},
+        bubbles: true, cancelable: true,
+      }));
+      return true;
+    })()`,
+  );
+  const afterWheel = await waitView((view) => view.percent !== beforeWheel.percent);
+  const wheelDeskBefore = beforeWheel.labels.find((/** @type {any} */ row) => row[0] === 1);
+  const wheelDeskAfter = afterWheel.labels.find((/** @type {any} */ row) => row[0] === 1);
+  const anchorDrift = wheelDeskBefore && wheelDeskAfter
+    ? Math.hypot(wheelDeskAfter[1] - wheelDeskBefore[1], wheelDeskAfter[2] - wheelDeskBefore[2])
+    : 999;
+  add(
+    "房间内滚轮放大，鼠标所在工位的投影基本不漂移",
+    anchorDrift <= 26,
+    `percent=${beforeWheel.percent}→${afterWheel.percent} drift=${Math.round(anchorDrift)}`,
+  );
+  await shot(ctx, win, "16-zoom-1280-detail");
+
+  const beforeOutsideWheel = String(await evalIn(contents, ZOOM_JS));
+  await evalIn(
+    contents,
+    `(() => {
+      document.querySelector('[data-testid="left-rail"]').dispatchEvent(new WheelEvent("wheel", {
+        deltaY: -240, deltaMode: 0, clientX: 40, clientY: 300, bubbles: true, cancelable: true,
+      }));
+      return true;
+    })()`,
+  );
+  await sleep(250);
+  add("滚轮离开房间不缩放", String(await evalIn(contents, ZOOM_JS)) === beforeOutsideWheel, `${beforeOutsideWheel}→${await evalIn(contents, ZOOM_JS)}`);
+
+  const beforePan = /** @type {any} */ (await evalIn(contents, VIEW_JS));
+  const panPoint = await evalIn(
+    contents,
+    `(() => {
+      const desk = document.querySelector('[data-testid="desk"][data-empty="true"]');
+      const r = desk.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), id: Number(desk.dataset.deskId) };
+    })()`,
+  );
+  await evalIn(
+    contents,
+    `(() => {
+      const desk = document.querySelector('[data-testid="desk"][data-empty="true"]');
+      desk.dispatchEvent(new PointerEvent("pointerdown", {
+        bubbles: true, cancelable: true, pointerId: 42, button: 0, buttons: 1,
+        clientX: ${panPoint.x}, clientY: ${panPoint.y},
+      }));
+      window.dispatchEvent(new PointerEvent("pointermove", {
+        bubbles: true, cancelable: true, pointerId: 42, buttons: 1,
+        clientX: ${panPoint.x + 72}, clientY: ${panPoint.y + 34},
+      }));
+      window.dispatchEvent(new PointerEvent("pointerup", {
+        bubbles: true, pointerId: 42, button: 0,
+        clientX: ${panPoint.x + 72}, clientY: ${panPoint.y + 34},
+      }));
+      desk.click(); // immediate post-drag click must be swallowed
+      return true;
+    })()`,
+  );
+  const afterPan = await waitView((view) => {
+    const row = view.labels.find((/** @type {any} */ entry) => entry[0] === panPoint.id);
+    const beforeRow = beforePan.labels.find((/** @type {any} */ entry) => entry[0] === panPoint.id);
+    return Boolean(row && beforeRow && row[1] !== beforeRow[1]);
+  });
+  const noAccidentalModal = await waitFor(
+    async () =>
+      (await evalIn(contents, `document.querySelector('[data-testid="hire-modal"]') === null`)) === true,
+    { timeoutMs: 1000 },
+  );
+  const panRowBefore = beforePan.labels.find((/** @type {any} */ entry) => entry[0] === panPoint.id);
+  const panRowAfter = afterPan.labels.find((/** @type {any} */ entry) => entry[0] === panPoint.id);
+  const panDrift = panRowBefore && panRowAfter ? Math.hypot(panRowAfter[1] - panRowBefore[1], panRowAfter[2] - panRowBefore[2]) : 0;
+  add("放大后拖动任意工位可平移，拖动结束不触发点选", panDrift > 20 && noAccidentalModal, `drift=${Math.round(panDrift)}`);
+
+  await click(contents, '[data-testid="desk"][data-empty="true"]');
+  const normalClickOpens = await waitFor(
+    async () => (await evalIn(contents, `document.querySelector('[data-testid="hire-modal"]') !== null`)) === true,
+    { timeoutMs: 2000 },
+  );
+  add("拖动判定只有超过 5px 才吞点击；普通点击仍打开招聘", normalClickOpens);
+  await click(contents, '[data-testid="hire-close"]');
+  await waitFor(async () => (await evalIn(contents, `document.querySelector('[data-testid="hire-modal"]')`)) === null, { timeoutMs: 2000 });
+
+  await click(contents, '[data-testid="zoom-fit"]');
+  const resetView = await waitView((view) => view.percent === "100%");
+  const deskAt100Before = /** @type {any} */ (await evalIn(contents, VIEW_JS)).labels;
+  await evalIn(
+    contents,
+    `(() => {
+      const desk = document.querySelector('[data-testid="desk"][data-empty="true"]');
+      const r = desk.getBoundingClientRect();
+      desk.dispatchEvent(new PointerEvent("pointerdown", {
+        bubbles: true, cancelable: true, pointerId: 43, button: 0, buttons: 1,
+        clientX: Math.round(r.left + r.width / 2), clientY: Math.round(r.top + r.height / 2),
+      }));
+      window.dispatchEvent(new PointerEvent("pointermove", {
+        bubbles: true, cancelable: true, pointerId: 43, buttons: 1,
+        clientX: Math.round(r.left + r.width / 2) + 80, clientY: Math.round(r.top + r.height / 2) + 40,
+      }));
+      window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 43, button: 0 }));
+      return true;
+    })()`,
+  );
+  await sleep(300);
+  const deskAt100After = /** @type {any} */ (await evalIn(contents, VIEW_JS)).labels;
+  add(
+    "100% 时拖动不平移，适应后回到全景",
+    Boolean(resetView) && JSON.stringify(deskAt100Before) === JSON.stringify(deskAt100After) && resetView.canOut === false,
+    JSON.stringify({ before: deskAt100Before, after: deskAt100After }),
+  );
+
+  const keyBefore = String(await evalIn(contents, ZOOM_JS));
+  await evalIn(contents, `window.dispatchEvent(new KeyboardEvent("keydown", { key: "+", bubbles: true })); true`);
+  await sleep(200);
+  add("没有全局 +/- 键盘缩放（输入框不会被劫持）", String(await evalIn(contents, ZOOM_JS)) === keyBefore, `${keyBefore}→${await evalIn(contents, ZOOM_JS)}`);
+
+  for (let i = 0; i < 8; i += 1) await click(contents, '[data-testid="zoom-in"]');
+  const maxView = await waitView((view) => view.percent === "400%", 3000);
+  const maxHitOwners = /** @type {any[]} */ (
+    await evalIn(
+      contents,
+      `(() => {
+        const room = document.querySelector('[data-testid="room"]').getBoundingClientRect();
+        return [...document.querySelectorAll('[data-testid="desk"]')].map((desk) => {
+          const r = desk.getBoundingClientRect();
+          const cx = Math.round(r.left + r.width / 2);
+          const cy = Math.round(r.top + r.height / 2);
+          if (cx < room.left || cx > room.right || cy < room.top || cy > room.bottom) return { id: Number(desk.dataset.deskId), visible: false, owner: null };
+          const hit = document.elementFromPoint(cx, cy);
+          return { id: Number(desk.dataset.deskId), visible: true, owner: Number(hit?.closest('[data-testid="desk"]')?.dataset.deskId ?? 0) };
+        });
+      })()`,
+    )
+  );
+  const visibleHits = maxHitOwners.filter((row) => row.visible);
+  add(
+    "倍率封顶 400%，加号禁用；放大后每个可见工位中心仍命中自己（热区不串桌）",
+    maxView.canIn === false &&
+      maxView.canOut === true &&
+      maxView.hit[0] > maxView.deskCard[0] &&
+      visibleHits.length >= 2 &&
+      visibleHits.every((row) => row.owner === row.id),
+    JSON.stringify({ maxView, visibleHits }),
+  );
+
+  await click(contents, '[data-testid="zoom-fit"]');
+  await waitFor(async () => String(await evalIn(contents, ZOOM_JS)) === "100%", { timeoutMs: 2000 });
+
+  await click(contents, '[data-testid="zoom-in"]');
+  await waitFor(async () => String(await evalIn(contents, ZOOM_JS)) === "125%", { timeoutMs: 2000 });
+  await resizeWindow(win, 1920, 1080);
+  const largeView = /** @type {any} */ (await evalIn(contents, VIEW_JS));
+  add(
+    "1920×1080 房间≥1400×950，放大倍率在 resize 后保留",
+    largeView.room[0] >= 1400 && largeView.room[1] >= 950 && largeView.percent === "125%" && largeView.controlsInsideRoom === true,
+    JSON.stringify(largeView),
+  );
+  await shot(ctx, win, "16-zoom-1920-125");
+  await click(contents, '[data-testid="zoom-fit"]');
+  await waitFor(async () => String(await evalIn(contents, ZOOM_JS)) === "100%", { timeoutMs: 2000 });
+  const largeFit = /** @type {any} */ (await evalIn(contents, VIEW_JS));
+  add("1920×1080 适应后仍是 100% 且控件不遮设置", largeFit.percent === "100%" && largeFit.overlapSettings === false, JSON.stringify(largeFit));
+  await shot(ctx, win, "16-zoom-1920-fit");
+
+  await resizeWindow(win, 900, 600);
+  const smallView = await waitView((view) => {
+    const inRoom = (/** @type {any[]} */ row) => {
+      const cx = row[1] + 85;
+      const cy = row[2] + 76;
+      return cx >= view.room[2] && cx <= view.room[2] + view.room[0] && cy >= view.room[3] && cy <= view.room[3] + view.room[1];
+    };
+    return view.room[0] >= 700 &&
+      view.room[1] >= 480 &&
+      view.controlsInsideRoom === true &&
+      view.overlapSettings === false &&
+      view.labels.every(inRoom);
+  });
+  add(
+    "900×600 最小窗房间≥700×480，控件不溢出、不遮设置；投影标签跟到新视口",
+    smallView.room[0] >= 700 &&
+      smallView.room[1] >= 480 &&
+      smallView.controlsInsideRoom === true &&
+      smallView.overlapSettings === false &&
+      smallView.labels.every((/** @type {any[]} */ row) => {
+        const cx = row[1] + 85;
+        const cy = row[2] + 76;
+        return cx >= smallView.room[2] && cx <= smallView.room[2] + smallView.room[0] && cy >= smallView.room[3] && cy <= smallView.room[3] + smallView.room[1];
+      }),
+    JSON.stringify(smallView),
+  );
+  await shot(ctx, win, "16-zoom-900");
+
+  await resizeWindow(win, 1280, 800);
+  const restoredView = /** @type {any} */ (await evalIn(contents, VIEW_JS));
+  add(
+    "窗口恢复 1280×800 后房间回到基线，缩放仍是 100%",
+    restoredView.room[0] === baseCanvas.roomRectW && restoredView.room[1] === baseCanvas.roomRectH && restoredView.percent === "100%",
+    JSON.stringify({ restored: restoredView.room, baseline: [baseCanvas.roomRectW, baseCanvas.roomRectH] }),
+  );
+
+  // Leave 125% on the table so the company-switch assertion below can prove
+  // the view survives a snapshot switch, then reset when we come back.
+  await click(contents, '[data-testid="zoom-in"]');
+  await waitFor(async () => String(await evalIn(contents, ZOOM_JS)) === "125%", { timeoutMs: 2000 });
 
   // ── 花名册浮层：花名 / 角色 / 在岗 ──────────────────────────────
   await click(contents, '[data-testid="rail-roster"]');
@@ -358,6 +685,8 @@ async function phaseShell(ctx) {
   const snapshotB = /** @type {any} */ (await evalIn(contents, `window.cubicle.invoke('office.get')`));
   const companyIdB = Number((snapshotB?.companies ?? []).find((/** @type {any} */ c) => c.name === OTHER_COMPANY)?.id ?? snapshotB?.activeCompanyId ?? 0);
   add("新建公司并切过去：画布切到 B 的空办公室（0 工位）", bShown && snapshotB?.activeCompanyId === companyIdB, `companyB=${companyIdB}`);
+  const zoomInB = String(await evalIn(contents, ZOOM_JS));
+  add("切公司保留放大倍率（B 仍是 125%）", zoomInB === "125%", `zoom=${zoomInB}`);
   const canvasB = /** @type {any} */ (await evalIn(contents, CANVAS_JS));
   add("切到 B（还没有任何组的画布）也仍 100% 满窗", canvasB.floorW === canvasB.innerW && canvasB.floorH === canvasB.innerH, JSON.stringify(canvasB));
 
@@ -404,6 +733,10 @@ async function phaseShell(ctx) {
     ),
   );
   add("工位 occupant 仍是同一名员工", seatName.includes(EMPLOYEE_NAME), seatName);
+  const zoomBackA = String(await evalIn(contents, ZOOM_JS));
+  add("切回 A 后倍率仍保留（125%），投影跟随新窗口重新计算", zoomBackA === "125%", `zoom=${zoomBackA}`);
+  await click(contents, '[data-testid="zoom-fit"]');
+  await waitFor(async () => String(await evalIn(contents, ZOOM_JS)) === "100%", { timeoutMs: 2000 });
 
   // 工单重开：慢活还在「进行中」→ 跑完自动「待验收」；把手段落实时搬家
   await click(contents, '[data-testid="task-rail"]');

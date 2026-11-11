@@ -4,7 +4,7 @@
 
 - **形态**：Windows 优先的桌面应用（Electron + React + Three.js）
 - **引擎**：不绑定任何 agent 引擎 —— 统一适配层调用本机已装的 pi / codex / claude / dsh / qoder…
-- **状态**：**M0-M7 全部通过（2026-11-11）—— 15 张 v1 研发票全部 done**，含统一设置、引擎无关模型库、pi/codex/dsh 三引擎、Blender/Three.js 3D 办公室（8 工位 + 咖啡机/饮水机）与打包验收。下一步 = 新 wayfinder effort（多员工协作等超出 v1 范围）。
+- **状态**：**M0-M7 全部通过（2026-11-11）—— 16 张 v1 研发票全部 done**，含统一设置、引擎无关模型库、pi/codex/dsh 三引擎、Blender/Three.js 3D 办公室（8 工位 + 咖啡机/饮水机）、视口自适应与缩放/平移巡检，以及打包验收。下一步 = 新 wayfinder effort（多员工协作等超出 v1 范围）。
 
 ## 从这里开始
 
@@ -24,7 +24,7 @@
   issues/                决策票（每张一个决策 + Answer）
   prototypes/            可点原型（throwaway，勿直接进主干）
   research/              调研资产
-.scratch/v1/             v1 研发票（15 张，下一步做什么）
+.scratch/v1/             v1 研发票（16 张，下一步做什么）
 docs/spike-m0.md         M0 探路结论（三关全过）
 docs/office-3d.md        3D 办公室/Blender 导出流程
 spike/                   M0 探路脚本（npm run spike 可重跑）
@@ -44,7 +44,7 @@ GLOSSARY.md              领域术语
 
 ## M1 骨架：票 02 已通过（2026-11-05）
 
-应用能开机：办公室画面 + 4 个空工位来自 SQLite（`node:sqlite`，零原生依赖）；
+应用能开机：办公室画面 + 8 个空工位来自 SQLite（`node:sqlite`，零原生依赖）；
 三层进程就位 —— main（窗口/宿主监管/16ms 合帧）· AgentHost（utilityProcess，DB 单写者）· renderer（React 18 纯视图）。
 验收一条命令：`npm run build:renderer && npm run e2e:02`；票与实现说明见 [.scratch/v1/issues/02-empty-office.md](.scratch/v1/issues/02-empty-office.md)。
 

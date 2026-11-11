@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { deskStyle, projectedDeskStyle } from "./scene/domScene.js";
 import { Office3D } from "./scene/Office3D.jsx";
 import { appearanceFor } from "./roleAppearance.js";
@@ -6,6 +6,13 @@ import { initialDeskActivity } from "./scene/deskActivity.js";
 import { initialMotion } from "./scene/idleMotion.js";
 import { deskSignals, bubbleTextFor } from "./scene/deskReadout.js";
 import { tokenText } from "./scene/tokenReadout.js";
+
+const INITIAL_SCENE_VIEW = {
+  zoom: 1,
+  percent: 100,
+  canZoomIn: true,
+  canZoomOut: false,
+};
 
 /**
  * The main canvas — always the office (hard constraint). Desks are drawn
@@ -33,9 +40,11 @@ import { tokenText } from "./scene/tokenReadout.js";
  */
 export function OfficeFloor({ snapshot, status, bridgeError, onHireAt, onTalkTo, deskStates, viewPrefs }) {
   const ready = status.state === "online" && snapshot;
-  const [projected, setProjected] = useState(/** @type {Record<number, { x: number, y: number }> | null} */ (null));
+  const [projected, setProjected] = useState(/** @type {Record<number, { x: number, y: number, width: number, height: number, hitLeft: number, hitTop: number, clipPath: string }> | null} */ (null));
   const [amenities, setAmenities] = useState(/** @type {Record<string, { x: number, y: number }> | null} */ (null));
   const [scene3dFailed, setScene3dFailed] = useState(false);
+  const [sceneView, setSceneView] = useState(INITIAL_SCENE_VIEW);
+  const sceneApiRef = React.useRef(/** @type {{ zoomIn: () => void, zoomOut: () => void, reset: () => void } | null} */ (null));
 
   return (
     <div className="office-floor" data-testid="office-floor">
@@ -45,7 +54,56 @@ export function OfficeFloor({ snapshot, status, bridgeError, onHireAt, onTalkTo,
         </div>
       ) : null}
 
-      <div className="room" data-testid="room">
+      <div
+        className="room"
+        data-testid="room"
+        data-zoom={sceneView.percent}
+        data-zoomed={sceneView.zoom > 1.0001 ? "true" : "false"}
+      >
+        {ready && !scene3dFailed ? (
+          <div className="zoom-controls" data-testid="zoom-controls" role="group" aria-label="场景缩放">
+            <button
+              type="button"
+              className="zoom-fit"
+              data-testid="zoom-fit"
+              onClick={() => sceneApiRef.current?.reset()}
+              title="适应视图：回到 100% 全景"
+            >
+              适应
+            </button>
+            <div className="zoom-stack">
+              <button
+                type="button"
+                className="zoom-button"
+                data-testid="zoom-in"
+                onClick={() => sceneApiRef.current?.zoomIn()}
+                disabled={!sceneView.canZoomIn}
+                aria-label="放大场景"
+                title="放大场景（也可在房间内滚动滚轮）"
+              >
+                +
+              </button>
+              <span
+                className="zoom-percent"
+                data-testid="zoom-percent"
+                aria-label={`当前场景缩放 ${sceneView.percent}%`}
+              >
+                {sceneView.percent}%
+              </span>
+              <button
+                type="button"
+                className="zoom-button"
+                data-testid="zoom-out"
+                onClick={() => sceneApiRef.current?.zoomOut()}
+                disabled={!sceneView.canZoomOut}
+                aria-label="缩小场景"
+                title="缩小场景"
+              >
+                −
+              </button>
+            </div>
+          </div>
+        ) : null}
         {scene3dFailed ? (
           <img
             className="room-backdrop"
@@ -59,11 +117,16 @@ export function OfficeFloor({ snapshot, status, bridgeError, onHireAt, onTalkTo,
           <Office3D
             desks={snapshot.desks}
             deskStates={deskStates}
+            controlsRef={sceneApiRef}
+            onView={(view) => setSceneView(view)}
             onProject={(positions, nextAmenities) => {
               setProjected(positions);
               setAmenities(nextAmenities);
             }}
-            onError={() => setScene3dFailed(true)}
+            onError={() => {
+              setScene3dFailed(true);
+              setSceneView(INITIAL_SCENE_VIEW);
+            }}
           />
         ) : null}
         <div className="room-vignette" aria-hidden="true" />
@@ -111,7 +174,7 @@ export function OfficeFloor({ snapshot, status, bridgeError, onHireAt, onTalkTo,
  *   deskState: import("./App.jsx").DeskState | null,
  *   tokenSummary: import("./App.jsx").TokenTotalData | null,
  *   viewPrefs: import("./App.jsx").ViewPrefs,
- *   projected: Record<number, { x: number, y: number }> | null,
+ *   projected: Record<number, { x: number, y: number, width: number, height: number, hitLeft: number, hitTop: number, clipPath: string }> | null,
  *   showArt: boolean,
  * }} props
  */
@@ -120,6 +183,14 @@ const DeskCard = React.memo(function DeskCard(/** @type {any} */ props) {
   const occupant = desk.occupant;
   const empty = occupant === null;
   const openDesk = empty ? () => onHireAt(desk) : occupant ? () => onTalkTo(occupant) : undefined;
+  const projection = projected?.[desk.id];
+  const hit = projection && !showArt ? {
+    width: `${Math.max(1, projection.width)}px`,
+    height: `${Math.max(1, projection.height)}px`,
+    left: `calc(50% + ${projection.hitLeft}px)`,
+    top: `calc(50% + ${projection.hitTop}px)`,
+    clipPath: projection.clipPath,
+  } : null;
 
   const activity = deskState?.activity ?? initialDeskActivity();
   // No state entry yet (hired but the fold hasn't seen this employee): a
@@ -168,6 +239,13 @@ const DeskCard = React.memo(function DeskCard(/** @type {any} */ props) {
           {!empty && awayFromDesk ? <CoffeeChairSvg /> : null}
           <ChairBackSvg uid={`desk-${desk.id}`} />
         </>
+      ) : hit ? (
+        <div
+          className="desk-hit"
+          data-testid="desk-hit"
+          aria-hidden="true"
+          style={hit}
+        />
       ) : null}
 
       {/* ── always-on readout layer（关掉名牌/气泡仍在）──────────── */}

@@ -74,7 +74,11 @@ body {
 
 .room {
   position: relative;
-  width: min(82vw, 980px);
+  /* Fill the available office canvas on a big window: use the old 82vw
+     floor for small windows, then let the authored 640:440 frame grow with
+     the viewport height. The left rail and top-right settings control keep
+     their breathing room at the 900×600 minimum. */
+  width: min(max(calc(100vw - 240px), 82vw), calc((100vh - 30px) * 640 / 440));
   aspect-ratio: 640 / 440;
   border: 1px solid rgba(43, 38, 32, 0.18);
   border-radius: 24px;
@@ -83,6 +87,114 @@ body {
     0 2px 0 rgba(255, 255, 255, 0.6) inset;
   background: #c7b393;
   overflow: hidden;
+  touch-action: none;
+  transition: box-shadow 160ms ease;
+}
+
+.room[data-zoomed="true"] {
+  cursor: grab;
+  box-shadow:
+    0 34px 84px rgba(43, 38, 32, 0.22),
+    0 2px 0 rgba(255, 255, 255, 0.6) inset;
+}
+
+.room-panning {
+  cursor: grabbing !important;
+  transition: none;
+}
+
+/* ── scene zoom controls (top-right of the room) ─────────────────── */
+
+.zoom-controls {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 6;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.zoom-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 34px;
+  overflow: hidden;
+  border: 1px solid rgba(92, 73, 49, 0.26);
+  border-radius: 12px;
+  background: rgba(255, 252, 244, 0.9);
+  box-shadow: 0 8px 22px rgba(43, 38, 32, 0.16);
+  backdrop-filter: blur(8px);
+}
+
+.zoom-button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 19px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.zoom-button:first-child {
+  border-bottom: 1px solid rgba(92, 73, 49, 0.14);
+}
+
+.zoom-button:last-child {
+  border-top: 1px solid rgba(92, 73, 49, 0.14);
+}
+
+.zoom-button:hover:not(:disabled) {
+  background: rgba(43, 38, 32, 0.08);
+}
+
+.zoom-button:focus-visible,
+.zoom-fit:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.zoom-button:disabled {
+  color: rgba(43, 38, 32, 0.3);
+  cursor: default;
+}
+
+.zoom-percent {
+  padding: 3px 0 4px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.zoom-fit {
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 1px solid rgba(92, 73, 49, 0.26);
+  border-radius: 999px;
+  background: rgba(255, 252, 244, 0.9);
+  color: var(--ink);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(43, 38, 32, 0.12);
+  backdrop-filter: blur(8px);
+}
+
+.zoom-fit:hover {
+  background: var(--paper-raised);
 }
 
 /* The Blender-rendered room plate: architecture, window light, shelving,
@@ -121,6 +233,16 @@ body {
 }
 
 .desk-layer .desk {
+  pointer-events: auto;
+}
+
+/* Invisible projected hit shell. It is a clipped quad of the desk top, not
+   a bounding box: at 4× a bounding box overlaps the next bay and can make one
+   label open another desk. Text labels stay fixed above it. */
+.desk-hit {
+  position: absolute;
+  border-radius: 10px;
+  background: transparent;
   pointer-events: auto;
 }
 

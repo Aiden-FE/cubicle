@@ -38,7 +38,7 @@ export function deskStyle(desk) {
  * keeps labels usable while the GLB is still loading.
  *
  * @param {{ id: number, x: number, y: number }} desk
- * @param {Record<number, { x: number, y: number }> | null} projected
+ * @param {Record<number, { x: number, y: number, width?: number, height?: number, hitLeft?: number, hitTop?: number, clipPath?: string }> | null} projected
  */
 export function projectedDeskStyle(desk, projected) {
   const point = projected?.[desk.id];

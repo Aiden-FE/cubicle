@@ -210,16 +210,20 @@ function buildAvatar(occupant) {
  * @param {{
  *   desks: import("../App.jsx").DeskData[],
  *   deskStates: Map<number, import("../App.jsx").DeskState>,
- *   onProject: (positions: Record<number, { x: number, y: number }>, amenities: Record<string, { x: number, y: number }>) => void,
+ *   onProject: (positions: Record<number, { x: number, y: number, width: number, height: number, hitLeft: number, hitTop: number, clipPath: string }>, amenities: Record<string, { x: number, y: number }>) => void,
  *   onError?: (message: string) => void,
+ *   controlsRef?: React.MutableRefObject<{ zoomIn: () => void, zoomOut: () => void, reset: () => void } | null>,
+ *   onView?: (view: { zoom: number, percent: number, canZoomIn: boolean, canZoomOut: boolean }) => void,
  * }} props
  */
-export function Office3D({ desks, deskStates, onProject, onError }) {
+export function Office3D({ desks, deskStates, onProject, onError, controlsRef, onView }) {
   const hostRef = React.useRef(/** @type {HTMLDivElement | null} */ (null));
   const projectRef = React.useRef(onProject);
   projectRef.current = onProject;
   const errorRef = React.useRef(onError);
   errorRef.current = onError;
+  const viewRef = React.useRef(onView);
+  viewRef.current = onView;
   const apiRef = React.useRef(/** @type {any} */ (null));
   const desksRef = React.useRef(desks);
   const statesRef = React.useRef(deskStates);
@@ -253,13 +257,32 @@ export function Office3D({ desks, deskStates, onProject, onError }) {
 
     const scene = new THREE.Scene();
     scene.fog = new THREE.Fog(0xe8dfcf, 22, 42);
-    const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 100);
-    const target = new THREE.Vector3(0, 0.75, 2.2);
+    const BASE_FOV = 34;
+    const MIN_ZOOM = 1;
+    const MAX_ZOOM = 4;
+    const ZOOM_STEP = 1.25;
+    const CAMERA_DISTANCE = 17.5;
+    const BASE_TARGET = new THREE.Vector3(0, 0.75, 2.2);
+    // The room shell tops out around x=±4.7 and z=6.2. Keep the camera target
+    // inside the useful furniture band so a fully zoomed view never wanders
+    // into the empty world outside the dollhouse.
+    const TARGET_BOUNDS = {
+      minX: -4.25,
+      maxX: 4.25,
+      minY: 0.25,
+      maxY: 2.5,
+      minZ: 0.75,
+      maxZ: 5.15,
+    };
+    const camera = new THREE.PerspectiveCamera(BASE_FOV, 1, 0.1, 100);
+    const target = BASE_TARGET.clone();
     // rear-right, high oblique: employees are seen from behind and the whole
     // 4×2 floor plan fits without cutting off the coffee/water corners.
     const cameraDirection = new THREE.Vector3(0.38, 0.48, 0.79).normalize();
-    camera.position.copy(target).addScaledVector(cameraDirection, 17.5);
+    const cameraOffset = cameraDirection.clone().multiplyScalar(CAMERA_DISTANCE);
+    camera.position.copy(target).add(cameraOffset);
     camera.lookAt(target);
+    let zoom = MIN_ZOOM;
 
     // Soft studio lighting. The room plate carries most of the colour; these
     // lights give the mesh furniture readable form and contact shadows.
@@ -281,7 +304,7 @@ export function Office3D({ desks, deskStates, onProject, onError }) {
     windowLight.position.set(-3, 3, 0.5);
     scene.add(windowLight);
 
-    /** @type {Record<number, { x: number, y: number }>} */
+    /** @type {Record<number, { x: number, y: number, width: number, height: number, hitLeft: number, hitTop: number, clipPath: string }>} */
     let projected = {};
     /** @type {Map<number, any>} */
     const avatars = new Map();
@@ -304,6 +327,7 @@ export function Office3D({ desks, deskStates, onProject, onError }) {
       const width = hostEl.clientWidth;
       const height = hostEl.clientHeight;
       if (width === 0 || height === 0) return;
+      camera.updateMatrixWorld();
       projected = {};
       const projectPoint = (/** @type {number} */ x, /** @type {number} */ y, /** @type {number} */ z) => {
         const point = new THREE.Vector3(x, y, z);
@@ -313,15 +337,152 @@ export function Office3D({ desks, deskStates, onProject, onError }) {
           y: Math.round((-point.y * 0.5 + 0.5) * height),
         };
       };
+      // The DOM label anchor stays at the desk's front-center. The hit shell is
+      // a clipped quad of the projected desk top: a plain bounding box would
+      // overlap the next desk at 400% and could make one label open another bay.
+      const projectDeskHit = (/** @type {number} */ x, /** @type {number} */ z, /** @type {{ x: number, y: number }} */ anchor) => {
+        const corners = [
+          [x - 0.82, z - 0.48],
+          [x + 0.82, z - 0.48],
+          [x + 0.82, z + 0.48],
+          [x - 0.82, z + 0.48],
+        ].map(([px, pz]) => projectPoint(px, 0.74, pz));
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+        for (const point of corners) {
+          minX = Math.min(minX, point.x);
+          minY = Math.min(minY, point.y);
+          maxX = Math.max(maxX, point.x);
+          maxY = Math.max(maxY, point.y);
+        }
+        const width = Math.max(1, maxX - minX);
+        const height = Math.max(1, maxY - minY);
+        const clipPath = `polygon(${corners
+          .map((point) => `${(((point.x - minX) / width) * 100).toFixed(1)}% ${(((point.y - minY) / height) * 100).toFixed(1)}%`)
+          .join(", ")})`;
+        return {
+          width: Math.round(width),
+          height: Math.round(height),
+          hitLeft: Math.round(minX - anchor.x),
+          hitTop: Math.round(minY - anchor.y),
+          clipPath,
+        };
+      };
       desksRef.current.forEach((/** @type {any} */ desk, /** @type {number} */ index) => {
         const layout = DESK_LAYOUT[index];
         if (!layout) return;
-        projected[desk.id] = projectPoint(layout.x, 0.94, layout.z + 0.30);
+        const anchor = projectPoint(layout.x, 0.94, layout.z + 0.30);
+        const hit = projectDeskHit(layout.x, layout.z, anchor);
+        projected[desk.id] = { ...anchor, ...hit };
       });
       projectRef.current(projected, {
         coffee: projectPoint(-4.22, 1.25, 5.0),
         water: projectPoint(-4.30, 1.72, 2.14),
       });
+    }
+
+    /** @param {number} value @param {number} min @param {number} max */
+    function clamp(value, min, max) {
+      return Math.min(max, Math.max(min, value));
+    }
+
+    function clampTarget() {
+      target.x = clamp(target.x, TARGET_BOUNDS.minX, TARGET_BOUNDS.maxX);
+      target.y = clamp(target.y, TARGET_BOUNDS.minY, TARGET_BOUNDS.maxY);
+      target.z = clamp(target.z, TARGET_BOUNDS.minZ, TARGET_BOUNDS.maxZ);
+    }
+
+    function updateCamera() {
+      camera.fov = BASE_FOV / zoom;
+      camera.updateProjectionMatrix();
+      camera.position.copy(target).add(cameraOffset);
+      camera.lookAt(target);
+      camera.updateMatrixWorld();
+    }
+
+    function renderView() {
+      updateCamera();
+      projectDesks();
+      renderer.render(scene, camera);
+    }
+
+    function notifyView() {
+      const percent = Math.round(zoom * 100);
+      viewRef.current?.({
+        zoom,
+        percent,
+        canZoomIn: zoom < MAX_ZOOM - 0.0001,
+        canZoomOut: zoom > MIN_ZOOM + 0.0001,
+      });
+    }
+
+    /**
+     * Zoom around a screen point. The anchor is projected onto the plane
+     * through the current target; the target then shifts just enough to keep
+     * that point under the cursor after the FOV changes. Clamping the target
+     * inside the room makes the edge of the dollhouse a hard stop.
+     * @param {number} nextZoom
+     * @param {number} [clientX]
+     * @param {number} [clientY]
+     */
+    function zoomAt(nextZoom, clientX, clientY) {
+      const clamped = clamp(nextZoom, MIN_ZOOM, MAX_ZOOM);
+      if (Math.abs(clamped - zoom) < 0.0005) return;
+      const previousZoom = zoom;
+      if (typeof clientX === "number" && typeof clientY === "number") {
+        const rect = hostEl.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          camera.updateMatrixWorld();
+          const halfHeight = CAMERA_DISTANCE * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+          const halfWidth = halfHeight * camera.aspect;
+          const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
+          const ndcY = -(((clientY - rect.top) / rect.height) * 2 - 1);
+          const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+          const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+          const offset = right.multiplyScalar(ndcX * halfWidth).addScaledVector(up, ndcY * halfHeight);
+          // Screen offset is proportional to world offset / visible width.
+          // Shrink the old offset by the zoom ratio so the cursor point stays put.
+          const ratio = clamped / previousZoom;
+          target.addScaledVector(offset, 1 - 1 / ratio);
+          clampTarget();
+        }
+      }
+      zoom = clamped;
+      renderView();
+      notifyView();
+    }
+
+    /** @param {number} dx @param {number} dy */
+    function panBy(dx, dy) {
+      if (zoom <= MIN_ZOOM + 0.0001) return false;
+      const viewportHeight = hostEl.clientHeight;
+      if (viewportHeight === 0) return false;
+      camera.updateMatrixWorld();
+      const worldPerPixel = (2 * CAMERA_DISTANCE * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) / viewportHeight;
+      const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+      const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+      target.addScaledVector(right, -dx * worldPerPixel);
+      target.addScaledVector(up, dy * worldPerPixel);
+      clampTarget();
+      renderView();
+      return true;
+    }
+
+    function zoomIn() {
+      zoomAt(zoom * ZOOM_STEP);
+    }
+
+    function zoomOut() {
+      zoomAt(zoom / ZOOM_STEP);
+    }
+
+    function resetView() {
+      zoom = MIN_ZOOM;
+      target.copy(BASE_TARGET);
+      renderView();
+      notifyView();
     }
 
     /** @param {import("../App.jsx").DeskData} desk @param {any} state @param {number} index */
@@ -386,6 +547,10 @@ export function Office3D({ desks, deskStates, onProject, onError }) {
       renderer.render(scene, camera);
     }
 
+    apiRef.current = { sync, project: projectDesks };
+    if (controlsRef) controlsRef.current = { zoomIn, zoomOut, reset: resetView };
+    notifyView();
+
     const loader = new GLTFLoader();
     loader.load(
       "./office/office.glb",
@@ -425,10 +590,6 @@ export function Office3D({ desks, deskStates, onProject, onError }) {
           skyMesh.position.set(-2.45, 2.62, 0.072);
           scene.add(skyMesh);
         }
-        apiRef.current = {
-          sync,
-          project: projectDesks,
-        };
         sync(desksRef.current, statesRef.current);
         projectDesks();
         renderer.render(scene, camera);
@@ -452,7 +613,108 @@ export function Office3D({ desks, deskStates, onProject, onError }) {
     };
     resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(hostEl);
+    // A window resize does not always fire the element ResizeObserver before
+    // the next React probe (observed on this Windows/Electron build). Belt and
+    // braces: reproject from the window event too, coalesced to one frame.
+    let resizeRaf = 0;
+    const onWindowResize = () => {
+      cancelAnimationFrame(resizeRaf);
+      resizeRaf = requestAnimationFrame(resize);
+    };
+    window.addEventListener("resize", onWindowResize);
     resize();
+
+    const room = hostEl.parentElement;
+    /** @type {{ id: number, startX: number, startY: number, lastX: number, lastY: number, moved: boolean } | null} */
+    let activePointer = null;
+    let suppressClickUntil = 0;
+
+    /** @param {EventTarget | null} target */
+    function isZoomControl(target) {
+      return target instanceof Element && target.closest(".zoom-controls") !== null;
+    }
+
+    /** @param {WheelEvent} event */
+    function onWheel(event) {
+      if (event.deltaY === 0 || isZoomControl(event.target)) return;
+      const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? hostEl.clientHeight : 1);
+      const bounded = Math.max(-480, Math.min(480, delta));
+      event.preventDefault();
+      zoomAt(zoom * Math.exp(-bounded * 0.0012), event.clientX, event.clientY);
+    }
+
+    /** @param {PointerEvent} event */
+    function onPointerDown(event) {
+      if (event.button !== 0 || zoom <= MIN_ZOOM + 0.0001 || isZoomControl(event.target)) return;
+      activePointer = {
+        id: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        lastX: event.clientX,
+        lastY: event.clientY,
+        moved: false,
+      };
+    }
+
+    /** @param {PointerEvent} event */
+    function onPointerMove(event) {
+      if (!activePointer || event.pointerId !== activePointer.id) return;
+      const totalDx = event.clientX - activePointer.startX;
+      const totalDy = event.clientY - activePointer.startY;
+      if (!activePointer.moved) {
+        if (Math.hypot(totalDx, totalDy) < 5) return;
+        activePointer.moved = true;
+        room?.classList.add("room-panning");
+        try {
+          room?.setPointerCapture(event.pointerId);
+        } catch {
+          // Synthetic pointers (and some pen/touch stacks) may not own an
+          // active pointer; the window-level listeners below still finish it.
+        }
+      }
+      event.preventDefault();
+      const dx = event.clientX - activePointer.lastX;
+      const dy = event.clientY - activePointer.lastY;
+      activePointer.lastX = event.clientX;
+      activePointer.lastY = event.clientY;
+      panBy(dx, dy);
+    }
+
+    /** @param {PointerEvent} event */
+    function finishPointer(event) {
+      if (!activePointer || event.pointerId !== activePointer.id) return;
+      if (activePointer.moved) suppressClickUntil = performance.now() + 200;
+      activePointer = null;
+      room?.classList.remove("room-panning");
+      try {
+        room?.releasePointerCapture(event.pointerId);
+      } catch {
+        // already released or synthetic pointer
+      }
+    }
+
+    /** @param {MouseEvent} event */
+    function onClickCapture(event) {
+      if (performance.now() >= suppressClickUntil) return;
+      suppressClickUntil = 0;
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
+    /** @param {MouseEvent} event */
+    function onDoubleClick(event) {
+      if (isZoomControl(event.target)) return;
+      if (event.target instanceof Element && event.target.closest(".desk")) return;
+      resetView();
+    }
+
+    room?.addEventListener("wheel", onWheel, { passive: false });
+    room?.addEventListener("pointerdown", onPointerDown);
+    room?.addEventListener("click", onClickCapture, true);
+    room?.addEventListener("dblclick", onDoubleClick);
+    window.addEventListener("pointermove", onPointerMove, { capture: true, passive: false });
+    window.addEventListener("pointerup", finishPointer, true);
+    window.addEventListener("pointercancel", finishPointer, true);
 
     const animate = () => {
       raf = requestAnimationFrame(animate);
@@ -472,12 +734,22 @@ export function Office3D({ desks, deskStates, onProject, onError }) {
     return () => {
       disposed = true;
       cancelAnimationFrame(raf);
+      cancelAnimationFrame(resizeRaf);
       resizeObserver?.disconnect();
+      window.removeEventListener("resize", onWindowResize);
+      room?.removeEventListener("wheel", onWheel);
+      room?.removeEventListener("pointerdown", onPointerDown);
+      room?.removeEventListener("click", onClickCapture, true);
+      room?.removeEventListener("dblclick", onDoubleClick);
+      window.removeEventListener("pointermove", onPointerMove, true);
+      window.removeEventListener("pointerup", finishPointer, true);
+      window.removeEventListener("pointercancel", finishPointer, true);
       for (const avatar of avatars.values()) scene.remove(avatar.group);
       scene.clear();
       renderer.dispose();
       renderer.domElement.remove();
       apiRef.current = null;
+      if (controlsRef) controlsRef.current = null;
     };
   }, []);
 
