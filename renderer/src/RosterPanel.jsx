@@ -10,11 +10,12 @@ const DOMAIN_TOPIC = "domain.changed";
  * @param {{
  *   snapshot: import("./App.jsx").OfficeSnapshotData | null,
  *   onClose: () => void,
+ *   onEditEmployee?: (employee: import("./App.jsx").RosterEmployeeData) => void,
  * }} props
  */
-export function RosterPanel({ snapshot, onClose }) {
+export function RosterPanel({ snapshot, onClose, onEditEmployee }) {
   const companyId = snapshot?.activeCompanyId ?? null;
-  const [employees, setEmployees] = useState(/** @type {{ id: number, name: string, roleName: string, deskLabel: string, groupName: string }[]} */ ([]));
+  const [employees, setEmployees] = useState(/** @type {import("./App.jsx").RosterEmployeeData[]} */ ([]));
   const [error, setError] = useState(false);
   const dialogRef = useDialog(onClose);
 
@@ -61,6 +62,16 @@ export function RosterPanel({ snapshot, onClose }) {
             <span className="roster-name" data-testid="roster-name">{employee.name}</span>
             <span className="roster-role">{employee.roleName}</span>
             <span className="roster-seat">在岗 · {employee.deskLabel} · {employee.groupName}</span>
+            {onEditEmployee ? (
+              <button
+                type="button"
+                className="task-mini-button roster-edit"
+                data-testid="roster-edit"
+                onClick={() => onEditEmployee(employee)}
+              >
+                编辑
+              </button>
+            ) : null}
           </div>
         ))}
       </div>

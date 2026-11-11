@@ -27,6 +27,7 @@ import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 
 import { appError } from "../../../shared/apperror.mjs";
+import { readModelLibrary, resolveModelForManifest } from "../../models/library.mjs";
 import { decideToolAccess } from "../policy.mjs";
 import { normalizePiEvent } from "./normalize.mjs";
 
@@ -120,24 +121,26 @@ export function createPiAdapter({ dataDir, moduleImporter }) {
 
     const engineRoot = path.join(dataDir, "engines", "pi");
     const modelsPath = path.join(engineRoot, "models.json");
+    const library = readModelLibrary(dataDir);
+    const resolved = resolveModelForManifest(library, "pi", manifest);
     if (!existsSync(modelsPath)) {
       throw appError(
         "engine_not_configured",
-        "引擎中心尚未配置模型：请把 models.json 放进 engines/pi/（BYOK，应用不会读取 ~/.pi）",
+        "pi 的派生模型配置还没生成：去「设置 → 模型」保存一次模型。",
       );
     }
     const authPath = path.join(engineRoot, "auth.json");
 
     const pi = await loadPi();
 
-    // Created per open so a BYOK config edit lands on the next conversation.
+    // Created per open so a model-library edit lands on the next conversation.
     const modelRuntime = await pi.ModelRuntime.create({
       modelsPath,
       authPath,
       allowModelNetwork: false,
       refreshOnCreate: false,
     });
-    const model = pickModel(modelRuntime, String(manifest.model ?? "default"));
+    const model = pickModel(modelRuntime, resolved.ref);
 
     // Resume story (decision 14 lifecycle): re-open the stored session file;
     // otherwise continue the newest one in the employee's private dir; a
@@ -171,6 +174,7 @@ export function createPiAdapter({ dataDir, moduleImporter }) {
       sessionManager,
       resourceLoader,
       ...(tools && tools.length > 0 ? { tools } : {}),
+      ...(resolved.reasoningEffort ? { thinkingLevel: /** @type {any} */ (resolved.reasoningEffort) } : {}),
     });
     const agentSession = created.session;
 

@@ -89,7 +89,9 @@ async function bootAndShowOffice(ctx) {
 }
 
 const DESK_COUNT_JS = `document.querySelectorAll('[data-testid="desk"]').length`;
-const BADGE_ONLINE_JS = `document.querySelector('[data-testid="host-status"]')?.dataset.online`;
+// Ticket 14 moved the visible host-status chip into Settings; this invisible
+// shell seam keeps the liveness check meaningful.
+const BADGE_ONLINE_JS = `document.querySelector('[data-testid="app-shell"]')?.dataset.online`;
 const GROUP_NAME_JS = `document.querySelector('[data-testid="group-name"]')?.textContent`;
 
 /**

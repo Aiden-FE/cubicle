@@ -27,7 +27,8 @@
     "e2e:10": "node scripts/e2e-10.mjs",
     "e2e:11": "node scripts/e2e-11.mjs",
     "e2e:12": "node scripts/e2e-12.mjs",
-    "e2e:13": "node scripts/e2e-13.mjs"
+    "e2e:13": "node scripts/e2e-13.mjs",
+    "e2e:14": "node scripts/e2e-14.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "1.5.0",

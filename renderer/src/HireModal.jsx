@@ -3,6 +3,34 @@ import { appearanceFor } from "./roleAppearance.js";
 import { useDialog } from "./useDialog.js";
 
 /**
+ * @param {any} library
+ * @param {string} engine
+ * @returns {string[]}
+ */
+function engineProtocols(library, engine) {
+  return /** @type {any[]} */ (library?.engines ?? []).find((entry) => entry.engine === engine)?.protocols ?? [];
+}
+
+/**
+ * Flat compatible model choices for one engine.
+ * @param {any} library
+ * @param {string} engine
+ * @returns {{ ref: string, label: string, model: any }[]}
+ */
+function compatibleModels(library, engine) {
+  const protocols = engineProtocols(library, engine);
+  /** @type {{ ref: string, label: string, model: any }[]} */
+  const result = [];
+  for (const provider of library?.providers ?? []) {
+    if (!protocols.includes(provider.protocol)) continue;
+    for (const model of provider.models ?? []) {
+      result.push({ ref: `${provider.key}/${model.id}`, label: `${model.displayName} · ${provider.displayName}`, model });
+    }
+  }
+  return result;
+}
+
+/**
  * Three-step hiring wizard, opened by clicking an empty desk (decision 10:
  * hiring is a mid-screen modal — the office canvas stays the main stage).
  *
@@ -23,22 +51,60 @@ export function HireModal({ desk, onClose }) {
   const [step, setStep] = useState(1);
   const [roles, setRoles] = useState(/** @type {import("./App.jsx").RoleData[] | null} */ (null));
   const [roleId, setRoleId] = useState(/** @type {number | null} */ (null));
+  const [engines, setEngines] = useState(/** @type {any[]} */ ([]));
+  const [library, setLibrary] = useState(/** @type {any} */ (null));
+  const [engine, setEngine] = useState("pi");
+  const [modelRef, setModelRef] = useState("");
+  const [reasoning, setReasoning] = useState("");
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(/** @type {string | null} */ (null));
   const dialogRef = useDialog(onClose);
 
   const role = roles?.find((r) => r.id === roleId) ?? null;
+  const models = compatibleModels(library, engine);
+  const selectedModel = models.find((entry) => entry.ref === modelRef) ?? models[0] ?? null;
+  const reasoningOptions = selectedModel?.model.reasoning
+    ? Object.keys(selectedModel.model.reasoningLevels ?? {})
+    : [];
+  const engineInfo = engines.find((entry) => entry.engine === engine);
+  const engineBlocked = !engineInfo?.enabled;
+  const noModel = models.length === 0;
+
+  // Picking a role picks its engine; the first compatible model follows.
+  useEffect(() => {
+    if (!role) return;
+    setEngine(String(role.manifest.engine ?? "pi"));
+    setModelRef("");
+    setReasoning("");
+  }, [role]);
+
+  useEffect(() => {
+    if (!selectedModel) return;
+    if (modelRef !== selectedModel.ref) setModelRef(selectedModel.ref);
+    if (selectedModel.model.reasoning) {
+      const levels = Object.keys(selectedModel.model.reasoningLevels ?? {});
+      if (!levels.includes(reasoning)) setReasoning(levels.find((level) => level !== "off") ?? "off");
+    } else if (reasoning) {
+      setReasoning("");
+    }
+  }, [selectedModel, modelRef, reasoning]);
 
   useEffect(() => {
     let alive = true;
-    window.cubicle
-      .invoke("role.list")
-      .then((data) => {
-        if (alive) setRoles(/** @type {any} */ (data).roles);
+    Promise.all([
+      window.cubicle.invoke("role.list"),
+      window.cubicle.invoke("engine.list"),
+      window.cubicle.invoke("model.library"),
+    ])
+      .then(([roleList, engineList, modelLibrary]) => {
+        if (!alive) return;
+        setRoles(/** @type {any} */ (roleList).roles);
+        setEngines(/** @type {any} */ (engineList).engines);
+        setLibrary(modelLibrary);
       })
       .catch((err) => {
-        if (alive) setError(/** @type {Error} */ (err).message ?? String(err));
+        if (alive) setError(/** @type {any} */ (err).message ?? String(err));
       });
     return () => {
       alive = false;
@@ -51,7 +117,18 @@ export function HireModal({ desk, onClose }) {
     setBusy(true);
     setError(null);
     try {
-      await window.cubicle.invoke("employee.hire", { deskId: desk.id, roleId: role.id, name });
+      const [provider, ...rest] = (selectedModel?.ref ?? "").split("/");
+      const model = rest.join("/");
+      if (!provider || !model) throw new Error("这个引擎没有兼容模型，先去设置 → 模型添加。");
+      await window.cubicle.invoke("employee.hire", {
+        deskId: desk.id,
+        roleId: role.id,
+        name,
+        engine,
+        provider,
+        model,
+        reasoningEffort: reasoning || null,
+      });
       onClose();
     } catch (err) {
       setError(/** @type {Error} */ (err).message ?? String(err));
@@ -142,7 +219,7 @@ export function HireModal({ desk, onClose }) {
             </div>
             <div className="cap-row" data-testid="cap-engine">
               <span className="cap-label">引擎</span>
-              <Chips items={[`${role.manifest.engine} · ${role.manifest.model}`]} />
+              <Chips items={[`${engine} · ${selectedModel?.label ?? "未选模型"}`]} />
             </div>
             <div className="cap-row" data-testid="cap-cost">
               <span className="cap-label">成本</span>
@@ -162,7 +239,7 @@ export function HireModal({ desk, onClose }) {
               <RoleGlyph roleKey={role.key} />
               <div>
                 <div className="hire-role-name">{role.name}</div>
-                <div className="hire-role-tagline">{desk.label} · 引擎 {role.manifest.engine}</div>
+                <div className="hire-role-tagline">{desk.label} · 引擎 {engine}</div>
               </div>
             </div>
             <label className="hire-name-label" htmlFor="hire-name">
@@ -176,6 +253,67 @@ export function HireModal({ desk, onClose }) {
                 disabled={busy}
               />
             </label>
+            <div className="settings-form-row">
+              <label className="settings-field">
+                引擎
+                <select
+                  data-testid="hire-engine"
+                  value={engine}
+                  disabled={busy}
+                  onChange={(event) => {
+                    setEngine(event.target.value);
+                    setModelRef("");
+                    setReasoning("");
+                  }}
+                >
+                  {engines.map((entry) => (
+                    <option key={entry.engine} value={entry.engine} disabled={entry.enabled !== true}>
+                      {entry.engine}
+                      {entry.enabled !== true ? "（未准入）" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="settings-field">
+                模型
+                <select
+                  data-testid="hire-model"
+                  value={selectedModel?.ref ?? ""}
+                  disabled={busy || noModel}
+                  onChange={(event) => setModelRef(event.target.value)}
+                >
+                  {models.length === 0 ? <option value="">没有兼容模型</option> : null}
+                  {models.map((entry) => (
+                    <option key={entry.ref} value={entry.ref}>{entry.label}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {reasoningOptions.length > 0 ? (
+              <label className="settings-field">
+                推理档位
+                <select
+                  data-testid="hire-reasoning"
+                  value={reasoning}
+                  disabled={busy}
+                  onChange={(event) => setReasoning(event.target.value)}
+                >
+                  {reasoningOptions.map((level) => (
+                    <option key={level} value={level}>{level}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            {engineBlocked ? (
+              <div className="hire-hint" data-testid="hire-engine-blocked">
+                这个引擎还没准入：先去「设置 → 引擎中心」跑探针或带风险启用。
+              </div>
+            ) : null}
+            {noModel ? (
+              <div className="hire-hint" data-testid="hire-model-missing">
+                这个引擎没有兼容模型：先去「设置 → 模型」添加供应商和模型。
+              </div>
+            ) : null}
             <div className="hire-hint">留空则用角色名。确认即刻录用并入座。</div>
           </div>
         ) : null}
@@ -201,7 +339,13 @@ export function HireModal({ desk, onClose }) {
               下一步
             </button>
           ) : (
-            <button type="button" className="hire-primary" data-testid="hire-confirm" disabled={busy || !role} onClick={() => void confirmHire()}>
+            <button
+              type="button"
+              className="hire-primary"
+              data-testid="hire-confirm"
+              disabled={busy || !role || engineBlocked || noModel}
+              onClick={() => void confirmHire()}
+            >
               {busy ? "录用中…" : "确认录用"}
             </button>
           )}

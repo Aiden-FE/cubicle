@@ -5,11 +5,10 @@ import { ChatOverlay } from "./ChatOverlay.jsx";
 import { TaskBench } from "./TaskBench.jsx";
 import { LeftRail } from "./LeftRail.jsx";
 import { RosterPanel } from "./RosterPanel.jsx";
-import { EngineCenterPanel } from "./EngineCenterPanel.jsx";
 import { WorkClockPanel } from "./WorkClockPanel.jsx";
-import { AboutPanel } from "./AboutPanel.jsx";
 import { TaskHandle } from "./TaskHandle.jsx";
-import { StatusChip } from "./StatusChip.jsx";
+import { SettingsModal } from "./SettingsModal.jsx";
+import { EmployeeEditModal } from "./EmployeeEditModal.jsx";
 import { initialDeskActivity, reduceDeskActivity, expireDeskBlocked } from "./scene/deskActivity.js";
 import { initialMotion, advanceMotion, motionOnWork, motionOnRelease } from "./scene/idleMotion.js";
 import { activeCountFor } from "./scene/handleGroups.js";
@@ -39,9 +38,9 @@ export function App() {
   const [benchOpen, setBenchOpen] = useState(false);
   const [handleOpen, setHandleOpen] = useState(false);
   const [rosterOpen, setRosterOpen] = useState(false);
-  const [engineOpen, setEngineOpen] = useState(false);
   const [dutyOpen, setDutyOpen] = useState(false);
-  const [aboutOpen, setAboutOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [editEmployee, setEditEmployee] = useState(/** @type {RosterEmployeeData | null} */ (null));
   const [benchTaskId, setBenchTaskId] = useState(/** @type {number | null} */ (null));
   const lastHostState = useRef(/** @type {string | null} */ (null));
 
@@ -54,9 +53,7 @@ export function App() {
   const closeLeftOverlays = useCallback(() => {
     setBenchOpen(false);
     setRosterOpen(false);
-    setEngineOpen(false);
     setDutyOpen(false);
-    setAboutOpen(false);
     setBenchTaskId(null);
   }, []);
 
@@ -64,6 +61,8 @@ export function App() {
     closeLeftOverlays();
     setHandleOpen(false);
     setChatEmployee(null);
+    setEditEmployee(null);
+    setSettingsOpen(false);
   }, [closeLeftOverlays]);
 
   const openBench = useCallback((/** @type {number | null} */ taskId = null) => {
@@ -85,23 +84,18 @@ export function App() {
     setRosterOpen(next);
   }, [rosterOpen, closeLeftOverlays]);
 
-  const toggleEngine = useCallback(() => {
-    const next = !engineOpen;
-    closeLeftOverlays();
-    setEngineOpen(next);
-  }, [engineOpen, closeLeftOverlays]);
-
   const toggleDuty = useCallback(() => {
     const next = !dutyOpen;
     closeLeftOverlays();
     setDutyOpen(next);
   }, [dutyOpen, closeLeftOverlays]);
 
-  const toggleAbout = useCallback(() => {
-    const next = !aboutOpen;
-    closeLeftOverlays();
-    setAboutOpen(next);
-  }, [aboutOpen, closeLeftOverlays]);
+  /** Settings is the global modal: it clears every other overlay (Q20 A). */
+  const openSettings = useCallback(() => {
+    closeAllOverlays();
+    setHireDesk(null);
+    setSettingsOpen(true);
+  }, [closeAllOverlays]);
 
   const toggleHandle = useCallback(() => {
     setHandleOpen((open) => !open);
@@ -252,7 +246,12 @@ export function App() {
   );
 
   return (
-    <div className="office-app">
+    <div
+      className="office-app"
+      data-testid="app-shell"
+      data-online={status.state === "online" ? "true" : "false"}
+      data-host-state={status.state ?? "unknown"}
+    >
       <OfficeFloor
         snapshot={snapshot}
         status={status}
@@ -262,29 +261,19 @@ export function App() {
         deskStates={deskStates}
         viewPrefs={viewPrefs}
       />
-      <StatusChip status={status} />
-      <div className="view-toggles" data-testid="view-toggles">
-        <label className="view-toggle">
-          <input
-            type="checkbox"
-            data-testid="toggle-plate"
-            checked={viewPrefs.plate}
-            onChange={(event) => setViewPref("plate", event.target.checked)}
-          />
-          名牌
-        </label>
-        <label className="view-toggle">
-          <input
-            type="checkbox"
-            data-testid="toggle-bubble"
-            checked={viewPrefs.bubble}
-            onChange={(event) => setViewPref("bubble", event.target.checked)}
-          />
-          气泡
-        </label>
-      </div>
-      {/* 左轨四入口（票 08）：公司切换（Switcher 收进来）/ 工单台 / 花名册 /
-          引擎中心。工单创建与列表只在浮层，主画布永远是办公室（硬约束）。 */}
+      {/* 全局设置入口：右上角齿轮，替换旧的状态点；所有全局配置收进模态。 */}
+      <button
+        type="button"
+        className="settings-gear"
+        data-testid="settings-open"
+        aria-expanded={settingsOpen ? "true" : "false"}
+        aria-label="打开设置"
+        onClick={openSettings}
+      >
+        ⚙ 设置
+      </button>
+      {/* 左轨四入口：公司切换 / 工单台 / 花名册 / 上下班。工单创建与列表只在
+          浮层，主画布永远是办公室（硬约束）。 */}
       <LeftRail
         snapshot={snapshot}
         onChanged={() => void refresh()}
@@ -292,19 +281,20 @@ export function App() {
         onToggleBench={toggleBench}
         rosterOpen={rosterOpen}
         onToggleRoster={toggleRoster}
-        engineOpen={engineOpen}
-        onToggleEngine={toggleEngine}
         dutyOpen={dutyOpen}
         onToggleDuty={toggleDuty}
-        aboutOpen={aboutOpen}
-        onToggleAbout={toggleAbout}
       />
       {benchOpen ? <TaskBench snapshot={snapshot} initialTaskId={benchTaskId} onClose={() => { setBenchOpen(false); setBenchTaskId(null); }} /> : null}
-      {rosterOpen ? <RosterPanel snapshot={snapshot} onClose={() => setRosterOpen(false)} /> : null}
-      {engineOpen ? <EngineCenterPanel onClose={() => setEngineOpen(false)} /> : null}
+      {rosterOpen ? (
+        <RosterPanel
+          snapshot={snapshot}
+          onClose={() => setRosterOpen(false)}
+          onEditEmployee={(employee) => {
+            setEditEmployee(employee);
+          }}
+        />
+      ) : null}
       {dutyOpen ? <WorkClockPanel snapshot={snapshot} onClose={() => setDutyOpen(false)} /> : null}
-      {/* 票 13: 关于页（版本号来自安装包 metadata，经 main 对表 package.json）。 */}
-      {aboutOpen ? <AboutPanel onClose={() => setAboutOpen(false)} /> : null}
       {/* 右缘任务把手：徽标 = 活跃工单数（进行中+待验收），拉开三段
           进行中 / 待验收 / 档案（done+failed）。 */}
       <button
@@ -322,6 +312,24 @@ export function App() {
       {handleOpen ? <TaskHandle snapshot={snapshot} onClose={() => setHandleOpen(false)} onOpenTask={openTaskFromHandle} /> : null}
       {hireDesk ? <HireModal desk={hireDesk} onClose={() => setHireDesk(null)} /> : null}
       {chatEmployee ? <ChatOverlay employee={chatEmployee} onClose={() => setChatEmployee(null)} /> : null}
+      {settingsOpen ? (
+        <SettingsModal
+          viewPrefs={viewPrefs}
+          setViewPref={setViewPref}
+          status={status}
+          onClose={() => setSettingsOpen(false)}
+        />
+      ) : null}
+      {editEmployee ? (
+        <EmployeeEditModal
+          employee={editEmployee}
+          onClose={() => setEditEmployee(null)}
+          onSaved={() => {
+            setEditEmployee(null);
+            void refresh();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -368,6 +376,14 @@ function saveViewPrefs(prefs) {
  * @property {boolean} plate 名牌
  * @property {boolean} bubble 气泡
  *
+ * @typedef {object} RosterEmployeeData
+ * @property {number} id
+ * @property {string} name
+ * @property {string} roleName
+ * @property {RoleSnapshotData} roleSnapshot
+ * @property {string} deskLabel
+ * @property {string} groupName
+ *
  * @typedef {{ employeeId: number, event: { type: string, [key: string]: unknown } }} RunEventData
  *
  * @typedef {object} RoleManifestData
@@ -377,6 +393,8 @@ function saveViewPrefs(prefs) {
  * @property {string[]} mcpServers
  * @property {string} engine
  * @property {string} model
+ * @property {string} [provider] ticket 14: model-library provider key
+ * @property {string} [reasoningEffort] ticket 14: selected reasoning level
  * @property {{ tokenBudgetPerTask: number }} cost
  *
  * @typedef {object} RoleData

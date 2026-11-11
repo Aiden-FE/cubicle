@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 
 import { readJson, printChecks } from "./e2e-harness.mjs";
 import { startMockModelServer08 } from "./e2e-08-mock-server.mjs";
+import { seedModelLibrary } from "./e2e-models.mjs";
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -94,6 +95,8 @@ await writeFile(
   )}\n`,
   "utf8",
 );
+
+await seedModelLibrary(dataDir, { baseUrl: mock.baseUrl, protocol: "openai-completions" });
 
 const started = Date.now();
 

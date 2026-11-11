@@ -86,21 +86,32 @@ async function openTaskDetail(contents, taskId) {
   );
 }
 
-/** @param {string} dataDir @returns {(healthy: boolean) => void} switch the BYOK provider key between healthy/broken */
+/** @param {string} dataDir @returns {(healthy: boolean) => void} switch the model library between healthy/broken */
 function modelsJsonToggle(dataDir) {
-  const file = path.join(dataDir, "engines", "pi", "models.json");
+  const file = path.join(dataDir, "settings", "models.json");
   /** @param {boolean} healthy */
   return (healthy) => {
-    const config = JSON.parse(readFileSync(file, "utf8"));
-    const providers = { ...config.providers };
+    const library = JSON.parse(readFileSync(file, "utf8"));
+    const provider = library.providers.find((/** @type {any} */ entry) => entry.key === "cubicle");
+    if (!provider) return;
     if (healthy) {
-      providers.cubicle = providers.cubicle_broken;
-      delete providers.cubicle_broken;
+      provider.models = provider.models.length > 0 ? provider.models : [{
+        id: "cubicle-e2e-model",
+        displayName: "E2E Model",
+        contextWindow: 1000000,
+        maxTokens: 128000,
+        input: ["text", "image"],
+        reasoning: false,
+        reasoningLevels: null,
+      }];
+      library.defaultProvider = "cubicle";
+      library.defaultModel = provider.models[0].id;
     } else {
-      providers.cubicle_broken = providers.cubicle;
-      delete providers.cubicle;
+      provider.models = [];
+      library.defaultProvider = null;
+      library.defaultModel = null;
     }
-    writeFileSync(file, `${JSON.stringify({ ...config, providers }, null, 2)}\n`, "utf8");
+    writeFileSync(file, `${JSON.stringify(library, null, 2)}\n`, "utf8");
   };
 }
 

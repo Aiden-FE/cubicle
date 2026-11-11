@@ -79,9 +79,10 @@ async function phaseBoot(ctx, add) {
   const expected = process.env.CUBICLE_EXPECTED_VERSION ?? null;
   add("安装包 metadata == 打包时的 package.json（编排器包外独立对表）", expected !== null && appVersion === expected, `expected=${expected} app.getVersion=${appVersion}`);
 
-  await click(contents, '[data-testid="rail-about"]');
+  await click(contents, '[data-testid="settings-open"]');
+  await click(contents, '[data-testid="settings-tab-about"]');
   const panelUp = await waitFor(async () => (await evalIn(contents, `document.querySelector('[data-testid="about-panel"]') !== null`)), { timeoutMs: 4000 });
-  add("关于页浮层打开（左轨入口，画布不动）", panelUp);
+  add("关于页在设置里打开（画布不动）", panelUp);
   if (panelUp) {
     const shown = String(await evalIn(contents, `document.querySelector('[data-testid="about-version"]')?.textContent ?? ""`));
     add("关于页显示的版本号 = 安装包版本", shown === appVersion && shown === expected, `DOM=${shown} expected=${expected}`);

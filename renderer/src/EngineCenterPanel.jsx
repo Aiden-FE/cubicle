@@ -22,15 +22,15 @@ const BADGE_LABELS = /** @type {Record<string, string>} */ ({
  * 探针/带风险启用、BYOK 配置目录与示例提示。切换引擎仍在员工对话里
  * （需要具体 employeeId）；这里负责「引擎能不能用」。
  *
- * @param {{ onClose: () => void }} props
+ * @param {{ onClose?: () => void, embedded?: boolean }} props
  */
-export function EngineCenterPanel({ onClose }) {
+export function EngineCenterPanel({ onClose = () => {}, embedded = false }) {
   const [engines, setEngines] = useState(/** @type {EngineStateData[] | null} */ (null));
   const [configDirs, setConfigDirs] = useState(/** @type {Record<string, string>} */ ({}));
   const [error, setError] = useState(/** @type {string | null} */ (null));
   const [note, setNote] = useState(/** @type {string | null} */ (null));
   const [busyEngine, setBusyEngine] = useState(/** @type {string | null} */ (null));
-  const dialogRef = useDialog(onClose);
+  const dialogRef = useDialog(onClose, { enabled: !embedded });
 
   const load = useCallback(async () => {
     try {
@@ -85,13 +85,21 @@ export function EngineCenterPanel({ onClose }) {
   };
 
   return (
-    <aside className="rail-drawer" data-testid="engine-panel" ref={dialogRef} role="dialog" aria-modal="true" aria-label="引擎中心" tabIndex={-1}>
-      <header className="task-header">
-        <div className="task-title">引擎中心</div>
-        <button type="button" className="task-close" data-testid="engine-close" onClick={onClose} aria-label="收起引擎中心">
-          ✕
-        </button>
-      </header>
+    <div
+      className={embedded ? "engine-center-section" : "rail-drawer"}
+      data-testid="engine-panel"
+      ref={dialogRef}
+      {...(embedded ? { role: "region", "aria-label": "引擎中心" } : { role: "dialog", "aria-modal": "true", "aria-label": "引擎中心" })}
+      tabIndex={-1}
+    >
+      {!embedded ? (
+        <header className="task-header">
+          <div className="task-title">引擎中心</div>
+          <button type="button" className="task-close" data-testid="engine-close" onClick={onClose} aria-label="收起引擎中心">
+            ✕
+          </button>
+        </header>
+      ) : null}
       <div className="engine-body">
         {error ? <div className="task-note" data-testid="engine-error">{`没能读到引擎清单：${error}`}</div> : null}
         {!engines && !error ? <div className="task-empty">正在查询引擎清单…</div> : null}
@@ -167,12 +175,12 @@ export function EngineCenterPanel({ onClose }) {
         ))}
         </div>
         <div className="engine-config-note">
-          BYOK：把 <code>models.json</code>（<code>baseUrl</code> / <code>apiKey</code> / <code>model</code>）放进对应引擎的配置目录。
+          模型统一在「设置 → 模型」配置；宿主会生成各引擎的派生配置（pi 的 <code>models.json</code>、codex 每员工 home、DSH 独立 profile）。
           切换员工引擎请到员工的对话浮层。
         </div>
         {note ? <div className="task-note task-note-ok" data-testid="engine-note">{note}</div> : null}
       </div>
-    </aside>
+    </div>
   );
 }
 

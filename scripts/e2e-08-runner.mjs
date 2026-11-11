@@ -146,13 +146,16 @@ async function phaseShell(ctx) {
         company: document.querySelector('[data-testid="company-switcher"]') !== null,
         bench: document.querySelector('[data-testid="task-rail"]') !== null,
         roster: document.querySelector('[data-testid="rail-roster"]') !== null,
-        engine: document.querySelector('[data-testid="rail-engine"]') !== null,
+        duty: document.querySelector('[data-testid="rail-duty"]') !== null,
+        settings: document.querySelector('[data-testid="settings-open"]') !== null,
+        noEngineRail: document.querySelector('[data-testid="rail-engine"]') === null,
+        noAboutRail: document.querySelector('[data-testid="rail-about"]') === null,
       }))()`,
     )
   );
   add(
-    "左轨四个入口都在：公司切换 / 工单台 / 花名册 / 引擎中心",
-    rail.rail && rail.company && rail.bench && rail.roster && rail.engine,
+    "左轨四入口 = 公司切换 / 工单台 / 花名册 / 上下班；引擎中心/关于已收进设置",
+    rail.rail && rail.company && rail.bench && rail.roster && rail.duty && rail.settings && rail.noEngineRail && rail.noAboutRail,
     JSON.stringify(rail),
   );
 
@@ -190,22 +193,23 @@ async function phaseShell(ctx) {
   await click(contents, '[data-testid="roster-close"]');
   await waitFor(async () => (await evalIn(contents, `document.querySelector('[data-testid="roster-panel"]')`)) === null, { timeoutMs: 2000 });
 
-  // ── 引擎中心浮层：引擎名 + 配置目录 + 票 11 插槽 ────────────────
-  await click(contents, '[data-testid="rail-engine"]');
+  // ── 引擎中心（设置 tab）：引擎名 + 配置目录 + 票 11 插槽 ────────
+  await click(contents, '[data-testid="settings-open"]');
+  await click(contents, '[data-testid="settings-tab-engine"]');
   const engineOk = await waitFor(
     async () =>
       (await evalIn(contents, `document.querySelector('[data-testid="engine-item"][data-engine="pi"]') !== null`)) === true &&
       (await evalIn(contents, `document.querySelector('[data-testid="engine-card-slot"]') !== null`)) === true,
     { timeoutMs: 3000 },
   );
-  const engineConfigDir = String(await evalIn(contents, `document.querySelector('[data-testid="engine-config-dir"]')?.textContent ?? ''`)).replace(/\\/g, "/");
+  const engineConfigDir = String(await evalIn(contents, `document.querySelector('[data-testid="engine-item"][data-engine="pi"] [data-testid="engine-config-dir"]')?.textContent ?? ''`)).replace(/\\/g, "/");
   add(
     "引擎中心：pi 出现 + 配置目录路径（数据目录/engines/pi）+ 票 11 引擎卡插槽",
     engineOk && engineConfigDir.includes("engines/pi") && engineConfigDir.includes(ctx.dataDir.replace(/\\/g, "/")),
     engineConfigDir,
   );
-  await click(contents, '[data-testid="engine-close"]');
-  await waitFor(async () => (await evalIn(contents, `document.querySelector('[data-testid="engine-panel"]')`)) === null, { timeoutMs: 2000 });
+  await click(contents, '[data-testid="settings-close"]');
+  await waitFor(async () => (await evalIn(contents, `document.querySelector('[data-testid="settings-modal"]')`)) === null, { timeoutMs: 2000 });
 
   // ── 工单台浮层：开合都不改变画布尺寸 ────────────────────────────
   await click(contents, '[data-testid="task-rail"]');

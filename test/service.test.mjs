@@ -1,8 +1,53 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+
+/**
+ * Every service fixture starts with a usable pi model library. Ticket 14 made
+ * hiring/engine switching depend on it; tests that don't exercise models still
+ * need the same office baseline.
+ * @param {string} dataDir
+ */
+function seedTestLibrary(dataDir) {
+  const settings = path.join(dataDir, "settings");
+  mkdirSync(settings, { recursive: true });
+  writeFileSync(
+    path.join(settings, "models.json"),
+    JSON.stringify(
+      {
+        version: 1,
+        providers: [
+          {
+            key: "cubicle",
+            displayName: "Cubicle Test",
+            baseUrl: "http://127.0.0.1:9/v1",
+            apiKey: "test-key",
+            protocol: "openai-responses",
+            models: [
+              {
+                id: "cubicle-test-model",
+                displayName: "Test Model",
+                contextWindow: 1000000,
+                maxTokens: 128000,
+                input: ["text", "image"],
+                reasoning: true,
+                reasoningLevels: { off: null, low: "low", medium: "medium", high: "high" },
+              },
+            ],
+          },
+        ],
+        defaultProvider: "cubicle",
+        defaultModel: "cubicle-test-model",
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+}
 
 import { openStore } from "../src/host/store.mjs";
 import { createService } from "../src/host/service.mjs";
@@ -18,6 +63,7 @@ import { createInvoke } from "../src/shared/envelope.mjs";
 async function withService(name) {
   const dataDir = await mkdtemp(path.join(tmpdir(), `cubicle-service-${name}-`));
   const store = openStore({ dataDir });
+  seedTestLibrary(dataDir);
   const service = createService({
     store,
     hostInfo: { pid: 4242, startedAt: "2026-11-05T09:00:00.000Z" },
@@ -259,6 +305,7 @@ test("projectGroup.create for an unknown company answers with unknown_company", 
 async function withRunService(name) {
   const dataDir = await mkdtemp(path.join(tmpdir(), `cubicle-run-service-${name}-`));
   const store = openStore({ dataDir });
+  seedTestLibrary(dataDir);
   const runManager = createRunManager({
     store,
     getAdapter: (engine) =>
@@ -411,6 +458,7 @@ async function withTaskService(name, options = {}) {
   const { headScript = { ok: true, sha: "a".repeat(40) }, useRealGit = false, hold = false } = options;
   const dataDir = await mkdtemp(path.join(tmpdir(), `cubicle-task-service-${name}-`));
   const store = openStore({ dataDir });
+  seedTestLibrary(dataDir);
   const auditCommands = [
     `git -C ${dataDir} rev-parse HEAD`,
     `git -C ${dataDir} diff --name-status ${"a".repeat(40)}`,
@@ -488,6 +536,7 @@ async function withTaskService(name, options = {}) {
 async function withEngineService(name, options = {}) {
   const dataDir = await mkdtemp(path.join(tmpdir(), `cubicle-engine-service-${name}-`));
   const store = openStore({ dataDir });
+  seedTestLibrary(dataDir);
   const service = createService({
     store,
     hostInfo: { pid: 1, startedAt: "x" },
@@ -946,6 +995,7 @@ test("engine.overview answers with each engine's name and config directory (票 
 async function withDutyService(name, { hold = false } = {}) {
   const dataDir = await mkdtemp(path.join(tmpdir(), `cubicle-duty-service-${name}-`));
   const store = openStore({ dataDir });
+  seedTestLibrary(dataDir);
   let releasePrompt = /** @type {((value?: unknown) => void) | null} */ (null);
   const git = /** @type {any} */ ({
     head: () => ({ ok: true, sha: "a".repeat(40) }),
@@ -1484,6 +1534,7 @@ function service_handle(/** @type {any} */ ctx, /** @type {string} */ method, /*
 async function withCrashService(name) {
   const dataDir = await mkdtemp(path.join(tmpdir(), `cubicle-crash-${name}-`));
   const store = openStore({ dataDir });
+  seedTestLibrary(dataDir);
   const group = store.officeSnapshot().groups[0];
   const programmer = /** @type {any} */ (store.listRoles().find((r) => r.key === "programmer"));
   const desks = store.listDesks({ groupId: group.id });
@@ -1709,6 +1760,7 @@ test("票 10 rerun 的进行中形状（09 豁免：续跑后崩溃）：先落 
   const dataDir = await mkdtemp(path.join(tmpdir(), "cubicle-rerun-shape-"));
   try {
     const store = openStore({ dataDir });
+  seedTestLibrary(dataDir);
     const group = store.officeSnapshot().groups[0];
     const programmer = /** @type {any} */ (store.listRoles().find((r) => r.key === "programmer"));
     const desk = store.listDesks({ groupId: group.id })[0];

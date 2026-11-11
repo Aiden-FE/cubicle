@@ -7,12 +7,12 @@
 **Cubicle** —— 一间看得见的办公室：AI 数字员工在工位上干活，你招聘、派活、验收。
 Windows 优先的桌面应用（Electron + React + PixiJS），不绑定任何 agent 引擎（统一适配层调用本机 pi / codex / claude / dsh / qoder…）。
 
-**当前状态：M0-M6 全部通过（2026-11-08）—— 13 张研发票全部 done：01 探路、02 空办公室、03 招聘、04 引擎开跑、05 工单与产出、06 验收与打回、07 工位动画、08 主界面外壳、09 上下班、10 崩溃恢复、11 第二引擎 codex、12 失败与成本、13 打包。**
+**当前状态：M0-M7 全部通过（2026-11-11）—— 14 张研发票全部 done：01 探路、02 空办公室、03 招聘、04 引擎开跑、05 工单与产出、06 验收与打回、07 工位动画、08 主界面外壳、09 上下班、10 崩溃恢复、11 第二引擎 codex、12 失败与成本、13 打包、14 统一设置 + 引擎无关模型库（pi/codex/dsh）。**
 
 ## 先读顺序
 
 1. `README.md` —— 门面与下一步
-2. `.scratch/v1/README.md` —— **研发票总览**（13 张、依赖表、怎么取票）
+2. `.scratch/v1/README.md` —— **研发票总览**（14 张、依赖表、怎么取票）
 3. `.scratch/cubicle/map.md` —— 决策地图（15 条决策索引 + 雾区 + 范围边界）
 4. `GLOSSARY.md` —— 领域术语（公司/项目组/工位/员工/角色/任务/会话/产出）
 5. 与任务相关的那张票的 `## Answer`（在 `.scratch/cubicle/issues/`）
@@ -30,7 +30,7 @@ Windows 优先的桌面应用（Electron + React + PixiJS），不绑定任何 a
 
 ## 研发票（下一步做什么）
 
-- 位置：`.scratch/v1/issues/NN-<slug>.md`，13 张 tracer-bullet 票，每张可独立演示
+- 位置：`.scratch/v1/issues/NN-<slug>.md`，14 张 tracer-bullet 票，每张可独立演示
 - 状态：`Status: ready-for-agent | in-progress | done`
 - **取票**：编号最小 + `Blocked by` 全部 done；动手前把 Status 改 `in-progress`
 - **完成**：逐条勾选验收项，Status 改 `done`

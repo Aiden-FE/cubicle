@@ -36,7 +36,7 @@ const E2E_HIRE_A = "E2E 程序员甲";
 const E2E_HIRE_B = "E2E 程序员乙";
 
 /** Capability-manifest needles for step 2 (ticket 05 preset roster). */
-const MANIFEST_NEEDLES = ["人格", "技能", "工具", "引擎", "成本", "严谨务实", "git 工作流", "powershell", "pi · default", "50 万"];
+const MANIFEST_NEEDLES = ["人格", "技能", "工具", "引擎", "成本", "严谨务实", "git 工作流", "powershell", "pi · E2E Model", "50 万"];
 
 /**
  * @typedef {object} E2EContext

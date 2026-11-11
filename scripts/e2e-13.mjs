@@ -30,6 +30,7 @@ import { fileURLToPath } from "node:url";
 import { readJson, printChecks } from "./e2e-harness.mjs";
 import { startMockModelServer as startPiMockServer } from "./e2e-07-mock-server.mjs";
 import { startCodexResponsesMock } from "./e2e-codex-responses-mock.mjs";
+import { writeModelLibrary } from "./e2e-models.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = path.join(root, "tmp", "e2e-13");
@@ -288,6 +289,27 @@ await writeFile(
   `${JSON.stringify({ baseUrl: codexMock.baseUrl, apiKey: "e2e-codex-key", model: "cubicle-e2e-model" }, null, 2)}\n`,
   "utf8",
 );
+
+writeModelLibrary(dataDir, {
+  providers: {
+    cubicle: {
+      name: "Cubicle E2E",
+      baseUrl: piMock.baseUrl,
+      api: "openai-completions",
+      apiKey: "e2e-local-key",
+      models: [{ id: "cubicle-e2e-model", name: "E2E Model", input: ["text"], contextWindow: 128000, maxTokens: 8192 }],
+    },
+    codex: {
+      name: "Cubicle Codex E2E",
+      baseUrl: codexMock.baseUrl,
+      api: "openai-responses",
+      apiKey: "e2e-codex-key",
+      models: [{ id: "cubicle-e2e-model", name: "Codex E2E Model", input: ["text"], contextWindow: 128000, maxTokens: 8192 }],
+    },
+  },
+  defaultProvider: "cubicle",
+  defaultModel: "cubicle-e2e-model",
+});
 
 /** @type {Array<{ at: number, codex: number }>} */
 const samples = [];

@@ -30,6 +30,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { readJson, printChecks } from "./e2e-harness.mjs";
 import { startMockModelServer09 } from "./e2e-09-mock-server.mjs";
+import { seedModelLibrary } from "./e2e-models.mjs";
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -107,6 +108,8 @@ await writeFile(
   )}\n`,
   "utf8",
 );
+
+await seedModelLibrary(dataDir, { baseUrl: mock.baseUrl, protocol: "openai-completions" });
 
 const started = Date.now();
 

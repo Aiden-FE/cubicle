@@ -55,6 +55,8 @@ import { DEFAULT_TASK_TOKEN_BUDGET } from "./cost/budget.mjs";
  * @property {string[]} mcpServers
  * @property {string} engine
  * @property {string} model
+ * @property {string} [provider] ticket 14: model-library provider key
+ * @property {string} [reasoningEffort] ticket 14: selected reasoning level
  * @property {{ tokenBudgetPerTask: number }} cost
  *
  * @typedef {object} RoleRow
@@ -742,6 +744,7 @@ function toEngineState(row) {
 const ENGINE_SEEDS = [
   { engine: "pi", enabled: true, installed: true },
   { engine: "codex", enabled: false, installed: null },
+  { engine: "dsh", enabled: false, installed: null },
 ];
 
 /** @param {DatabaseSync} db */
@@ -966,10 +969,10 @@ export function openStore({ dataDir }) {
      * edits never infect people already hired). One transaction so a desk is
      * never half-occupied.
      *
-     * @param {{ deskId: number, roleId: number, name?: string }} input
+     * @param {{ deskId: number, roleId: number, name?: string, engine?: string, provider?: string, model?: string, reasoningEffort?: string | null }} input
      * @returns {{ employee: { id: number, companyId: number, name: string, roleId: number, roleSnapshot: RoleSnapshot, hiredAt: string }, desk: DeskRow | null }}
      */
-    hireEmployee({ deskId, roleId, name }) {
+    hireEmployee({ deskId, roleId, name, engine, provider, model, reasoningEffort }) {
       const deskRow = db
         .prepare(
           `SELECT ${DESK_JOIN}, g.company_id AS g_company_id
@@ -988,6 +991,14 @@ export function openStore({ dataDir }) {
 
       const role = toRole(/** @type {Record<string, unknown>} */ (roleRow));
       const roleSnapshot = toRoleSnapshot(role);
+      const manifest = /** @type {Record<string, any>} */ (roleSnapshot.manifest);
+      if (engine !== undefined) manifest.engine = engine;
+      if (provider !== undefined) manifest.provider = provider;
+      if (model !== undefined) manifest.model = model;
+      if (reasoningEffort !== undefined) {
+        if (reasoningEffort === null) delete manifest.reasoningEffort;
+        else manifest.reasoningEffort = reasoningEffort;
+      }
       const employeeName = name !== undefined && name.trim().length > 0 ? name.trim() : role.name;
       const hiredAt = new Date().toISOString();
       let employeeId = 0;
@@ -1027,7 +1038,7 @@ export function openStore({ dataDir }) {
      * 花名册 is a company roster, not "the active group's desks".
      *
      * @param {{ companyId: number }} input
-     * @returns {{ id: number, name: string, roleName: string, deskLabel: string, groupName: string }[]}
+     * @returns {{ id: number, name: string, roleName: string, roleSnapshot: RoleSnapshot, deskLabel: string, groupName: string }[]}
      */
     listEmployeesForCompany({ companyId }) {
       const rows = db
@@ -1048,6 +1059,7 @@ export function openStore({ dataDir }) {
           id: Number(row.id),
           name: String(row.name),
           roleName: String(snapshot.name ?? "未知角色"),
+          roleSnapshot: snapshot,
           deskLabel: String(row.desk_label),
           groupName: String(row.group_name),
         };
@@ -1071,6 +1083,24 @@ export function openStore({ dataDir }) {
         roleSnapshot: /** @type {RoleSnapshot} */ (parseJsonOr(row.role_snapshot, UNKNOWN_ROLE_SNAPSHOT)),
         hiredAt: String(row.hired_at),
       };
+    },
+
+    /**
+     * Every employee row (all companies) — model-reassign on delete needs a
+     * complete reference scan, not only the active company's roster.
+     *
+     * @returns {{ id: number, companyId: number, name: string, roleId: number, roleSnapshot: RoleSnapshot, hiredAt: string }[]}
+     */
+    listAllEmployees() {
+      const rows = db.prepare("SELECT id, company_id, name, role_id, role_snapshot, hired_at FROM employee ORDER BY id").all();
+      return rows.map((row) => ({
+        id: Number(row.id),
+        companyId: Number(row.company_id),
+        name: String(row.name),
+        roleId: Number(row.role_id),
+        roleSnapshot: /** @type {RoleSnapshot} */ (parseJsonOr(row.role_snapshot, UNKNOWN_ROLE_SNAPSHOT)),
+        hiredAt: String(row.hired_at),
+      }));
     },
 
     /**
@@ -1867,6 +1897,41 @@ export function openStore({ dataDir }) {
       if (!snapshot.manifest || typeof snapshot.manifest !== "object") snapshot.manifest = {};
       snapshot.manifest.engine = engine;
       db.prepare("UPDATE employee SET role_snapshot = ? WHERE id = ?").run(JSON.stringify(snapshot), employeeId);
+      return /** @type {any} */ (this.employeeById(employeeId));
+    },
+
+    /**
+     * Edit an employee's name / engine / provider / model / reasoning effort
+     * (ticket 14). Only provided fields are touched; the rest of the frozen
+     * snapshot stays frozen.
+     *
+     * @param {{ employeeId: number, name?: string, engine?: string, provider?: string, model?: string, reasoningEffort?: string | null }} input
+     */
+    updateEmployee({ employeeId, name, engine, provider, model, reasoningEffort }) {
+      const row = db
+        .prepare("SELECT name, role_snapshot FROM employee WHERE id = ?")
+        .get(employeeId);
+      if (!row) throw appError("unknown_employee", `no employee with id ${employeeId}`);
+      const record = /** @type {Record<string, unknown>} */ (row);
+      const snapshot = /** @type {any} */ (parseJsonOr(record.role_snapshot, { manifest: {} }));
+      if (!snapshot.manifest || typeof snapshot.manifest !== "object") snapshot.manifest = {};
+      if (name !== undefined) {
+        const trimmed = name.trim();
+        if (trimmed.length === 0) throw appError("invalid_payload", "员工名字不能为空");
+        if (trimmed.length > 40) throw appError("invalid_payload", "员工名字最多 40 个字符");
+      }
+      if (engine !== undefined) snapshot.manifest.engine = engine;
+      if (provider !== undefined) snapshot.manifest.provider = provider;
+      if (model !== undefined) snapshot.manifest.model = model;
+      if (reasoningEffort !== undefined) {
+        if (reasoningEffort === null) delete snapshot.manifest.reasoningEffort;
+        else snapshot.manifest.reasoningEffort = reasoningEffort;
+      }
+      db.prepare("UPDATE employee SET name = ?, role_snapshot = ? WHERE id = ?").run(
+        name !== undefined ? name.trim() : String(record.name),
+        JSON.stringify(snapshot),
+        employeeId,
+      );
       return /** @type {any} */ (this.employeeById(employeeId));
     },
 

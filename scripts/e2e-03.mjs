@@ -21,6 +21,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { readJson, printChecks } from "./e2e-harness.mjs";
+import { seedModelLibrary } from "./e2e-models.mjs";
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -63,6 +64,10 @@ function launch(options) {
 
 await rm(outDir, { recursive: true, force: true });
 await mkdir(outDir, { recursive: true });
+seedModelLibrary(path.join(outDir, "data"), {
+  baseUrl: "http://127.0.0.1:9/v1",
+  protocol: "openai-completions",
+});
 
 const started = Date.now();
 

@@ -24,8 +24,8 @@ import { redactSecrets } from "../../shared/redact.mjs";
  * the engine's own message — traceable, still one line.
  */
 const KNOWN_CODES = /** @type {Record<string, string>} */ ({
-  engine_not_configured: "引擎还没配置模型：去「引擎中心」把 models.json 放进 engines/pi/（BYOK）。",
-  engine_model_missing: "引擎里找不到员工用的这个模型：检查引擎中心的模型配置（models.json）。",
+  engine_not_configured: "引擎还没配置模型：去「设置 → 模型」添加一个供应商和模型。",
+  engine_model_missing: "引擎里找不到员工用的这个模型：去「设置 → 模型」检查模型库，或编辑员工重新选择。",
   engine_unavailable: "这个引擎在当前版本里没有适配器：换员工的引擎，或等这个引擎的适配上线。",
   engine_failed: "引擎跑挂了，没有给出更细的原因。",
 });

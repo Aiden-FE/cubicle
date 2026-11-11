@@ -32,6 +32,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { appError } from "../../../shared/apperror.mjs";
+import { readModelLibrary, resolveModelForManifest } from "../../models/library.mjs";
 import { decideToolAccess } from "../policy.mjs";
 import { startPolicyBridge } from "./bridge.mjs";
 import { createCodexNormalizer } from "./normalize.mjs";
@@ -129,8 +130,17 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
     return { CUBICLE_POLICY_BRIDGE_URL: bridgeInfo.url, CUBICLE_POLICY_TOKEN: bridgeInfo.token };
   }
 
-  function ensureHookInstall() {
-    const hooksDir = path.join(engineRoot, "hooks");
+  /**
+   * Per-employee CODEX_HOME (ticket 14: one model per home).
+   * @param {EmployeeSessionRow} session
+   */
+  function homeFor(session) {
+    return session.agentDir;
+  }
+
+  /** @param {EmployeeSessionRow} session */
+  function ensureHookInstall(session) {
+    const hooksDir = path.join(homeFor(session), "hooks");
     mkdirSync(hooksDir, { recursive: true });
     // Only the thin client is copied. The rule table stays in the host and is
     // asked over /decide — copying policy.mjs here would let the agent edit
@@ -139,40 +149,31 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
   }
 
   /**
-   * Read the BYOK config the engine center owns; render the CODEX_HOME
-   * config.toml from it on every open, so edits land on the next run.
+   * Resolve the employee's model from the app library, then render this
+   * employee's private CODEX_HOME (models.json + config.toml) on every open.
    *
-   * @returns {{ model: string }}
+   * @param {EmployeeSessionRow} session
+   * @param {any} employee
+   * @returns {{ home: string, model: string, reasoningEffort: string | null }}
    */
-  function writeEngineConfig() {
-    const modelsPath = path.join(engineRoot, "models.json");
-    if (!existsSync(modelsPath)) {
-      throw appError(
-        "engine_not_configured",
-        "引擎中心尚未配置 codex 模型：请把 models.json（provider baseUrl/key/model）放进 engines/codex/（BYOK，应用不会读取 ~/.codex）",
-      );
-    }
-    /** @type {any} */
-    let models;
-    try {
-      models = JSON.parse(readFileSync(modelsPath, "utf8"));
-    } catch (err) {
-      throw appError("engine_bad_config", `engines/codex/models.json 无法解析：${err instanceof Error ? err.message : err}`);
-    }
-    if (typeof models.baseUrl !== "string" || typeof models.apiKey !== "string" || typeof models.model !== "string") {
-      throw appError("engine_bad_config", "engines/codex/models.json 需要 baseUrl、apiKey、model 三个字段");
-    }
+  function writeEngineConfig(session, employee) {
+    const library = readModelLibrary(dataDir);
+    const manifest = /** @type {Record<string, unknown>} */ (employee?.roleSnapshot?.manifest ?? {});
+    const resolved = resolveModelForManifest(library, "codex", manifest);
+    const home = homeFor(session);
+    const reasoning = resolved.reasoningEffort && resolved.reasoningEffort !== "off" ? resolved.reasoningEffort : null;
 
-    const hookPath = path.join(engineRoot, "hooks", "policy-hook.mjs");
+    const hookPath = path.join(home, "hooks", "policy-hook.mjs");
     const hookPosix = hookPath.replace(/\\/g, "/");
     const hookWindows = hookPath.replace(/\\/g, "\\\\");
     const toml = [
       `model_provider = "${PROVIDER_KEY}"`,
-      `model = "${models.model}"`,
+      `model = ${JSON.stringify(resolved.model.id)}`,
+      ...(reasoning ? [`model_reasoning_effort = ${JSON.stringify(reasoning)}`] : []),
       "",
       `[model_providers.${PROVIDER_KEY}]`,
       `name = "Cubicle"`,
-      `base_url = "${models.baseUrl.replace(/\\/g, "\\\\")}"`,
+      `base_url = "${resolved.provider.baseUrl.replace(/\\/g, "\\\\")}"`,
       `env_key = "CUBICLE_CODEX_KEY"`,
       `wire_api = "responses"`,
       `requires_openai_auth = false`,
@@ -197,9 +198,24 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
       "timeout = 15",
       "",
     ].join("\n");
-    mkdirSync(engineRoot, { recursive: true });
-    writeFileSync(path.join(engineRoot, "config.toml"), toml, "utf8");
-    return { model: models.model };
+    mkdirSync(home, { recursive: true });
+    writeFileSync(path.join(home, "config.toml"), toml, "utf8");
+    writeFileSync(
+      path.join(home, "models.json"),
+      `${JSON.stringify(
+        {
+          baseUrl: resolved.provider.baseUrl,
+          apiKey: resolved.provider.apiKey,
+          model: resolved.model.id,
+          reasoningEffort: reasoning,
+          providerKey: resolved.provider.key,
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    return { home, model: resolved.model.id, reasoningEffort: reasoning };
   }
 
   /**
@@ -236,11 +252,11 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
    * `context.threadId` is an out-param: the caller reads back the thread id
    * this run established (fresh or resumed) for the next prompt's resume.
    *
-   * @param {{ session: EmployeeSessionRow, onEvent: (event: NormalizedEvent) => void, text: string, threadId: string | null, context: { threadId: string | null } }} input
+   * @param {{ session: EmployeeSessionRow, onEvent: (event: NormalizedEvent) => void, text: string, threadId: string | null, context: { threadId: string | null }, home: string }} input
    * @returns {Promise<void>}
    */
-  async function runOne({ session, onEvent, text, threadId, context }) {
-    const models = JSON.parse(readFileSync(path.join(engineRoot, "models.json"), "utf8"));
+  async function runOne({ session, onEvent, text, threadId, context, home }) {
+    const models = JSON.parse(readFileSync(path.join(home, "models.json"), "utf8"));
     // --json / -s / -C are `codex exec` LEVEL options: placed after the
     // `resume` subcommand they are rejected ("unexpected argument '-s'"), so
     // the launch flags go first and the subcommand comes last.
@@ -262,7 +278,7 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
 
     const env = {
       ...process.env,
-      CODEX_HOME: engineRoot, // private home — never ~/.codex
+      CODEX_HOME: home, // per-employee private home — never ~/.codex
       CUBICLE_CODEX_KEY: String(models.apiKey ?? ""),
       ...bridgeEnv(),
     };
@@ -394,8 +410,8 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
    * @returns {Promise<{ prompt(text: string): Promise<void>, abort(): Promise<void>, sessionFile(): string | null }>}
    */
   async function open({ employee, session, onEvent }) {
-    writeEngineConfig(); // validates BYOK config, (re)renders config.toml
-    ensureHookInstall();
+    writeEngineConfig(session, employee); // validates library, renders this employee's CODEX_HOME
+    ensureHookInstall(session);
     await bridge(); // the verdict endpoint every codex child (and its hook) gets
 
     const context = {
@@ -416,10 +432,10 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
         // edited hooks/ or config.toml between prompts gets the host's copy
         // back. (The real boundary is still OS-level; this closes the cheap
         // self-uninstall path.)
-        writeEngineConfig();
-        ensureHookInstall();
+        const current = writeEngineConfig(session, employee);
+        ensureHookInstall(session);
         writePersonaFile(session, employee);
-        await runOne({ session, onEvent, text, threadId: context.threadId, context });
+        await runOne({ session, onEvent, text, threadId: context.threadId, context, home: current.home });
       },
       async abort() {
         const child = liveChildren.get(session.id);
@@ -454,7 +470,7 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
    */
   function configFingerprint() {
     try {
-      const stat = statSync(path.join(engineRoot, "models.json"));
+      const stat = statSync(path.join(dataDir, "settings", "models.json"));
       return `${stat.mtimeMs}:${stat.size}`;
     } catch {
       return null;

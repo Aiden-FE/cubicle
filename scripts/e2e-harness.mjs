@@ -200,7 +200,9 @@ export function homeDirUntouched(before, after) {
 }
 
 const DESK_COUNT_JS = `document.querySelectorAll('[data-testid="desk"]').length`;
-const BADGE_ONLINE_JS = `document.querySelector('[data-testid="host-status"]')?.dataset.online`;
+// Ticket 14 moved the visible host-status chip into Settings. The shell keeps
+// an invisible test seam so every legacy e2e can still prove host liveness.
+const BADGE_ONLINE_JS = `document.querySelector('[data-testid="app-shell"]')?.dataset.online`;
 const HIRE_STEP_JS = `document.querySelector('[data-testid="hire-step"]')?.dataset.step`;
 
 /**
@@ -344,6 +346,13 @@ export async function hireThroughWizard(contents, { roleKey, employeeName, backF
   if (backFrom3) outcome.wentBack3 = await goBackAndReturn(3);
 
   await typeInto(contents, '[data-testid="employee-name-input"]', employeeName);
+  // Ticket 14: the confirm button waits for the model library load and a
+  // compatible model for the selected engine.
+  await waitFor(
+    async () =>
+      (await evalIn(contents, `document.querySelector('[data-testid="hire-confirm"]')?.disabled === false`)) === true,
+    { timeoutMs: 4000 },
+  );
   await click(contents, '[data-testid="hire-confirm"]');
   outcome.confirmed = await waitFor(
     async () => (await evalIn(contents, `document.querySelector('[data-testid="hire-modal"]')`)) === null,

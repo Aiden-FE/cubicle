@@ -5,15 +5,20 @@ import { useEffect, useRef } from "react";
  * on Escape, cycle Tab inside, and return focus to the opener on unmount.
  * The drawers used to leave focus on a rail button hidden under the overlay.
  *
+ * `enabled: false` lets a section be embedded in a larger dialog: the outer
+ * dialog owns focus/Escape, the section only returns its DOM ref.
+ *
  * @param {() => void} onClose
+ * @param {{ enabled?: boolean }} [options]
  * @returns {any}
  */
-export function useDialog(onClose) {
+export function useDialog(onClose, options = {}) {
   const ref = useRef(/** @type {HTMLElement | null} */ (null));
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
 
   useEffect(() => {
+    if (options.enabled === false) return;
     const root = ref.current;
     const previous = /** @type {HTMLElement | null} */ (document.activeElement);
     const selector =
@@ -54,7 +59,7 @@ export function useDialog(onClose) {
       document.removeEventListener("keydown", onKey);
       previous?.focus?.();
     };
-  }, []);
+  }, [options.enabled]);
 
   return ref;
 }

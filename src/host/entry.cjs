@@ -18,6 +18,7 @@ async function main() {
     { createRunManager },
     { createPiAdapter },
     { createCodexAdapter },
+    { createDshAdapter },
     { createProbeRunner },
     { createGitReader },
     { createTaskRunHook },
@@ -27,12 +28,14 @@ async function main() {
     { existsSync },
     path,
     { parseEnvelope, createEvent, TOPICS },
+    { readModelLibrary, listCompatible, writePiModels, ensureDshProfile },
   ] = await Promise.all([
     import("./store.mjs"),
     import("./service.mjs"),
     import("./engine/run-manager.mjs"),
     import("./engine/pi/adapter.mjs"),
     import("./engine/codex/adapter.mjs"),
+    import("./engine/dsh/adapter.mjs"),
     import("./engine/probe.mjs"),
     import("./git/reader.mjs"),
     import("./task/artifacts.mjs"),
@@ -42,9 +45,20 @@ async function main() {
     import("node:fs"),
     import("node:path"),
     import("../shared/envelope.mjs"),
+    import("./models/library.mjs"),
   ]);
 
   const store = openStore({ dataDir });
+  // Ticket 14: the model library is the source of truth. Derive pi's config
+  // and the Cubicle-owned DSH profile before any adapter opens.
+  try {
+    const library = readModelLibrary(store.dataDir);
+    writePiModels(store.dataDir, library);
+    ensureDshProfile(store.dataDir, library);
+  } catch {
+    // A corrupt library must not keep the office from booting; the settings
+    // page reports the load error and adapters fail with 未配置模型.
+  }
   // 票 10 「宿主启动时清扫」: main's launch sweep covers the app restart; this
   // covers the SUPERVISOR restart path (host crashed → new host boots in the
   // same app session) — orphan engine children of the dead host get swept here,
@@ -72,13 +86,18 @@ async function main() {
     dataDir: store.dataDir,
     codexBinary: process.env.CUBICLE_CODEX_PATH || "codex",
   });
-  // Abrupt host exit (supervisor stop → kill) must still reclaim codex, so the
-  // CLI host leaves no child process under this host pid.
-  process.on("exit", () => codexAdapter.killChildrenSync());
+  const dshAdapter = createDshAdapter({ dataDir: store.dataDir });
+  // Abrupt host exit (supervisor stop → kill) must still reclaim engine
+  // children, so no codex/dsh process is left under this host pid.
+  process.on("exit", () => {
+    codexAdapter.killChildrenSync();
+    dshAdapter.shutdown();
+  });
 
   const runManager = createRunManager({
     store,
-    getAdapter: (engine) => (engine === "pi" ? piAdapter : engine === "codex" ? codexAdapter : null),
+    getAdapter: (engine) =>
+      engine === "pi" ? piAdapter : engine === "codex" ? codexAdapter : engine === "dsh" ? dshAdapter : null,
     // Engine events ride the run.event topic; the main process coalesces and
     // the view subscribes per topic. (Payloads stay envelope-shaped.)
     emit: (payload) => send(createEvent(TOPICS.runEvent, payload)),
@@ -110,9 +129,10 @@ async function main() {
     abortRun: (employeeId) => runManager.abort({ employeeId }),
   });
 
-  /** An engine is "configured" (badge 已登录 vs 待配 key) by its BYOK file. */
+  /** An engine is "configured" when the engine-agnostic model library has at
+   *  least one protocol-compatible model for it (ticket 14). */
   const engineFacts = (/** @type {string} */ engine) => ({
-    configured: existsSync(path.join(store.dataDir, "engines", engine, "models.json")),
+    configured: listCompatible(readModelLibrary(store.dataDir), engine).length > 0,
   });
 
   // 票 10: 引擎能力声明 — the adapters own the promise ("can this engine
@@ -123,7 +143,7 @@ async function main() {
   });
   /** @param {string} engine */
   function adapterFor(engine) {
-    return engine === "pi" ? piAdapter : engine === "codex" ? codexAdapter : null;
+    return engine === "pi" ? piAdapter : engine === "codex" ? codexAdapter : engine === "dsh" ? dshAdapter : null;
   }
 
   const service = createService({
@@ -148,6 +168,7 @@ async function main() {
         .shutdown()
         .catch(() => {})
         .finally(() => {
+          dshAdapter.shutdown();
           send(createReplySafe(envelope, { ok: true }));
           setTimeout(() => process.exit(0), 50);
         });
@@ -181,6 +202,11 @@ async function main() {
     }
     send(createEvent(TOPICS.domainChanged, { reason: "engine.detect", engine: "codex" }));
   }
+
+  // DSH desktop detection is synchronous: the installed binary + app.asar
+  // launcher either exist or they don't. Version metadata is shown as null.
+  store.setEngineInstalled({ engine: "dsh", installed: dshAdapter.installed(), version: null });
+  send(createEvent(TOPICS.domainChanged, { reason: "engine.detect", engine: "dsh" }));
 
   const heartbeat = () => send(createEvent(TOPICS.hostStatus, { state: "online", ...hostInfo }));
   heartbeat();

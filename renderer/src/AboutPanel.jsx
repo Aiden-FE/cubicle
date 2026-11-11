@@ -6,9 +6,9 @@ import { useDialog } from "./useDialog.js";
  * （打包形态 = 安装包写进 exe 的 metadata），主进程对表过 package.json，
  * 漂移时这里诚实挂警示。入口在左轨（主画布永远是办公室，一切皆浮层）。
  *
- * @param {{ onClose: () => void }} props
+ * @param {{ onClose?: () => void, embedded?: boolean }} props
  */
-export function AboutPanel({ onClose }) {
+export function AboutPanel({ onClose = () => {}, embedded = false }) {
   const [info, setInfo] = useState(/** @type {import("./bridge").AppInfo | null} */ (null));
   const [error, setError] = useState(/** @type {string | null} */ (null));
 
@@ -27,16 +27,24 @@ export function AboutPanel({ onClose }) {
     };
   }, []);
 
-  const dialogRef = useDialog(onClose);
+  const dialogRef = useDialog(onClose, { enabled: !embedded });
 
   return (
-    <aside className="rail-drawer about-panel" data-testid="about-panel" ref={dialogRef} role="dialog" aria-modal="true" aria-label="关于 Cubicle" tabIndex={-1}>
-      <header className="task-header">
-        <div className="task-title">关于 Cubicle</div>
-        <button type="button" className="task-close" data-testid="about-close" onClick={onClose} aria-label="收起关于页">
-          ✕
-        </button>
-      </header>
+    <div
+      className={embedded ? "about-section" : "rail-drawer about-panel"}
+      data-testid="about-panel"
+      ref={dialogRef}
+      {...(embedded ? { role: "region", "aria-label": "关于 Cubicle" } : { role: "dialog", "aria-modal": "true", "aria-label": "关于 Cubicle" })}
+      tabIndex={-1}
+    >
+      {!embedded ? (
+        <header className="task-header">
+          <div className="task-title">关于 Cubicle</div>
+          <button type="button" className="task-close" data-testid="about-close" onClick={onClose} aria-label="收起关于页">
+            ✕
+          </button>
+        </header>
+      ) : null}
       <div className="about-body">
         {error ? <div className="about-error" data-testid="about-error">读不到版本信息：{error}</div> : null}
         {info ? (
@@ -58,6 +66,6 @@ export function AboutPanel({ onClose }) {
           !error && <div className="task-empty">读取版本信息…</div>
         )}
       </div>
-    </aside>
+    </div>
   );
 }

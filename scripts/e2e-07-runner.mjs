@@ -302,8 +302,16 @@ async function phaseDesk(ctx) {
     onSample: async (snap) => {
       if (!prefsShot && snap.busy === "true" && snap.hasPlate && snap.bubble === "在看资料") {
         prefsShot = true;
+        await click(win.webContents, '[data-testid="settings-open"]');
         await click(win.webContents, '[data-testid="toggle-plate"]');
         await click(win.webContents, '[data-testid="toggle-bubble"]');
+        await click(win.webContents, '[data-testid="settings-close"]');
+        // Settings is a global modal and closed the chat overlay; reopen the
+        // employee's conversation so the run's end marker keeps being observed.
+        await evalIn(win.webContents, `document.querySelector('[data-testid="desk"][data-empty="false"]')?.click()`);
+        await waitFor(async () => (await evalIn(win.webContents, `document.querySelector('[data-testid="chat-input"]') !== null`)) === true, {
+          timeoutMs: 3000,
+        });
         screenshots.push(await shot(ctx, win, "10-prefs-off-working"));
       }
     },
@@ -324,7 +332,14 @@ async function phaseDesk(ctx) {
     (s) => s.busy === "false" && s.light?.tone !== "working",
     { timeoutMs: 5_000 },
   );
-  add("这一轮收尾后回到「在闲」（busy=false、灯不再是 working）", wentIdle && again.ended);
+  // Chat history replay only keeps the latest run, so an agent_end count that
+  // fell while Settings was open cannot be compared across the remount. The
+  // observable contract is the desk settling: busy=false and the light not working.
+  add(
+    "这一轮收尾后回到「在闲」（busy=false、灯不再是 working）",
+    wentIdle,
+    JSON.stringify({ ended: again.ended, final: again.final }),
+  );
 
   return {
     checks,

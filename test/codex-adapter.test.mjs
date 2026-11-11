@@ -37,14 +37,41 @@ function fakeChild() {
 
 /** @param {string} dir */
 function seedModels(dir) {
-  const engineRoot = path.join(dir, "engines", "codex");
-  mkdirSync(engineRoot, { recursive: true });
+  const settings = path.join(dir, "settings");
+  mkdirSync(settings, { recursive: true });
   writeFileSync(
-    path.join(engineRoot, "models.json"),
-    JSON.stringify({ baseUrl: "http://127.0.0.1:9/v1", apiKey: "test-key", model: "cubicle-e2e-model" }),
+    path.join(settings, "models.json"),
+    JSON.stringify(
+      {
+        version: 1,
+        providers: [
+          {
+            key: "cubicle",
+            displayName: "Cubicle Test",
+            baseUrl: "http://127.0.0.1:9/v1",
+            apiKey: "test-key",
+            protocol: "openai-responses",
+            models: [
+              {
+                id: "cubicle-e2e-model",
+                displayName: "Test Model",
+                contextWindow: 1000000,
+                maxTokens: 128000,
+                input: ["text", "image"],
+                reasoning: true,
+                reasoningLevels: { off: null, low: "low", medium: "medium", high: "high" },
+              },
+            ],
+          },
+        ],
+        defaultProvider: "cubicle",
+        defaultModel: "cubicle-e2e-model",
+      },
+      null,
+      2,
+    ),
     "utf8",
   );
-  return engineRoot;
 }
 
 /** @param {string} dir @param {number} [employeeId] */
@@ -63,13 +90,13 @@ function sessionFixture(dir, employeeId = 1) {
   };
 }
 
-test("open without models.json reports engine_not_configured", async () => {
+test("open without a model library reports engine_model_missing", async () => {
   const dir = tempDir();
   try {
     const adapter = createCodexAdapter({ dataDir: dir, spawnProcess: () => fakeChild() });
     await assert.rejects(
       () => adapter.open({ employee: { name: "甲", roleSnapshot: { manifest: {} } }, session: sessionFixture(dir), onEvent: () => {} }),
-      (/** @type {any} */ err) => err.code === "engine_not_configured",
+      (/** @type {any} */ err) => err.code === "engine_model_missing",
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -133,7 +160,9 @@ test("prompt streams codex JSONL into normalized events and resolves on close", 
 test("the CLI launch keeps the app-private CODEX_HOME, absolute -C, and the hook bridge env", async () => {
   const dir = tempDir();
   try {
-    const engineRoot = seedModels(dir);
+    seedModels(dir);
+    const session = sessionFixture(dir);
+    const home = session.agentDir;
     let captured = /** @type {any} */ (null);
     const adapter = createCodexAdapter({
       dataDir: dir,
@@ -148,7 +177,6 @@ test("the CLI launch keeps the app-private CODEX_HOME, absolute -C, and the hook
         return child;
       },
     });
-    const session = sessionFixture(dir);
     const live = await adapter.open({
       employee: { name: "甲", roleSnapshot: { name: "程序员", manifest: { persona: "persona-text" } } },
       session,
@@ -161,13 +189,13 @@ test("the CLI launch keeps the app-private CODEX_HOME, absolute -C, and the hook
     assert.ok(captured.args.includes("-C"));
     assert.equal(captured.args[captured.args.indexOf("-C") + 1], session.workspaceDir);
     assert.ok(path.isAbsolute(captured.args[captured.args.indexOf("-C") + 1]));
-    assert.equal(captured.opts.env.CODEX_HOME, engineRoot); // never ~/.codex
+    assert.equal(captured.opts.env.CODEX_HOME, home); // never ~/.codex
     assert.equal(captured.opts.env.CUBICLE_CODEX_KEY, "test-key");
     assert.ok(captured.opts.env.CUBICLE_POLICY_BRIDGE_URL?.startsWith("http://127.0.0.1:"));
     assert.ok(captured.opts.env.CUBICLE_POLICY_TOKEN?.length >= 16);
 
     // config.toml carries our provider AND the PreToolUse hook block.
-    const config = readFileSync(path.join(engineRoot, "config.toml"), "utf8");
+    const config = readFileSync(path.join(home, "config.toml"), "utf8");
     assert.ok(config.includes("cubicle"));
     assert.ok(config.includes("PreToolUse"));
     // codex 0.163 refuses to start when a hook entry has only the platform
@@ -176,9 +204,9 @@ test("the CLI launch keeps the app-private CODEX_HOME, absolute -C, and the hook
     assert.match(config, /^commandWindows = "node /m);
     assert.match(config, /\[shell_environment_policy\]/);
     assert.match(config, /exclude = \["CUBICLE_CODEX_KEY"\]/, "shell 子进程不继承 BYOK key");
-    assert.ok(existsSync(path.join(engineRoot, "hooks", "policy-hook.mjs")));
+    assert.ok(existsSync(path.join(home, "hooks", "policy-hook.mjs")));
     assert.equal(
-      existsSync(path.join(engineRoot, "hooks", "policy.mjs")),
+      existsSync(path.join(home, "hooks", "policy.mjs")),
       false,
       "规则表不落在员工可写的引擎目录：hook 只问宿主 /decide",
     );

@@ -29,7 +29,8 @@ import { mkdirSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { out, sleep, waitFor, evalIn, click, typeInto, bootAndShowOffice, hireThroughWizard, ensureAllDaySchedule } from "./e2e-harness.mjs";
+import { execFileSync } from "node:child_process";
+import { out, sleep, waitFor, evalIn, click, typeInto, bootAndShowOffice, hireThroughWizard, ensureAllDaySchedule, seedGitWorkspace } from "./e2e-harness.mjs";
 import { enginePaths } from "../src/host/engine/paths.mjs";
 
 const E2E_EMPLOYEE = "E2E 换擎员";
@@ -162,6 +163,8 @@ async function phaseEngine(ctx) {
     await writeFile(path.join(dirs.workspaceDir, "hello.txt"), "hello from e2e fixture\n", "utf8");
     await writeFile(path.join(dirs.workspaceDir, "important.txt"), "must survive\n", "utf8");
   }
+  // Task dispatch needs a real git workspace (both engines share it).
+  seedGitWorkspace(enginePaths(ctx.dataDir, "codex", employeeId).workspaceDir, execFileSync);
 
   await click(contents, '[data-testid="desk"][data-empty="false"]');
   const cardUp = await waitFor(async () => (await evalIn(contents, `document.querySelector('[data-testid="engine-card"]') !== null`)), { timeoutMs: 4000 });
@@ -205,6 +208,32 @@ async function phaseEngine(ctx) {
   );
   const codexHistory = /** @type {any} */ (await evalIn(contents, `window.cubicle.invoke('run.history', { employeeId: ${employeeId} })`));
   add("CODEX 跑完：落库 completed，引擎 codex", codexHistory?.lastRun?.status === "completed" && codexHistory?.lastRun?.engine === "codex", JSON.stringify(codexHistory?.lastRun));
+
+  // ── 3b. A real work order on codex (not only a chat turn) ───────────────
+  const codexTask = /** @type {any} */ (
+    await evalIn(
+      contents,
+      `window.cubicle.invoke('task.create', { employeeId: ${employeeId}, text: '读一下 greet.txt，然后说说里面写了什么。' })`,
+    )
+  );
+  const codexTaskId = Number(codexTask?.task?.id ?? 0);
+  const codexDispatch = /** @type {any} */ (
+    await evalIn(contents, `window.cubicle.invoke('task.dispatch', { taskId: ${codexTaskId} })`)
+  );
+  let codexTaskStatus = "";
+  const codexTaskReviewed = await waitFor(
+    async () => {
+      const detail = /** @type {any} */ (await evalIn(contents, `window.cubicle.invoke('task.detail', { taskId: ${codexTaskId} })`));
+      codexTaskStatus = String(detail?.task?.status ?? "");
+      return codexTaskStatus === "review";
+    },
+    { timeoutMs: 90_000 },
+  );
+  add(
+    "CODEX 跑通一张工单并进入「待验收」",
+    codexTaskId > 0 && Boolean(codexDispatch?.run) && codexTaskReviewed,
+    `taskId=${codexTaskId} status=${codexTaskStatus}`,
+  );
 
   // ── 4. Policy refusal on the codex desk (engine's own PreToolUse hook) ──
   const danger = await sendAndObserveDesk(ctx, win, MSG_DANGER);

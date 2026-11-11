@@ -13,6 +13,19 @@ import { DEFAULT_SCHEDULE, validateSchedule } from "./duty/schedule.mjs";
 import { deriveEngineBadge, installGuide } from "./engine/badge.mjs";
 import { extendBudgetBy50 } from "./cost/budget.mjs";
 import { existsSync } from "node:fs";
+import {
+  deleteModel,
+  deleteProvider,
+  ensureDshProfile,
+  publicModelLibrary,
+  readModelLibrary,
+  resolveModelForManifest,
+  saveModel,
+  saveProvider,
+  setDefaults,
+  testStoredModel,
+  writePiModels,
+} from "./models/library.mjs";
 
 /**
  * @typedef {import("../shared/envelope.mjs").InvokeEnvelope} InvokeEnvelope
@@ -178,7 +191,11 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
     if (pointer === null || pointer === undefined || String(pointer).length === 0) {
       return { canResume: false, hint: "引擎会话的恢复指针不在（这一轮从没跑完过）：只能重跑。" };
     }
-    if (!String(pointer).startsWith("thread:") && !existsSync(String(pointer))) {
+    if (
+      !String(pointer).startsWith("thread:") &&
+      !String(pointer).startsWith("acp:") &&
+      !existsSync(String(pointer))
+    ) {
       return { canResume: false, hint: "引擎的会话文件已经不在了：只能重跑。" };
     }
     return { canResume: true, hint: null };
@@ -194,6 +211,113 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
    */
   function pointerOfEmployeeSession(employeeSessionId) {
     return store.employeeSessionById(employeeSessionId)?.sessionFile ?? null;
+  }
+
+  /** Re-derive engine configs after any model-library mutation. */
+  function syncDerivedModels() {
+    const library = readModelLibrary(store.dataDir);
+    try {
+      writePiModels(store.dataDir, library);
+    } catch {
+      // A bad provider entry must not block saving the rest of the library.
+    }
+    try {
+      ensureDshProfile(store.dataDir, library);
+    } catch {
+      // The dsh profile is only consumed by the dsh adapter.
+    }
+  }
+
+  /** @param {string} engine */
+  function requireAdmittedEngine(engine) {
+    const state = store.engineState(engine);
+    if (!state) throw appError("unknown_engine", `no engine ${engine}`);
+    if (!state.enabled) throw appError("engine_not_admitted", `${engine} 尚未准入（未通过探针且未手动启用）`);
+    return state;
+  }
+
+  /**
+   * Resolve a model choice for an engine, turning library errors into
+   * user-facing host errors.
+   * @param {string} engine
+   * @param {Record<string, unknown>} manifest
+   */
+  function resolveChoice(engine, manifest) {
+    const library = readModelLibrary(store.dataDir);
+    return resolveModelForManifest(library, engine, manifest);
+  }
+
+  /**
+   * @param {unknown} payload
+   * @returns {{ engine: string, provider: string, model: string, reasoningEffort: string | null } | null}
+   */
+  function readModelChoice(payload) {
+    const record = /** @type {Record<string, unknown>} */ (payload ?? {});
+    if (typeof record.engine !== "string" || record.engine.trim().length === 0) return null;
+    if (typeof record.provider !== "string" || record.provider.trim().length === 0) return null;
+    if (typeof record.model !== "string" || record.model.trim().length === 0) return null;
+    const reasoning =
+      typeof record.reasoningEffort === "string" && record.reasoningEffort.length > 0 ? record.reasoningEffort : null;
+    return {
+      engine: record.engine.trim(),
+      provider: record.provider.trim(),
+      model: record.model.trim(),
+      reasoningEffort: reasoning,
+    };
+  }
+
+  /**
+   * A preflight view of the library with one provider/model removed, used to
+   * pick each affected employee's fallback before the delete is committed.
+   * @param {string} providerKey
+   * @param {string} [modelId]
+   */
+  function libraryAfterRemoval(providerKey, modelId) {
+    const library = readModelLibrary(store.dataDir);
+    const providers = library.providers
+      .filter((provider) => provider.key !== providerKey)
+      .map((provider) => ({ ...provider, models: provider.models.map((model) => ({ ...model })) }));
+    if (modelId) {
+      for (const provider of library.providers) {
+        if (provider.key !== providerKey) continue;
+        const kept = provider.models.filter((model) => model.id !== modelId).map((model) => ({ ...model }));
+        providers.push({ ...provider, models: kept });
+      }
+    }
+    return { ...library, providers };
+  }
+
+  /**
+   * Auto-reassign employees that would be orphaned by a delete (Q33 B).
+   * Throws (and blocks the delete) when an engine has no compatible fallback.
+   * @param {{ id: number, name: string, roleSnapshot: { manifest: Record<string, any> } }[]} affected
+   * @param {{ providerKey: string, modelId?: string }} removal
+   */
+  function reassignEmployees(affected, removal) {
+    if (affected.length === 0) return [];
+    const library = libraryAfterRemoval(removal.providerKey, removal.modelId);
+    /** @type {{ employeeId: number, name: string, engine: string, ref: string }[]} */
+    const reassigned = [];
+    for (const employee of affected) {
+      const engine = String(employee.roleSnapshot.manifest.engine ?? "pi");
+      let resolved;
+      try {
+        resolved = resolveModelForManifest(library, engine, { provider: "", model: "default" });
+      } catch (err) {
+        throw appError(
+          "model_in_use",
+          `${employee.name} 正在使用这个模型，且 ${engine} 没有可回迁的兼容模型：先给 ${engine} 配置一个模型，再删除。`,
+        );
+      }
+      store.updateEmployee({
+        employeeId: employee.id,
+        provider: resolved.provider.key,
+        model: resolved.model.id,
+        reasoningEffort: resolved.reasoningEffort,
+      });
+      reassigned.push({ employeeId: employee.id, name: employee.name, engine, ref: resolved.ref });
+    }
+    return reassigned;
   }
 
   /**
@@ -287,28 +411,163 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
     "employee.setEngine"(payload) {
       const employeeId = requirePositiveId(payload, "employeeId");
       const engine = requireName(payload, "engine");
-      const state = store.engineState(engine);
-      if (!state) throw appError("unknown_engine", `no engine ${engine}`);
-      if (!state.enabled) {
-        throw appError("engine_not_admitted", `${engine} 尚未准入（未通过探针且未手动启用）`);
-      }
+      requireAdmittedEngine(engine);
       if (!store.employeeById(employeeId)) throw appError("unknown_employee", `no employee with id ${employeeId}`);
-      const employee = store.setEmployeeEngine({ employeeId, engine });
+      // Switching engine chooses that engine's default/first-compatible model;
+      // the old engine's model ref is not allowed to leak across protocols.
+      const resolved = resolveChoice(engine, { provider: "", model: "default", reasoningEffort: null });
+      const employee = store.updateEmployee({
+        employeeId,
+        engine,
+        provider: resolved.provider.key,
+        model: resolved.model.id,
+        reasoningEffort: resolved.reasoningEffort,
+      });
       return { payload: { employee }, event: { reason: "employee.setEngine", employeeId, engine } };
     },
 
     "employee.hire"(payload) {
       const deskId = requirePositiveId(payload, "deskId");
       const roleId = requirePositiveId(payload, "roleId");
-      const rawName = /** @type {Record<string, unknown>} */ (payload ?? {}).name;
+      const record = /** @type {Record<string, unknown>} */ (payload ?? {});
+      const rawName = record.name;
       if (rawName !== undefined && rawName !== null && typeof rawName !== "string") {
         throw appError("invalid_payload", "name must be a string");
       }
-      const { employee, desk } = store.hireEmployee({ deskId, roleId, name: /** @type {string | undefined} */ (rawName ?? undefined) });
+      const role = store.listRoles().find((entry) => entry.id === roleId);
+      if (!role) throw appError("unknown_role", `no role with id ${roleId}`);
+      const engine = typeof record.engine === "string" && record.engine.trim().length > 0
+        ? record.engine.trim()
+        : String(role.manifest.engine ?? "pi");
+      requireAdmittedEngine(engine);
+      const explicit = readModelChoice(payload);
+      const resolved = resolveChoice(engine, {
+        provider: explicit?.provider ?? "",
+        model: explicit?.model ?? "default",
+        reasoningEffort: explicit?.reasoningEffort ?? null,
+      });
+      const { employee, desk } = store.hireEmployee({
+        deskId,
+        roleId,
+        name: /** @type {string | undefined} */ (rawName ?? undefined),
+        engine,
+        provider: resolved.provider.key,
+        model: resolved.model.id,
+        reasoningEffort: resolved.reasoningEffort,
+      });
       return {
         payload: { employee, desk },
         event: { reason: "employee.hire", employeeId: employee.id, deskId },
       };
+    },
+
+    "employee.update"(payload) {
+      const employeeId = requirePositiveId(payload, "employeeId");
+      const existing = store.employeeById(employeeId);
+      if (!existing) throw appError("unknown_employee", `no employee with id ${employeeId}`);
+      const record = /** @type {Record<string, unknown>} */ (payload ?? {});
+      if (record.name !== undefined && typeof record.name !== "string") {
+        throw appError("invalid_payload", "name must be a string");
+      }
+      const engine = typeof record.engine === "string" && record.engine.trim().length > 0
+        ? record.engine.trim()
+        : String(existing.roleSnapshot.manifest.engine ?? "pi");
+      const modelTouched =
+        typeof record.provider === "string" ||
+        typeof record.model === "string" ||
+        typeof record.reasoningEffort === "string" ||
+        record.reasoningEffort === null;
+      // A name-only edit must not be blocked by an old, pre-library model ref.
+      if (modelTouched) {
+        requireAdmittedEngine(engine);
+        const explicit = readModelChoice({ ...record, engine });
+        const resolved = resolveChoice(engine, {
+          provider: explicit?.provider ?? (typeof record.provider === "string" ? record.provider : existing.roleSnapshot.manifest.provider ?? ""),
+          model: explicit?.model ?? (typeof record.model === "string" ? record.model : existing.roleSnapshot.manifest.model ?? "default"),
+          reasoningEffort:
+            record.reasoningEffort === null
+              ? null
+              : (explicit?.reasoningEffort ?? existing.roleSnapshot.manifest.reasoningEffort ?? null),
+        });
+        const employee = store.updateEmployee({
+          employeeId,
+          name: typeof record.name === "string" ? record.name : undefined,
+          engine,
+          provider: resolved.provider.key,
+          model: resolved.model.id,
+          reasoningEffort: resolved.reasoningEffort,
+        });
+        return {
+          payload: { employee },
+          event: { reason: "employee.update", employeeId, engine },
+        };
+      }
+      const employee = store.updateEmployee({
+        employeeId,
+        name: typeof record.name === "string" ? record.name : undefined,
+      });
+      return { payload: { employee }, event: { reason: "employee.update", employeeId } };
+    },
+
+    // — engine-agnostic model library (ticket 14) —
+
+    "model.library"() {
+      return { payload: publicModelLibrary(readModelLibrary(store.dataDir)) };
+    },
+
+    "model.provider.save"(payload) {
+      const library = saveProvider(store.dataDir, /** @type {Record<string, unknown>} */ (payload ?? {}));
+      syncDerivedModels();
+      return { payload: library, event: { reason: "model.provider.save" } };
+    },
+
+    "model.provider.delete"(payload) {
+      const providerKey = requireName(payload, "providerKey");
+      const affected = store
+        .listAllEmployees()
+        .filter((employee) => employee.roleSnapshot.manifest?.provider === providerKey);
+      const reassigned = reassignEmployees(affected, { providerKey });
+      const library = deleteProvider(store.dataDir, providerKey);
+      syncDerivedModels();
+      return { payload: { ...library, reassigned }, event: { reason: "model.provider.delete", providerKey } };
+    },
+
+    "model.model.save"(payload) {
+      const providerKey = requireName(payload, "providerKey");
+      const library = saveModel(store.dataDir, providerKey, /** @type {Record<string, unknown>} */ (payload ?? {}));
+      syncDerivedModels();
+      return { payload: library, event: { reason: "model.model.save", providerKey } };
+    },
+
+    "model.model.delete"(payload) {
+      const providerKey = requireName(payload, "providerKey");
+      const modelId = requireName(payload, "modelId");
+      const affected = store
+        .listAllEmployees()
+        .filter(
+          (employee) =>
+            employee.roleSnapshot.manifest?.provider === providerKey &&
+            employee.roleSnapshot.manifest?.model === modelId,
+        );
+      const reassigned = reassignEmployees(affected, { providerKey, modelId });
+      const library = deleteModel(store.dataDir, providerKey, modelId);
+      syncDerivedModels();
+      return { payload: { ...library, reassigned }, event: { reason: "model.model.delete", providerKey, modelId } };
+    },
+
+    "model.defaults.set"(payload) {
+      const providerKey = requireName(payload, "providerKey");
+      const modelId = requireName(payload, "modelId");
+      const library = setDefaults(store.dataDir, { providerKey, modelId });
+      syncDerivedModels();
+      return { payload: library, event: { reason: "model.defaults.set", providerKey, modelId } };
+    },
+
+    async "model.test"(payload) {
+      const providerKey = requireName(payload, "providerKey");
+      const modelId = requireName(payload, "modelId");
+      const result = await testStoredModel(store.dataDir, providerKey, modelId);
+      return { payload: result };
     },
 
     // — engine runs (ticket 04) — the reply only starts/answers; engine
@@ -653,15 +912,12 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
      * 招聘 codex 员工，它的引擎自然进列表）。
      */
     "engine.overview"() {
-      /** @type {{ name: string, configDir: string }[]} */
-      const engines = [];
-      const seen = new Set();
-      for (const role of store.listRoles()) {
-        const name = role.manifest.engine && role.manifest.engine.length > 0 ? role.manifest.engine : "pi";
-        if (seen.has(name)) continue;
-        seen.add(name);
-        engines.push({ name, configDir: engineConfigDir(store.dataDir, name) });
-      }
+      // Fixed engine set (ticket 14): pi / codex / dsh are the adapters the
+      // app ships; the model library, not role manifests, decides what they use.
+      const engines = store.listEngineStates().map((state) => ({
+        name: state.engine,
+        configDir: engineConfigDir(store.dataDir, state.engine),
+      }));
       return { payload: { engines, dataDir: store.dataDir } };
     },
 

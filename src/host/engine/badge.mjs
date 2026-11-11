@@ -26,6 +26,7 @@ export function deriveEngineBadge({ installed, configured }) {
 export const INSTALL_GUIDES = {
   codex: "未安装：装官方 Codex CLI（npm install -g @openai/codex，0.163 以上），或在引擎中心指定其路径后重试。",
   pi: "pi 引擎随 Cubicle 打包，不需要单独安装。",
+  dsh: "未安装：装 DeepSeek Harness desktop（0.2.x），或设置 CUBICLE_DSH_EXE / CUBICLE_DSH_ENTRY 指向安装位置。",
 };
 
 /** @param {string} engine @returns {string} */
