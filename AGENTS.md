@@ -7,12 +7,12 @@
 **Cubicle** —— 一间看得见的办公室：AI 数字员工在工位上干活，你招聘、派活、验收。
 Windows 优先的桌面应用（Electron + React + Three.js），不绑定任何 agent 引擎（统一适配层调用本机 pi / codex / claude / dsh / qoder…）。
 
-**当前状态：M0-M7 全部通过（2026-11-11）—— 17 张研发票全部 done：01 探路、02 空办公室、03 招聘、04 引擎开跑、05 工单与产出、06 验收与打回、07 工位动画、08 主界面外壳、09 上下班、10 崩溃恢复、11 第二引擎 codex、12 失败与成本、13 打包、14 统一设置 + 引擎无关模型库（pi/codex/dsh）、15 3D 办公室场景（Blender/Three.js，8 工位 + 咖啡机/饮水机）、16 视口自适应 + 缩放/平移巡检、17 工位屏幕状态 + 随机摸鱼。**
+**当前状态：M0-M7 全部通过（2026-11-12）—— 18 张研发票全部 done：01 探路、02 空办公室、03 招聘、04 引擎开跑、05 工单与产出、06 验收与打回、07 工位动画、08 主界面外壳、09 上下班、10 崩溃恢复、11 第二引擎 codex、12 失败与成本、13 打包、14 统一设置 + 引擎无关模型库（pi/codex/dsh）、15 3D 办公室场景（Blender/Three.js，8 工位 + 咖啡机/饮水机）、16 视口自适应 + 缩放/平移巡检、17 工位屏幕状态 + 随机摸鱼、18 无文字场景（员工形象 + 桌面名牌 + 走道寻路）。**
 
 ## 先读顺序
 
 1. `README.md` —— 门面与下一步
-2. `.scratch/v1/README.md` —— **研发票总览**（17 张、依赖表、怎么取票）
+2. `.scratch/v1/README.md` —— **研发票总览**（18 张、依赖表、怎么取票）
 3. `.scratch/cubicle/map.md` —— 决策地图（15 条决策索引 + 雾区 + 范围边界）
 4. `GLOSSARY.md` —— 领域术语（公司/项目组/工位/员工/角色/任务/会话/产出）
 5. 与任务相关的那张票的 `## Answer`（在 `.scratch/cubicle/issues/`）
@@ -30,7 +30,7 @@ Windows 优先的桌面应用（Electron + React + Three.js），不绑定任何
 
 ## 研发票（下一步做什么）
 
-- 位置：`.scratch/v1/issues/NN-<slug>.md`，17 张 tracer-bullet 票，每张可独立演示
+- 位置：`.scratch/v1/issues/NN-<slug>.md`，18 张 tracer-bullet 票，每张可独立演示
 - 状态：`Status: ready-for-agent | in-progress | done`
 - **取票**：编号最小 + `Blocked by` 全部 done；动手前把 Status 改 `in-progress`
 - **完成**：逐条勾选验收项，Status 改 `done`
@@ -74,5 +74,5 @@ Windows 优先的桌面应用（Electron + React + Three.js），不绑定任何
 - 三层：`main`（窗口/更新/偏好）· `AgentHost`（utilityProcess：SQLite 单写者 + 引擎运行时）· `renderer`（纯视图）
 - 存储：SQLite(WAL) + 文件系统（artifacts / engines / renders）
 - IPC：类型化事件信封 + 16ms 合帧 + 主题订阅 + 大对象走指针
-- 渲染：`SceneRenderer` 接口隔离渲染技术（当前 = Blender 导出的 `office.glb` + Three.js 后方斜俯视 3D 场景 + DOM 投影名牌/状态灯；视口随窗口等比铺满，视口内支持相机缩放/平移巡检；员工状态靠动作与屏幕内容表达，不写状态文字）
+- 渲染：`SceneRenderer` 接口隔离渲染技术（当前 = Blender 导出的 `office.glb` + Three.js 后方斜俯视 3D 场景 + 桌面实体名牌；视口随窗口等比铺满，视口内支持相机缩放/平移巡检；员工状态靠动作与屏幕内容表达，不写状态文字）
 - 原型是 throwaway：`.scratch/cubicle/prototypes/` 里的代码**不要直接进主干**，移植时重写

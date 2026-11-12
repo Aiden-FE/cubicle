@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useDialog } from "./useDialog.js";
+import { tokenText } from "./scene/tokenReadout.js";
 
 const DOMAIN_TOPIC = "domain.changed";
 
@@ -62,6 +63,15 @@ export function RosterPanel({ snapshot, onClose, onEditEmployee }) {
             <span className="roster-name" data-testid="roster-name">{employee.name}</span>
             <span className="roster-role">{employee.roleName}</span>
             <span className="roster-seat">在岗 · {employee.deskLabel} · {employee.groupName}</span>
+            {/* 票 18: the employee's token total moved here from the scene —
+                the desk itself no longer carries any text. */}
+            <span
+              className="roster-token"
+              data-testid="roster-token"
+              data-measured={snapshot?.employeeTokens?.[String(employee.id)]?.measured === true ? "true" : "false"}
+            >
+              {tokenText(snapshot?.employeeTokens?.[String(employee.id)] ?? null)}
+            </span>
             {onEditEmployee ? (
               <button
                 type="button"

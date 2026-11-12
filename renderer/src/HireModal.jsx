@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { appearanceFor } from "./roleAppearance.js";
 import { useDialog } from "./useDialog.js";
+import { EMPLOYEE_LOOKS, lookFor } from "./scene/employeeLook.js";
+import { LookPicker } from "./LookPicker.jsx";
 
 /**
  * @param {any} library
@@ -57,6 +59,9 @@ export function HireModal({ desk, onClose }) {
   const [modelRef, setModelRef] = useState("");
   const [reasoning, setReasoning] = useState("");
   const [name, setName] = useState("");
+  // 票 18: the face is picked at hire time; the default follows the role so a
+  // fast confirm still lands someone recognisable.
+  const [appearance, setAppearance] = useState(EMPLOYEE_LOOKS[0].id);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(/** @type {string | null} */ (null));
   const dialogRef = useDialog(onClose);
@@ -77,6 +82,7 @@ export function HireModal({ desk, onClose }) {
     setEngine(String(role.manifest.engine ?? "pi"));
     setModelRef("");
     setReasoning("");
+    setAppearance(lookFor({ appearance: null, roleSnapshot: role }).id);
   }, [role]);
 
   useEffect(() => {
@@ -124,6 +130,7 @@ export function HireModal({ desk, onClose }) {
         deskId: desk.id,
         roleId: role.id,
         name,
+        appearance,
         engine,
         provider,
         model,
@@ -253,6 +260,11 @@ export function HireModal({ desk, onClose }) {
                 disabled={busy}
               />
             </label>
+            <div className="hire-look-row">
+              <div className="hire-look-title">员工形象</div>
+              <LookPicker value={appearance} onChange={setAppearance} disabled={busy} testId="hire-look-picker" />
+              <div className="hire-hint">办公室里没有姓名标签：桌面名牌写名字，形象让同事一眼认出是谁。</div>
+            </div>
             <div className="settings-form-row">
               <label className="settings-field">
                 引擎

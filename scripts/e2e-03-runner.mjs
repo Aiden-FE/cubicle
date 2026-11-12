@@ -50,7 +50,9 @@ const MANIFEST_NEEDLES = ["人格", "技能", "工具", "引擎", "成本", "严
  */
 
 const OCCUPIED_DESK_COUNT_JS = `document.querySelectorAll('[data-testid="desk"][data-empty="false"]').length`;
-const OCCUPANT_TEXT_JS = `Array.from(document.querySelectorAll('[data-testid="desk-occupant"]')).map((n) => n.textContent).join("|")`;
+// 票 18: the scene carries no floating nameplate — the name lives on the 3D
+// desk plaque, and the desk exposes it as data for accessibility/tests.
+const OCCUPANT_TEXT_JS = `Array.from(document.querySelectorAll('[data-testid="desk"][data-empty="false"]')).map((n) => n.dataset.occupantName ?? "").join("|")`;
 
 /**
  * @param {E2EContext} ctx
@@ -181,7 +183,7 @@ async function phaseVerify(ctx) {
     const text = String(await evalIn(win.webContents, OCCUPANT_TEXT_JS));
     return text.includes(E2E_HIRE_A) && text.includes(E2E_HIRE_B);
   }, { timeoutMs: 4000 });
-  add("画面显示两名占用员工与其角色名", canvasShowsBoth && textShowsBoth);
+  add("画面显示两名占用员工与其姓名（桌面名牌 + 工位数据）", canvasShowsBoth && textShowsBoth);
 
   return { checks };
 }

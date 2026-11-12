@@ -296,22 +296,34 @@ async function phaseCost(ctx, checks, evidence) {
   const unmeasuredLabel = String(await evalIn(contents, TOKEN_CODE_JS));
   add("C · 任务侧边栏显示「未计量」而不是 0", unmeasuredLabel === "未计量", `label=${unmeasuredLabel}`);
 
-  // — D. 三层可见：员工名牌 + 公司面板 —
+  // — D. 三层可见：花名册（员工级）+ 公司面板。票 18 把员工 token 从场景
+  //     名牌搬进了花名册 —— 场景里不再有任何文字。
   await click(contents, '[data-testid="task-back"]');
+  await click(contents, '[data-testid="task-close"]');
+  await click(contents, '[data-testid="rail-roster"]');
+  const rosterOpen = await waitFor(
+    async () => (await evalIn(contents, `document.querySelector('[data-testid="roster-panel"]') !== null`)) === true,
+    { timeoutMs: 3000 },
+  );
+  await waitFor(
+    async () => (await evalIn(contents, `document.querySelectorAll('[data-testid="roster-row"]').length`)) === 2,
+    { timeoutMs: 4000 },
+  );
   const plates = /** @type {any[]} */ (
     await evalIn(
       contents,
-      `Array.from(document.querySelectorAll('[data-testid="desk"]')).map((d) => ({
-        empty: d.dataset.empty,
-        token: d.querySelector('[data-testid="desk-token"]')?.textContent ?? '',
-        measured: d.querySelector('[data-testid="desk-token"]')?.dataset.measured ?? '',
+      `Array.from(document.querySelectorAll('[data-testid="roster-row"]')).map((row) => ({
+        name: row.querySelector('[data-testid="roster-name"]')?.textContent ?? '',
+        token: row.querySelector('[data-testid="roster-token"]')?.textContent ?? '',
+        measured: row.querySelector('[data-testid="roster-token"]')?.dataset.measured ?? '',
       }))`,
     )
   );
   const plateE1 = plates.find((p) => p.measured === "true");
   const plateE2 = plates.find((p) => p.token === "未计量");
-  add("D · 员工名牌（甲）显示员工级 token 聚合（计量过）", Boolean(plateE1) && /^\d+(\.\d+[km])?$/.test(plateE1?.token ?? ""), JSON.stringify(plateE1));
-  add("D · 员工名牌（乙）显示「未计量」（不是 0）", Boolean(plateE2), JSON.stringify(plateE2));
+  add("D · 花名册（甲）显示员工级 token 聚合（计量过）", rosterOpen && Boolean(plateE1) && /^\d+(\.\d+[km])?$/.test(plateE1?.token ?? ""), JSON.stringify({ rosterOpen, plates: plates.slice(0, 3) }));
+  add("D · 花名册（乙）显示「未计量」（不是 0）", Boolean(plateE2), JSON.stringify({ rosterOpen, plates }));
+  await click(contents, '[data-testid="rail-roster"]');
 
   await click(contents, '[data-testid="company-switcher"]');
   const companyTokenShown = await waitFor(

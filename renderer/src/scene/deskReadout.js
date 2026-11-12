@@ -23,7 +23,7 @@ export function deskSignals(activity, motion) {
     ? "working"
     : activity.blocked !== null
       ? "blocked"
-      : motion.posture === "coffee"
+      : motion.posture === "coffee" || motion.posture === "water"
         ? "coffee"
         : motion.posture === "phone" || motion.posture === "minesweeper"
           ? "slack"

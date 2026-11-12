@@ -53,6 +53,23 @@ function readRoleTokenBudget(roleSnapshot) {
 }
 
 /**
+ * 票 18: the employee's look is presentation, so the host only checks the
+ * shape (a short lowercase id). Unknown ids are kept as-is; the renderer
+ * falls back to the role's default face rather than rendering nobody.
+ *
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+function readAppearance(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") throw appError("invalid_payload", "appearance must be a look id");
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+  if (trimmed.length > 32) throw appError("invalid_payload", "appearance is too long");
+  return trimmed;
+}
+
+/**
  * 票 12: the续跑 contract after the soft gate capped a task — the 票 09 resume
  * channel, with the raised budget stated so the engine knows to continue
  * (not restart) its work.
@@ -434,6 +451,10 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
       if (rawName !== undefined && rawName !== null && typeof rawName !== "string") {
         throw appError("invalid_payload", "name must be a string");
       }
+      // 票 18: the look chosen in the wizard. The catalog lives in the
+      // renderer (it is presentation), so the host only enforces shape;
+      // an unknown id falls back to the role's default face on screen.
+      const appearance = readAppearance(record.appearance);
       const role = store.listRoles().find((entry) => entry.id === roleId);
       if (!role) throw appError("unknown_role", `no role with id ${roleId}`);
       const engine = typeof record.engine === "string" && record.engine.trim().length > 0
@@ -450,6 +471,7 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
         deskId,
         roleId,
         name: /** @type {string | undefined} */ (rawName ?? undefined),
+        appearance,
         engine,
         provider: resolved.provider.key,
         model: resolved.model.id,
@@ -469,6 +491,7 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
       if (record.name !== undefined && typeof record.name !== "string") {
         throw appError("invalid_payload", "name must be a string");
       }
+      const appearance = readAppearance(record.appearance);
       const engine = typeof record.engine === "string" && record.engine.trim().length > 0
         ? record.engine.trim()
         : String(existing.roleSnapshot.manifest.engine ?? "pi");
@@ -492,6 +515,7 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
         const employee = store.updateEmployee({
           employeeId,
           name: typeof record.name === "string" ? record.name : undefined,
+          appearance,
           engine,
           provider: resolved.provider.key,
           model: resolved.model.id,
@@ -505,6 +529,7 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
       const employee = store.updateEmployee({
         employeeId,
         name: typeof record.name === "string" ? record.name : undefined,
+        appearance,
       });
       return { payload: { employee }, event: { reason: "employee.update", employeeId } };
     },

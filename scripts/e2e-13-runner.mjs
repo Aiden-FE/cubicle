@@ -77,15 +77,14 @@ async function phaseBoot(ctx, add) {
         `(() => ({
           canvas: document.querySelector('[data-testid="office-3d"] canvas') !== null,
           desks: document.querySelectorAll('[data-testid="desk"]').length,
-          coffee: document.querySelector('[data-testid="amenity-coffee"]') !== null,
-          water: document.querySelector('[data-testid="amenity-water"]') !== null,
+          labels: document.querySelectorAll('.amenity-tag, [data-testid="desk-occupant"], [data-testid="desk-light"]').length,
         }))()`,
       )).canvas === true &&
       (await evalIn(contents, `document.querySelectorAll('[data-testid="desk"]').length`)) === 8 &&
-      (await evalIn(contents, `document.querySelector('[data-testid="amenity-coffee"]') !== null`)) === true,
+      (await evalIn(contents, `document.querySelectorAll('.amenity-tag, [data-testid="desk-occupant"]').length`)) === 0,
     { timeoutMs: 8000 },
   );
-  add("打包形态：3D 场景从 asar 加载（WebGL 画布 + 8 工位 + 咖啡机/饮水机）", scene3d);
+  add("打包形态：3D 场景从 asar 加载（WebGL 画布 + 8 工位 + 无文字标签）", scene3d);
 
   // 验收 5：关于页显示版本号；三方一致 = exe metadata(app.getVersion) =
   // asar package.json（主进程 app-info IPC 对表）= 关于页 DOM。期望版本由

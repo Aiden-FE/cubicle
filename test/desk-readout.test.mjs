@@ -11,18 +11,21 @@ import { deskSignals } from "../renderer/src/scene/deskReadout.js";
 const WORKING = motionOnWork(initialMotion(0), 0);
 const BUSY = reduceDeskActivity(initialDeskActivity(), { type: "session_start", sessionId: "1" }, 0);
 const phone = () => 0.1;
-const minesweeper = () => 0.5;
-const coffee = () => 0.9;
+const minesweeper = () => 0.3;
+const coffee = () => 0.6;
+const water = () => 0.9;
+const walk = () => 2_500;
 
 test("busy/idle signals are derived from state, never from text prefs", () => {
   assert.deepEqual(deskSignals(BUSY, WORKING), { busy: true, light: "working" });
   assert.deepEqual(deskSignals(initialDeskActivity(), initialMotion(0)), { busy: false, light: "idle" });
 });
 
-test("the three idle postures stay readable without any label: 手机 / 扫雷 / 咖啡", () => {
+test("the four idle postures stay readable without any label: 手机 / 扫雷 / 咖啡 / 打水", () => {
   assert.equal(deskSignals(initialDeskActivity(), advanceMotion(initialMotion(0), 9_000, undefined, phone)).light, "slack");
   assert.equal(deskSignals(initialDeskActivity(), advanceMotion(initialMotion(0), 9_000, undefined, minesweeper)).light, "slack");
   assert.equal(deskSignals(initialDeskActivity(), advanceMotion(initialMotion(0), 9_000, undefined, coffee)).light, "coffee");
+  assert.equal(deskSignals(initialDeskActivity(), advanceMotion(initialMotion(0), 9_000, undefined, water)).light, "coffee");
 });
 
 test("an unresolved 拒绝 outranks idle postures on the always-on light", () => {

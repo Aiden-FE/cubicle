@@ -254,17 +254,16 @@ async function phaseShell(ctx) {
             canvas: document.querySelector('[data-testid="office-3d"] canvas') !== null,
             canvasW: document.querySelector('[data-testid="office-3d"] canvas')?.clientWidth ?? 0,
             desks: document.querySelectorAll('[data-testid="desk"]').length,
-            coffee: document.querySelector('[data-testid="amenity-coffee"]') !== null,
-            water: document.querySelector('[data-testid="amenity-water"]') !== null,
+            labels: document.querySelectorAll('.amenity-tag, [data-testid="desk-occupant"], [data-testid="desk-light"]').length,
           }))()`,
         )
       );
-      return state.canvas && state.canvasW > 0 && state.desks === 8 && state.coffee && state.water ? state : null;
+      return state.canvas && state.canvasW > 0 && state.desks === 8 && state.labels === 0 ? state : null;
     },
     { timeoutMs: 8000 },
   );
   add(
-    "3D 办公室：WebGL 画布 + 8 工位 + 咖啡机/饮水机",
+    "3D 办公室：WebGL 画布 + 8 工位，且场景内没有任何文字标签（票 18）",
     Boolean(scene3d),
     JSON.stringify(scene3d),
   );

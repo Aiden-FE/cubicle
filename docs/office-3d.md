@@ -13,7 +13,10 @@ renderer/public/office/office.glb   (≈4.7 MB, materials only, no textures)
         │  GLTFLoader
         ▼
 renderer/src/scene/Office3D.jsx      (Three.js, camera + lights + avatars + screens)
-renderer/src/OfficeFloor.jsx         (DOM nameplates/status lights projected over the canvas)
+renderer/src/OfficeFloor.jsx         (DOM hit areas + empty-bay affordance projected over the canvas)
+renderer/src/scene/avatarRig.js      (jointed low-poly employee + seated/walk poses)
+renderer/src/scene/employeeLook.js   (the eight selectable looks)
+renderer/src/scene/navigation.js     (desk layout + aisle walk graph)
 ```
 
 `scripts/blender/office-backdrop.py` is only the WebGL-failure fallback image
@@ -98,6 +101,55 @@ walk is interpolated every frame from the state phase timestamps, so the
 500ms React tick only changes posture/phase; it does not step the position.
 Coffee starts beside the counter at `(-3.42, 4.92)`, clear of the counter
 occlusion seen in the first pass.
+
+## No text in the scene (ticket 18)
+
+The office is read from people and screens, never from labels:
+
+- the amenity tags (咖啡机 / 饮水机), the floating employee nameplate, the status
+  light and the token badge are gone;
+- the employee's name lives on a **physical desk plaque** painted into a canvas
+  texture and placed on the desk top (the 名牌 preference shows/hides it);
+- who is who comes from the person: hire (or edit) picks one of eight looks —
+  skin, hair colour and silhouette, shirt, accessory, build — stored on the
+  employee row (`employee.appearance`, NULL = the role's default face);
+- the always-on status light is replaced by posture + monitor content;
+- employee-level token totals moved to the 花名册 roster panel.
+
+## The employee rig
+
+`renderer/src/scene/avatarRig.js` builds a jointed low-poly person instead of
+the old torso-capsule blob:
+
+```
+group (pelvis height)
+├── hips
+├── torsoPivot (lean)
+│   ├── torso, shoulders, collar, tie
+│   ├── headPivot → neck, head, ears, hair, glasses/headset/cap
+│   └── armL/armR (shoulder pivot) → elbow → hand → cup/bottle/phone
+└── legL/legR (hip pivot) → knee → shin + foot
+```
+
+One rig does both poses: seated, the thighs rotate to 1.42 rad and the shins
+back down so the hips sit on the 0.58 m cushion with the feet under the desk;
+walking, the same joints swing. The torso is long enough (shoulder y ≈ 1.22
+seated) that the shoulders clear the 1.09 m chair backrest, which is what the
+old model failed to do. Props are counter-rotated by the arm's X rotation so a
+cup stays upright and a phone faces the employee.
+
+## Walking the aisles
+
+`renderer/src/scene/navigation.js` owns the walkable graph: every bay exits
+behind its chair, joins its row aisle (2.70 m behind the back row, 4.55 m in
+front of the front row), crosses rows only through the 0.75 m column gaps
+(x = ±2.3, 0), then steps into the coffee stand (-3.42, 4.95) or the water
+cooler (-4.28, 2.70). `walkRouteFor()` returns the polyline and
+`walkDurationMs()` the walk time at 1.55 m/s (clamped 1.3–3.6 s), so the state
+machine and the renderer agree on when the walk ends. `test/navigation.test.mjs`
+samples 120 points on all 16 routes and asserts none lands inside a desk
+footprint or another chair — the "walk through a workstation" bug is now a
+failing unit test, not just a screenshot.
 
 ## Viewport and inspection zoom
 

@@ -246,42 +246,6 @@ body {
   pointer-events: auto;
 }
 
-.amenity-layer {
-  position: absolute;
-  inset: 0;
-  z-index: 4;
-  pointer-events: none;
-}
-
-.amenity-tag {
-  position: absolute;
-  transform: translate(-50%, -100%);
-  padding: 2px 8px;
-  border: 1px solid rgba(96, 77, 54, 0.22);
-  border-radius: 999px;
-  background: rgba(255, 251, 241, 0.82);
-  color: #5d4b38;
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  box-shadow: 0 2px 6px rgba(45, 33, 21, 0.10);
-  backdrop-filter: blur(3px);
-}
-
-.amenity-tag::before {
-  content: "";
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  margin-right: 5px;
-  border-radius: 50%;
-  background: #ad7a45;
-  vertical-align: 1px;
-}
-
-.amenity-water::before {
-  background: #6f9bab;
-}
-
 .room-vignette {
   position: absolute;
   inset: 0;
@@ -327,29 +291,6 @@ body {
   pointer-events: none;
 }
 
-/* Nameplate sits INSIDE the workstation art's bottom band, so desk cards
-   never spill into the next row (first-row labels used to be covered). */
-.desk-plate {
-  position: absolute;
-  left: 50%;
-  bottom: 2px;
-  transform: translateX(-50%);
-  white-space: nowrap;
-  font-size: 12px;
-  color: var(--ink);
-  background: var(--paper-raised);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 2px 12px;
-  box-shadow: 0 2px 6px rgba(43, 38, 32, 0.1);
-}
-
-.desk-plate-empty {
-  color: var(--ink-soft);
-}
-
-/* Eight desks make six empty nameplates visual noise. Empty bays get a small
-   “+” affordance; the full “空位 · 点击招聘” line appears on hover/focus. */
 .desk-vacant {
   position: absolute;
   left: 50%;
@@ -381,27 +322,11 @@ body {
   line-height: 1;
 }
 
-.desk-vacant > em {
-  display: none;
-  font-style: normal;
-  white-space: nowrap;
-}
-
 .desk-empty:hover .desk-vacant,
 .desk-empty:focus-visible .desk-vacant {
   opacity: 1;
   background: var(--paper-raised);
   box-shadow: 0 4px 12px rgba(43, 38, 32, 0.12);
-}
-
-.desk-empty:hover .desk-vacant > em,
-.desk-empty:focus-visible .desk-vacant > em {
-  display: inline;
-}
-
-.desk-empty:hover .desk-vacant > span,
-.desk-empty:focus-visible .desk-vacant > span {
-  display: none;
 }
 
 /* empty desks invite hiring; occupied ones just show their person */
@@ -414,17 +339,6 @@ body {
 .desk-empty:hover,
 .desk-empty:focus-visible {
   background: rgba(43, 38, 32, 0.05);
-}
-
-.desk-empty:hover .desk-plate,
-.desk-empty:focus-visible .desk-plate {
-  color: var(--ink);
-  border-color: var(--ink-soft);
-}
-
-.desk-plate-occupied {
-  color: var(--ok);
-  border-color: rgba(61, 138, 95, 0.35);
 }
 
 /* ── hire wizard (mid-screen modal, decision 10) ───────────────── */
@@ -681,6 +595,55 @@ body {
   margin-top: 10px;
   font-size: 12.5px;
   color: var(--bad);
+}
+
+/* 票 18: picking a face — the office reads identity from the person, not
+   from floating labels, so this choice is part of hiring. */
+.hire-look-row {
+  margin-top: 14px;
+}
+
+.hire-look-title {
+  font-size: 13px;
+  color: var(--ink-soft);
+  margin-bottom: 8px;
+}
+
+.look-picker {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.look-option {
+  padding: 3px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  cursor: pointer;
+  transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.look-option:hover:not(:disabled) {
+  transform: translateY(-2px);
+  border-color: rgba(96, 77, 54, 0.4);
+}
+
+.look-option.selected {
+  border-color: var(--ok);
+  box-shadow: 0 0 0 2px rgba(61, 138, 95, 0.2);
+}
+
+.look-option:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.look-glyph {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 11px;
 }
 
 .hire-footer {
@@ -964,11 +927,6 @@ body {
 .desk-occupied:hover,
 .desk-occupied:focus-visible {
   background: rgba(43, 38, 32, 0.05);
-}
-
-.desk-plate-working {
-  color: var(--warn);
-  border-color: rgba(201, 138, 44, 0.45);
 }
 
 /* ── conversation drawer (ticket 04) ───────────────────────────── */
@@ -1301,36 +1259,6 @@ body {
   to {
     opacity: 1;
   }
-}
-
-/* always-on status light: 在忙/在闲 survives every text toggle */
-.desk-status-light {
-  position: absolute;
-  top: 4px;
-  right: 10px;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  border: 1px solid rgba(43, 38, 32, 0.25);
-  background: var(--ok);
-}
-
-.desk-status-light.working {
-  background: var(--warn);
-  animation: desk-light-pulse 1.2s ease-in-out infinite;
-}
-
-.desk-status-light.blocked {
-  background: var(--bad);
-  animation: desk-light-pulse 0.8s ease-in-out infinite;
-}
-
-.desk-status-light.slack {
-  background: #4f8f9c;
-}
-
-.desk-status-light.coffee {
-  background: #8a7a63;
 }
 
 @keyframes desk-light-pulse {
@@ -2437,17 +2365,6 @@ body {
   font-weight: 700;
 }
 
-.desk-plate-token {
-  margin-left: 6px;
-  padding: 0 6px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.55);
-  font-size: 12px;
-  font-weight: 600;
-  color: #5d564b;
-}
-
 .switcher-token-count {
   display: block;
   font-size: 12px;
@@ -2759,8 +2676,10 @@ button.handle-row:hover {
   flex-direction: column;
   gap: 10px;
 }
-.desk-plate-token {
+.roster-token {
   font-size: 12px;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
 }
 .task-paused-badge,
 .task-interrupted-badge {
@@ -2812,7 +2731,7 @@ button.handle-row:hover {
   white-space: nowrap;
 }
 
-.desk-plate-token,
+.roster-token,
 .chat-time,
 .workclock-hint,
 .task-section-label {

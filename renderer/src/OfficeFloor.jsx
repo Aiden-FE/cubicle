@@ -1,11 +1,10 @@
 import React, { useRef, useState } from "react";
 import { deskStyle, projectedDeskStyle } from "./scene/domScene.js";
 import { Office3D } from "./scene/Office3D.jsx";
-import { appearanceFor } from "./roleAppearance.js";
+import { lookFor } from "./scene/employeeLook.js";
 import { initialDeskActivity } from "./scene/deskActivity.js";
 import { initialMotion } from "./scene/idleMotion.js";
 import { deskSignals } from "./scene/deskReadout.js";
-import { tokenText } from "./scene/tokenReadout.js";
 import { screenForDesk } from "./scene/deskScreen.js";
 
 const INITIAL_SCENE_VIEW = {
@@ -44,13 +43,12 @@ const INITIAL_SCENE_VIEW = {
 export function OfficeFloor({ snapshot, status, bridgeError, offDuty, onHireAt, onTalkTo, deskStates, viewPrefs }) {
   const ready = status.state === "online" && snapshot;
   const [projected, setProjected] = useState(/** @type {Record<number, { x: number, y: number, width: number, height: number, hitLeft: number, hitTop: number, clipPath: string }> | null} */ (null));
-  const [amenities, setAmenities] = useState(/** @type {Record<string, { x: number, y: number }> | null} */ (null));
   const [scene3dFailed, setScene3dFailed] = useState(false);
   const [sceneView, setSceneView] = useState(INITIAL_SCENE_VIEW);
   const sceneApiRef = React.useRef(/** @type {{ zoomIn: () => void, zoomOut: () => void, reset: () => void } | null} */ (null));
 
   return (
-    <div className="office-floor" data-testid="office-floor">
+    <div className="office-floor" data-testid="office-floor" data-nameplates={viewPrefs?.plate === false ? "off" : "on"}>
       {!ready ? (
         <div className="scene-caption" data-testid="scene-caption">
           <span>{bridgeError ? "后台服务未连接，正在自动重试…" : "正在准备办公室…"}</span>
@@ -121,11 +119,11 @@ export function OfficeFloor({ snapshot, status, bridgeError, offDuty, onHireAt, 
             desks={snapshot.desks}
             deskStates={deskStates}
             offDuty={offDuty}
+            showNameplates={viewPrefs?.plate !== false}
             controlsRef={sceneApiRef}
             onView={(view) => setSceneView(view)}
-            onProject={(positions, nextAmenities) => {
+            onProject={(positions) => {
               setProjected(positions);
-              setAmenities(nextAmenities);
             }}
             onError={() => {
               setScene3dFailed(true);
@@ -135,16 +133,6 @@ export function OfficeFloor({ snapshot, status, bridgeError, offDuty, onHireAt, 
         ) : null}
         <div className="room-vignette" aria-hidden="true" />
         <div className="room-floor" />
-        {amenities ? (
-          <div className="amenity-layer" aria-hidden="true">
-            <div className="amenity-tag amenity-coffee" data-testid="amenity-coffee" style={{ left: `${amenities.coffee.x}px`, top: `${amenities.coffee.y}px` }}>
-              咖啡机
-            </div>
-            <div className="amenity-tag amenity-water" data-testid="amenity-water" style={{ left: `${amenities.water.x}px`, top: `${amenities.water.y}px` }}>
-              饮水机
-            </div>
-          </div>
-        ) : null}
         <div className="desk-layer">
           {snapshot?.desks.map((desk) => (
             <DeskCard
@@ -153,8 +141,6 @@ export function OfficeFloor({ snapshot, status, bridgeError, offDuty, onHireAt, 
               onHireAt={onHireAt}
               onTalkTo={onTalkTo}
               deskState={desk.occupant ? deskStates.get(desk.occupant.id) ?? null : null}
-              tokenSummary={desk.occupant ? snapshot?.employeeTokens?.[String(desk.occupant.id)] ?? null : null}
-              viewPrefs={viewPrefs}
               offDuty={offDuty}
               projected={projected}
               showArt={scene3dFailed}
@@ -177,15 +163,13 @@ export function OfficeFloor({ snapshot, status, bridgeError, offDuty, onHireAt, 
  *   onHireAt: (desk: import("./App.jsx").DeskData) => void,
  *   onTalkTo: (occupant: import("./App.jsx").DeskOccupantData) => void,
  *   deskState: import("./App.jsx").DeskState | null,
- *   tokenSummary: import("./App.jsx").TokenTotalData | null,
- *   viewPrefs: import("./App.jsx").ViewPrefs,
  *   offDuty: boolean,
  *   projected: Record<number, { x: number, y: number, width: number, height: number, hitLeft: number, hitTop: number, clipPath: string }> | null,
  *   showArt: boolean,
  * }} props
  */
 const DeskCard = React.memo(function DeskCard(/** @type {any} */ props) {
-  const { desk, onHireAt, onTalkTo, deskState, tokenSummary, viewPrefs, offDuty, projected, showArt } = props;
+  const { desk, onHireAt, onTalkTo, deskState, offDuty, projected, showArt } = props;
   const occupant = desk.occupant;
   const empty = occupant === null;
   const openDesk = empty ? () => onHireAt(desk) : occupant ? () => onTalkTo(occupant) : undefined;
@@ -219,10 +203,13 @@ const DeskCard = React.memo(function DeskCard(/** @type {any} */ props) {
       data-tone={activity.screenTone ?? ""}
       data-screen={screen.kind}
       data-posture={motion.posture}
-      data-coffee-phase={motion.coffeePhase ?? ""}
+      data-trip-phase={motion.tripPhase ?? ""}
+      data-destination={motion.destination ?? ""}
       data-position={motion.position}
       data-off-duty={offDuty ? "true" : "false"}
       data-blocked={activity.blocked !== null ? "true" : "false"}
+      data-look={empty ? "" : lookFor(occupant).id}
+      data-occupant-name={empty ? "" : occupant.name}
       role="button"
       title={empty ? `${desk.label}（空工位 · 点击招聘）` : `${occupant?.name}（点击对话）`}
       tabIndex={0}
@@ -243,7 +230,12 @@ const DeskCard = React.memo(function DeskCard(/** @type {any} */ props) {
           <DeskArtSvg activity={activity} screen={screen} uid={`desk-${desk.id}`} />
           <ChairSeatSvg uid={`desk-${desk.id}`} />
           {!empty && !awayFromDesk ? (
-            <SeatedPersonSvg uid={`desk-${desk.id}`} roleKey={occupant.roleSnapshot.key} posture={motion.posture} working={working} />
+            <SeatedPersonSvg
+              uid={`desk-${desk.id}`}
+              look={lookFor(occupant)}
+              posture={motion.posture}
+              working={working}
+            />
           ) : null}
           {!empty && awayFromDesk ? <CoffeeChairSvg /> : null}
           <ChairBackSvg uid={`desk-${desk.id}`} />
@@ -257,45 +249,23 @@ const DeskCard = React.memo(function DeskCard(/** @type {any} */ props) {
         />
       ) : null}
 
-      {/* ── always-on readout layer（关掉名牌仍在）────────────────── */}
-      {!empty ? (
-        <>
-          <span className={`desk-status-light ${signals.light}`} data-testid="desk-light" data-tone={signals.light} aria-hidden="true" />
-          {activity.blocked !== null ? (
-            <div
-              className="desk-blocked"
-              data-testid="desk-blocked"
-              title={`被策略拦下：${activity.blocked.reason}`}
-              aria-label="被策略拦下"
-            >
-              <span aria-hidden="true">禁</span>
-            </div>
-          ) : null}
-        </>
-      ) : null}
-
-      {!empty && viewPrefs.plate ? (
+      {/* ── no text in the scene (ticket 18): the only desk overlay left is the
+          blocked badge, which is an alert icon — the name lives on the 3D
+          nameplate, the state lives in the person and the monitor. */}
+      {!empty && activity.blocked !== null ? (
         <div
-          className={`desk-plate desk-plate-occupied ${working ? "desk-plate-working" : ""}`}
-          data-testid="desk-occupant"
-          title={`${occupant.name} · ${occupant.roleSnapshot.name}`}
+          className="desk-blocked"
+          data-testid="desk-blocked"
+          title={`被策略拦下：${activity.blocked.reason}`}
+          aria-label="被策略拦下"
         >
-          {occupant.name} · {occupant.roleSnapshot.name}
-          {/* 票 12 验收 3: 员工名牌上的员工级 token 聚合（host 聚合走信封）；
-              未计量的引擎显示「未计量」，不是 0。 */}
-          <span
-            className="desk-plate-token"
-            data-testid="desk-token"
-            data-measured={tokenSummary?.measured === true ? "true" : "false"}
-          >
-            {tokenSummary?.measured === true ? compactToken(tokenSummary.total) : tokenText(tokenSummary)}
-          </span>
+          <span aria-hidden="true">!</span>
         </div>
       ) : null}
+
       {empty ? (
         <div className="desk-vacant" title={`${desk.label} · 空位 · 点击招聘`} aria-label={`${desk.label} 空位，点击招聘`}>
           <span aria-hidden="true">+</span>
-          <em>{desk.label} · 空位</em>
         </div>
       ) : null}
     </div>
@@ -672,18 +642,19 @@ function CoffeeChairSvg() {
 
 /**
  * The seated employee, BACK view — they face the monitor, away from the
- * dollhouse camera. Role reads from clothing color + back-readable features.
- * Posture (ticket 07 + 17): work = typing at the keyboard; idle = hands down;
- * phone = leaning back at a glowing phone; minesweeper = clicking at the
- * computer; coffee = seated with a cup after the machine trip.
+ * dollhouse camera. Ticket 18: the look (skin/hair/shirt) comes from the
+ * employee's chosen appearance, so two people in the same role differ.
+ * Posture: work = typing; idle = hands down; phone = leaning back at a glowing
+ * phone; minesweeper = clicking; coffee/water = seated with a cup or bottle.
  *
- * @param {{ uid: string, roleKey: string, posture: "idle" | "work" | "phone" | "minesweeper" | "coffee", working: boolean }} props
+ * @param {{ uid: string, look: import("./scene/employeeLook.js").EmployeeLook, posture: string, working: boolean }} props
  */
-function SeatedPersonSvg({ uid, roleKey, posture, working }) {
-  const color = appearanceFor(roleKey);
+function SeatedPersonSvg({ uid, look, posture, working }) {
+  const color = look;
+  const roleKey = look.id;
   const phone = posture === "phone";
   const minesweeper = posture === "minesweeper";
-  const coffee = posture === "coffee";
+  const coffee = posture === "coffee" || posture === "water";
   return (
     <svg
       className={`desk-art desk-person ${working ? "person-typing" : ""} ${phone ? "person-slack" : ""} ${minesweeper ? "person-minesweeper" : ""} ${coffee ? "person-coffee" : ""}`}
@@ -776,17 +747,4 @@ function SeatedPersonSvg({ uid, roleKey, posture, working }) {
       )}
     </svg>
   );
-}
-
-/**
- * A 52,345-token badge is unreadable on a 12px nameplate; full numbers remain
- * in the task detail / company panel. e2e-12's plate assertion accepts both.
- *
- * @param {number} total
- * @returns {string}
- */
-function compactToken(total) {
-  if (total >= 1_000_000) return `${(total / 1_000_000).toFixed(1)}m`;
-  if (total >= 10_000) return `${(total / 1000).toFixed(1)}k`;
-  return String(total);
 }

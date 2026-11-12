@@ -39,6 +39,7 @@ import { DEFAULT_TASK_TOKEN_BUDGET } from "./cost/budget.mjs";
  * @property {number} id
  * @property {string} name
  * @property {number} roleId
+ * @property {string | null} appearance 票 18: chosen look id (null = role default face)
  * @property {string} hiredAt
  * @property {RoleSnapshot} roleSnapshot
  *
@@ -219,6 +220,7 @@ CREATE TABLE IF NOT EXISTS employee (
   name TEXT NOT NULL,
   role_id INTEGER NOT NULL REFERENCES role(id),
   role_snapshot TEXT NOT NULL,
+  appearance TEXT,
   hired_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS employee_session (
@@ -506,7 +508,7 @@ function toGroup(row) {
 /** Shared columns for reading a desk row joined with its occupant's employee row. */
 const DESK_JOIN = `d.*,
   e.id AS e_id, e.name AS e_name, e.role_id AS e_role_id,
-  e.role_snapshot AS e_role_snapshot, e.hired_at AS e_hired_at`;
+  e.role_snapshot AS e_role_snapshot, e.appearance AS e_appearance, e.hired_at AS e_hired_at`;
 
 /**
  * @param {Record<string, unknown>} row desk row joined with its occupant
@@ -527,6 +529,7 @@ function toDesk(row) {
             id: occupantId,
             name: String(row.e_name),
             roleId: Number(row.e_role_id),
+            appearance: row.e_appearance === null || row.e_appearance === undefined ? null : String(row.e_appearance),
             hiredAt: String(row.e_hired_at),
             roleSnapshot: /** @type {RoleSnapshot} */ (parseJsonOr(row.e_role_snapshot, UNKNOWN_ROLE_SNAPSHOT)),
           },
@@ -865,6 +868,10 @@ export function openStore({ dataDir }) {
     // rebuild them in place, ids first (run rows reference those ids).
     migrateEmployeeSessionPerEngine(db);
     migrateCostColumns(db);
+    // Ticket 18: PEOPLE look different, so the employee row carries the look
+    // id chosen at hire time. Older rows stay NULL and fall back to the role's
+    // default face in the renderer.
+    migrateEmployeeAppearance(db);
   } finally {
     db.exec("PRAGMA foreign_keys = ON;");
   }
@@ -981,10 +988,10 @@ export function openStore({ dataDir }) {
      * edits never infect people already hired). One transaction so a desk is
      * never half-occupied.
      *
-     * @param {{ deskId: number, roleId: number, name?: string, engine?: string, provider?: string, model?: string, reasoningEffort?: string | null }} input
-     * @returns {{ employee: { id: number, companyId: number, name: string, roleId: number, roleSnapshot: RoleSnapshot, hiredAt: string }, desk: DeskRow | null }}
+     * @param {{ deskId: number, roleId: number, name?: string, appearance?: string | null, engine?: string, provider?: string, model?: string, reasoningEffort?: string | null }} input
+     * @returns {{ employee: { id: number, companyId: number, name: string, roleId: number, roleSnapshot: RoleSnapshot, appearance: string | null, hiredAt: string }, desk: DeskRow | null }}
      */
-    hireEmployee({ deskId, roleId, name, engine, provider, model, reasoningEffort }) {
+    hireEmployee({ deskId, roleId, name, appearance, engine, provider, model, reasoningEffort }) {
       const deskRow = db
         .prepare(
           `SELECT ${DESK_JOIN}, g.company_id AS g_company_id
@@ -1018,8 +1025,15 @@ export function openStore({ dataDir }) {
       db.exec("BEGIN");
       try {
         const info = db
-          .prepare("INSERT INTO employee (company_id, name, role_id, role_snapshot, hired_at) VALUES (?, ?, ?, ?, ?)")
-          .run(Number(deskRow.g_company_id), employeeName, role.id, JSON.stringify(roleSnapshot), hiredAt);
+          .prepare("INSERT INTO employee (company_id, name, role_id, role_snapshot, appearance, hired_at) VALUES (?, ?, ?, ?, ?, ?)")
+          .run(
+            Number(deskRow.g_company_id),
+            employeeName,
+            role.id,
+            JSON.stringify(roleSnapshot),
+            appearance ?? null,
+            hiredAt,
+          );
         employeeId = Number(info.lastInsertRowid);
         // Guard against a racing occupy inside this transaction.
         const occupied = db
@@ -1039,6 +1053,7 @@ export function openStore({ dataDir }) {
           name: employeeName,
           roleId: role.id,
           roleSnapshot,
+          appearance: appearance ?? null,
           hiredAt,
         },
         desk: this.listDesks({ groupId: Number(deskRow.group_id) }).find((d) => d.id === deskId) ?? null,
@@ -1055,7 +1070,7 @@ export function openStore({ dataDir }) {
     listEmployeesForCompany({ companyId }) {
       const rows = db
         .prepare(
-          `SELECT e.id AS id, e.name AS name, e.role_snapshot AS role_snapshot,
+          `SELECT e.id AS id, e.name AS name, e.role_snapshot AS role_snapshot, e.appearance AS appearance,
                   d.label AS desk_label, g.name AS group_name
            FROM employee e
            JOIN desk d ON d.employee_id = e.id
@@ -1072,6 +1087,7 @@ export function openStore({ dataDir }) {
           name: String(row.name),
           roleName: String(snapshot.name ?? "未知角色"),
           roleSnapshot: snapshot,
+          appearance: row.appearance === null || row.appearance === undefined ? null : String(row.appearance),
           deskLabel: String(row.desk_label),
           groupName: String(row.group_name),
         };
@@ -1084,7 +1100,7 @@ export function openStore({ dataDir }) {
      */
     employeeById(employeeId) {
       const row = db
-        .prepare("SELECT id, company_id, name, role_id, role_snapshot, hired_at FROM employee WHERE id = ?")
+        .prepare("SELECT id, company_id, name, role_id, role_snapshot, appearance, hired_at FROM employee WHERE id = ?")
         .get(employeeId);
       if (!row) return null;
       return {
@@ -1092,6 +1108,7 @@ export function openStore({ dataDir }) {
         companyId: Number(row.company_id),
         name: String(row.name),
         roleId: Number(row.role_id),
+        appearance: row.appearance === null || row.appearance === undefined ? null : String(row.appearance),
         roleSnapshot: /** @type {RoleSnapshot} */ (parseJsonOr(row.role_snapshot, UNKNOWN_ROLE_SNAPSHOT)),
         hiredAt: String(row.hired_at),
       };
@@ -1101,15 +1118,16 @@ export function openStore({ dataDir }) {
      * Every employee row (all companies) — model-reassign on delete needs a
      * complete reference scan, not only the active company's roster.
      *
-     * @returns {{ id: number, companyId: number, name: string, roleId: number, roleSnapshot: RoleSnapshot, hiredAt: string }[]}
+     * @returns {(EmployeeOccupant & { companyId: number })[]}
      */
     listAllEmployees() {
-      const rows = db.prepare("SELECT id, company_id, name, role_id, role_snapshot, hired_at FROM employee ORDER BY id").all();
+      const rows = db.prepare("SELECT id, company_id, name, role_id, role_snapshot, appearance, hired_at FROM employee ORDER BY id").all();
       return rows.map((row) => ({
         id: Number(row.id),
         companyId: Number(row.company_id),
         name: String(row.name),
         roleId: Number(row.role_id),
+        appearance: row.appearance === null || row.appearance === undefined ? null : String(row.appearance),
         roleSnapshot: /** @type {RoleSnapshot} */ (parseJsonOr(row.role_snapshot, UNKNOWN_ROLE_SNAPSHOT)),
         hiredAt: String(row.hired_at),
       }));
@@ -1913,13 +1931,13 @@ export function openStore({ dataDir }) {
     },
 
     /**
-     * Edit an employee's name / engine / provider / model / reasoning effort
-     * (ticket 14). Only provided fields are touched; the rest of the frozen
-     * snapshot stays frozen.
+     * Edit an employee's name / look / engine / provider / model / reasoning
+     * effort (ticket 14 + 18). Only provided fields are touched; the rest of
+     * the frozen snapshot stays frozen.
      *
-     * @param {{ employeeId: number, name?: string, engine?: string, provider?: string, model?: string, reasoningEffort?: string | null }} input
+     * @param {{ employeeId: number, name?: string, appearance?: string | null, engine?: string, provider?: string, model?: string, reasoningEffort?: string | null }} input
      */
-    updateEmployee({ employeeId, name, engine, provider, model, reasoningEffort }) {
+    updateEmployee({ employeeId, name, appearance, engine, provider, model, reasoningEffort }) {
       const row = db
         .prepare("SELECT name, role_snapshot FROM employee WHERE id = ?")
         .get(employeeId);
@@ -1939,9 +1957,10 @@ export function openStore({ dataDir }) {
         if (reasoningEffort === null) delete snapshot.manifest.reasoningEffort;
         else snapshot.manifest.reasoningEffort = reasoningEffort;
       }
-      db.prepare("UPDATE employee SET name = ?, role_snapshot = ? WHERE id = ?").run(
+      db.prepare("UPDATE employee SET name = ?, role_snapshot = ?, appearance = COALESCE(?, appearance) WHERE id = ?").run(
         name !== undefined ? name.trim() : String(record.name),
         JSON.stringify(snapshot),
+        appearance ?? null,
         employeeId,
       );
       return /** @type {any} */ (this.employeeById(employeeId));
@@ -2073,6 +2092,28 @@ function migrateEmployeeWorkspaces(db, dataDir) {
 }
 
 /**
+ * Ticket 18 adds the employee's chosen look (a preset id) to a table that
+ * already exists in older databases. NULL means "not chosen", which the
+ * renderer maps to the role's default face.
+ *
+ * @param {DatabaseSync} db
+ */
+function migrateEmployeeAppearance(db) {
+  const columns = tableColumns(db, "employee");
+  if (!columns.has("appearance")) db.exec("ALTER TABLE employee ADD COLUMN appearance TEXT");
+}
+
+/**
+ * @param {DatabaseSync} db
+ * @param {string} table
+ * @returns {Set<string>}
+ */
+function tableColumns(db, table) {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all();
+  return new Set(rows.map((row) => String(/** @type {Record<string, unknown>} */ (row).name)));
+}
+
+/**
  * Migrations rebuild tables by hand; a missing column would otherwise be a
  * silent runtime failure far from the schema. Assert the contract at open.
  *
@@ -2085,6 +2126,7 @@ function assertRequiredColumns(db) {
     task_session: ["task_id", "employee_session_id", "engine", "status"],
     run: ["employee_session_id", "employee_id", "engine", "status", "usage", "task_id", "task_session_id", "fail_reason"],
     employee_session: ["employee_id", "engine", "agent_dir", "sessions_dir", "workspace_dir", "session_file"],
+    employee: ["appearance"],
     artifact: ["task_id", "run_id", "kind", "content"],
   };
   for (const [table, columns] of Object.entries(required)) {

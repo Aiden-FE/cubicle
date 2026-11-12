@@ -64,26 +64,25 @@ const SEED_FILES = {
 
 /**
  * One eval: the occupied desk's full animation state + the drawer's counters.
- * data-activity/tone/posture/position/blocked + light are the DOM contract
- * the scene layer paints (OfficeFloor.jsx).
+ * Ticket 18 removed every floating label, so the DOM contract is now data
+ * attributes only: posture/trip/position/screen/look + the name on the desk.
  */
 const DESK_SNAPSHOT_JS = `(() => {
   const d = document.querySelector('[data-testid="desk"][data-empty="false"]');
-  const plate = document.querySelector('[data-testid="desk-occupant"]');
-  const light = document.querySelector('[data-testid="desk-light"]');
   return {
     busy: d?.dataset.busy ?? null,
     activity: d?.dataset.activity ?? null,
     tone: d?.dataset.tone ?? null,
     screen: d?.dataset.screen ?? null,
     posture: d?.dataset.posture ?? null,
-    coffeePhase: d?.dataset.coffeePhase || null,
+    tripPhase: d?.dataset.tripPhase || null,
+    destination: d?.dataset.destination || null,
     position: d?.dataset.position ?? null,
     blocked: d?.dataset.blocked ?? null,
     offDuty: d?.dataset.offDuty ?? null,
-    hasPlate: plate !== null,
-    plateText: plate?.textContent ?? null,
-    light: light ? { tone: light.dataset.tone, visible: light.offsetWidth > 0 && light.offsetHeight > 0 } : null,
+    look: d?.dataset.look ?? null,
+    occupantName: d?.dataset.occupantName ?? null,
+    labels: document.querySelectorAll('[data-testid="desk-occupant"], [data-testid="desk-light"], [data-testid="desk-bubble"], .amenity-tag').length,
     ends: document.querySelectorAll('[data-testid="event-item"][data-type="agent_end"]').length,
     blockedLines: document.querySelectorAll('[data-testid="event-item"][data-type="policy_blocked"]').length,
   };
@@ -256,17 +255,27 @@ async function phaseDesk(ctx) {
     `(() => {
       const desk = document.querySelector('[data-testid="desk"][data-empty="false"]');
       const text = desk?.textContent ?? "";
-      const forbidden = ["在看资料", "在写东西", "在跑命令", "在跑测试", "在想事情", "在干活", "干活中", "摸鱼中", "去倒咖啡了", "在玩手机", "在玩扫雷", "在喝咖啡"];
+      const forbidden = ["在看资料", "在写东西", "在跑命令", "在跑测试", "在想事情", "在干活", "干活中", "摸鱼中", "去倒咖啡了", "在玩手机", "在玩扫雷", "在喝咖啡", "咖啡机", "饮水机"];
       return {
         bubbles: document.querySelectorAll('[data-testid="desk-bubble"]').length,
-        plate: document.querySelector('[data-testid="desk-occupant"]')?.textContent ?? null,
+        plates: document.querySelectorAll('[data-testid="desk-occupant"]').length,
+        lights: document.querySelectorAll('[data-testid="desk-light"]').length,
+        amenities: document.querySelectorAll('.amenity-tag').length,
         forbidden: forbidden.filter((word) => text.includes(word)),
+        occupantName: desk?.dataset.occupantName ?? null,
+        look: desk?.dataset.look ?? "",
       };
     })()`,
   );
   add(
-    "员工状态不靠文字：无状态气泡，名牌只保留姓名/角色/token",
-    textFreeState.bubbles === 0 && textFreeState.forbidden.length === 0 && (textFreeState.plate ?? "").includes(E2E_EMPLOYEE),
+    "场景内零文字：无状态气泡/名牌/状态灯/设施工牌，姓名只在桌面实体名牌上",
+    textFreeState.bubbles === 0 &&
+      textFreeState.plates === 0 &&
+      textFreeState.lights === 0 &&
+      textFreeState.amenities === 0 &&
+      textFreeState.forbidden.length === 0 &&
+      textFreeState.occupantName === E2E_EMPLOYEE &&
+      textFreeState.look.length > 0,
     JSON.stringify(textFreeState),
   );
 
@@ -304,22 +313,21 @@ async function phaseDesk(ctx) {
     onSample: captureOn((s) => s.blocked === "true", "06-blocked"),
   });
   const markerSeen = danger.samples.some((s) => s.blocked === "true");
-  const lightBlocked = danger.samples.some((s) => s.light?.tone === "blocked");
   const fileSurvived = existsSync(path.join(dirs.workspaceDir, "important.txt"));
   add(
-    "被策略拒绝：工位出现可见拒绝提示（marker + 红灯 + 时间线一行），且危险删除确实没执行",
+    "被策略拒绝：工位出现可见拒绝标记 + 时间线一行，且危险删除确实没执行",
     danger.ended && markerSeen && danger.final.blockedLines >= 1 && fileSurvived,
-    `blockedLines=${danger.final.blockedLines} fileSurvived=${fileSurvived} lightBlocked=${lightBlocked}`,
+    `blockedLines=${danger.final.blockedLines} fileSurvived=${fileSurvived}`,
   );
 
   // ── 7: 随机摸鱼：咖啡（2.5s 去 + 5s 停留 + 2.5s 回 + 10s 喝）、手机、扫雷 ──
   // Pin the RNG only for the selection moments so the whole story (including
   // the explicit 5s machine stay) is deterministic; production remains random.
-  await evalIn(contents, `window.__e2eRandom = Math.random; Math.random = () => 0.9; true`);
+  await evalIn(contents, `window.__e2eRandom = Math.random; Math.random = () => 0.6; true`);
   const idleStart = Date.now();
   const coffeeStartSeen = await waitForDesk(
     win,
-    (s) => s.posture === "coffee" && s.coffeePhase === "to-machine",
+    (s) => s.posture === "coffee" && s.tripPhase === "to-target",
     { timeoutMs: 13_000 },
   );
   const coffeeAt = coffeeStartSeen ? Date.now() - idleStart : -1;
@@ -333,7 +341,7 @@ async function phaseDesk(ctx) {
 
   const machineSeen = await waitForDesk(
     win,
-    (s) => s.posture === "coffee" && s.coffeePhase === "at-machine",
+    (s) => s.posture === "coffee" && s.tripPhase === "at-target",
     { timeoutMs: 5_000 },
   );
   const machineAt = Date.now();
@@ -342,19 +350,19 @@ async function phaseDesk(ctx) {
   const machineStill = /** @type {any} */ (await evalIn(contents, DESK_SNAPSHOT_JS));
   const returningSeen = await waitForDesk(
     win,
-    (s) => s.posture === "coffee" && s.coffeePhase === "returning",
+    (s) => s.posture === "coffee" && s.tripPhase === "returning",
     { timeoutMs: 2_500 },
   );
   const machineHoldMs = returningSeen ? Date.now() - machineAt : -1;
   add(
     "到咖啡机停留 5 秒后再往回走（4s 时仍在 machine 阶段）",
-    machineSeen && machineStill.coffeePhase === "at-machine" && machineHoldMs >= 4_200,
+    machineSeen && machineStill.tripPhase === "at-target" && machineHoldMs >= 4_200,
     `hold=${machineHoldMs}ms`,
   );
 
   const sippingSeen = await waitForDesk(
     win,
-    (s) => s.posture === "coffee" && s.coffeePhase === "sipping" && s.position === "desk",
+    (s) => s.posture === "coffee" && s.tripPhase === "sipping" && s.position === "desk",
     { timeoutMs: 4_000 },
   );
   const sippingSnap = /** @type {any} */ (await evalIn(contents, DESK_SNAPSHOT_JS));
@@ -376,8 +384,8 @@ async function phaseDesk(ctx) {
     JSON.stringify(phoneSnap),
   );
 
-  // Phone ends after 12s, then 9s idle → pin 0.5 for minesweeper.
-  await evalIn(contents, `Math.random = () => 0.5; true`);
+  // Phone ends after 12s, then 9s idle → pin 0.3 for minesweeper.
+  await evalIn(contents, `Math.random = () => 0.3; true`);
   const mineSeen = await waitForDesk(win, (s) => s.posture === "minesweeper" && s.position === "desk", {
     timeoutMs: 27_000,
   });
@@ -388,13 +396,28 @@ async function phaseDesk(ctx) {
     mineSeen && mineSnap.screen === "desktop" && mineSnap.position === "desk",
     JSON.stringify(mineSnap),
   );
+  // Minesweeper ends after 12s, then 9s idle → pin 0.9 for the water cooler
+  // (ticket 18: the other break destination, same aisle graph).
+  await evalIn(contents, `Math.random = () => 0.9; true`);
+  const waterSeen = await waitForDesk(
+    win,
+    (s) => s.posture === "water" && s.tripPhase === "at-target",
+    { timeoutMs: 40_000 },
+  );
+  const waterSnap = /** @type {any} */ (await evalIn(contents, DESK_SNAPSHOT_JS));
+  if (waterSeen) screenshots.push(await shot(ctx, win, "12-water-cooler"));
+  add(
+    "随机到打水：走到饮水机停留，显示器仍是 Windows 桌面",
+    waterSeen && waterSnap.destination === "water" && waterSnap.screen === "desktop",
+    JSON.stringify(waterSnap),
+  );
   await evalIn(contents, `if (window.__e2eRandom) Math.random = window.__e2eRandom; true`);
 
   // ── 8: 名牌可开关；关掉后状态仍由动作/屏幕/状态灯表达 ─────────────
   let prefsShot = false;
   const again = await sendAndObserve(ctx, win, MSG_READ_AGAIN, {
     onSample: async (snap) => {
-      if (!prefsShot && snap.busy === "true" && snap.hasPlate) {
+      if (!prefsShot && snap.busy === "true" && (snap.occupantName ?? "").length > 0) {
         prefsShot = true;
         await click(win.webContents, '[data-testid="settings-open"]');
         await click(win.webContents, '[data-testid="toggle-plate"]');
@@ -410,27 +433,28 @@ async function phaseDesk(ctx) {
     },
   });
 
-  const afterToggles = again.samples.filter((s) => s.busy === "true" && !s.hasPlate);
-  const lightReadableWhileBusy = afterToggles.some((s) => s.light?.tone === "working" && s.light?.visible);
+  const platePrefOff = (await evalIn(win.webContents, `document.querySelector('[data-testid="office-floor"]')?.dataset.nameplates ?? ''`)) === "off";
+  const afterToggles = again.samples.filter((s) => s.busy === "true");
   add(
-    "名牌关掉后：DOM 里再无名牌，但状态灯（working）+ busy 仍在 → 在忙可读",
-    prefsShot && afterToggles.length > 0 && lightReadableWhileBusy,
-    `busySamples=${afterToggles.length}`,
+    "名牌关掉后：桌面实体名牌隐藏，但动作/屏幕/busy 仍在 → 在忙可读",
+    prefsShot && platePrefOff && afterToggles.length > 0 && afterToggles.every((s) => s.screen === "code"),
+    `busySamples=${afterToggles.length} nameplates=${platePrefOff ? "off" : "on"}`,
   );
 
-  const wentIdle = await waitForDesk(
-    win,
-    (s) => s.busy === "false" && s.light?.tone !== "working",
-    { timeoutMs: 5_000 },
-  );
+  const wentIdle = await waitForDesk(win, (s) => s.busy === "false", { timeoutMs: 5_000 });
   // Chat history replay only keeps the latest run, so an agent_end count that
   // fell while Settings was open cannot be compared across the remount. The
-  // observable contract is the desk settling: busy=false and the light not working.
+  // observable contract is the desk settling: busy=false.
   add(
-    "这一轮收尾后回到「在闲」（busy=false、灯不再是 working）",
+    "这一轮收尾后回到「在闲」（busy=false）",
     wentIdle,
     JSON.stringify({ ended: again.ended, final: again.final }),
   );
+
+  // Restore the nameplate preference so later phases see a normal office.
+  await click(win.webContents, '[data-testid="settings-open"]');
+  await click(win.webContents, '[data-testid="toggle-plate"]');
+  await click(win.webContents, '[data-testid="settings-close"]');
 
   // ── 9: 下班 → 所有显示器黑屏；上班后恢复桌面 ───────────────────
   await click(win.webContents, '[data-testid="chat-close"]');
@@ -455,7 +479,7 @@ async function phaseDesk(ctx) {
     },
     { timeoutMs: 4000 },
   );
-  if (offDutyBlack) screenshots.push(await shot(ctx, win, "12-off-duty-black"));
+  if (offDutyBlack) screenshots.push(await shot(ctx, win, "13-off-duty-black"));
   add("下班后：整间办公室所有工位显示器黑屏", dutyPanel && Boolean(offDutyBlack), JSON.stringify(offDutyBlack));
 
   await click(win.webContents, '[data-testid="duty-on"]');

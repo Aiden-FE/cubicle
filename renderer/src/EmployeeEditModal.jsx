@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useDialog } from "./useDialog.js";
+import { lookFor } from "./scene/employeeLook.js";
+import { LookPicker } from "./LookPicker.jsx";
 
 /**
  * Employee edit modal (ticket 14): name / engine / model / reasoning effort.
@@ -16,6 +18,7 @@ export function EmployeeEditModal({ employee, onClose, onSaved }) {
   const dialogRef = useDialog(onClose);
   const manifest = employee.roleSnapshot.manifest;
   const [name, setName] = useState(employee.name);
+  const [appearance, setAppearance] = useState(() => lookFor(employee).id);
   const [engine, setEngine] = useState(String(manifest.engine ?? "pi"));
   const [modelRef, setModelRef] = useState(() => {
     if (typeof manifest.model === "string" && manifest.model.includes("/")) return manifest.model;
@@ -98,6 +101,7 @@ export function EmployeeEditModal({ employee, onClose, onSaved }) {
       await window.cubicle.invoke("employee.update", {
         employeeId: employee.id,
         name: name.trim(),
+        appearance,
         engine,
         provider,
         model,
@@ -145,6 +149,11 @@ export function EmployeeEditModal({ employee, onClose, onSaved }) {
               disabled={busy}
             />
           </label>
+
+          <div className="hire-look-row">
+            <div className="hire-look-title">员工形象</div>
+            <LookPicker value={appearance} onChange={setAppearance} disabled={busy} testId="edit-look-picker" />
+          </div>
 
           <div className="settings-form-row">
             <label className="settings-field">

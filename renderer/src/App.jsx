@@ -11,6 +11,7 @@ import { SettingsModal } from "./SettingsModal.jsx";
 import { EmployeeEditModal } from "./EmployeeEditModal.jsx";
 import { initialDeskActivity, reduceDeskActivity, expireDeskBlocked } from "./scene/deskActivity.js";
 import { initialMotion, advanceMotion, motionOnWork, motionOnRelease } from "./scene/idleMotion.js";
+import { walkDurationMs } from "./scene/navigation.js";
 import { activeCountFor } from "./scene/handleGroups.js";
 
 // Topic names mirrored from src/shared/envelope.mjs TOPICS (process boundary).
@@ -219,9 +220,16 @@ export function App() {
     };
   }, [snapshot?.activeCompanyId]);
 
-  // The idle clock: 摸鱼/咖啡/归位 + fading expired 拒绝 markers. This is the
-  // only timer that moves a desk, and advanceMotion/expireDeskBlocked are
-  // no-ops while a run is live.
+  // The idle clock: 摸鱼/咖啡/打水/归位 + fading expired 拒绝 markers. This is
+  // the only timer that moves a desk, and advanceMotion/expireDeskBlocked are
+  // no-ops while a run is live. Ticket 18: a trip's length depends on the bay
+  // it starts from, so the tick needs the employee's desk index.
+  const deskIndexByEmployee = useRef(/** @type {Map<number, number>} */ (new Map()));
+  deskIndexByEmployee.current = new Map(
+    (snapshot?.desks ?? [])
+      .map((desk, index) => /** @type {[number, number] | null} */ (desk.occupant ? [desk.occupant.id, index] : null))
+      .filter((entry) => entry !== null),
+  );
   useEffect(() => {
     const timer = setInterval(() => {
       setDeskStates((prev) => {
@@ -231,7 +239,16 @@ export function App() {
         const next = new Map();
         for (const [employeeId, entry] of prev) {
           const activity = expireDeskBlocked(entry.activity, now);
-          const motion = advanceMotion(entry.motion, now);
+          const index = deskIndexByEmployee.current.get(employeeId);
+          const motion = advanceMotion(
+            entry.motion,
+            now,
+            undefined,
+            undefined,
+            index === undefined
+              ? undefined
+              : (/** @type {"coffee" | "water"} */ target) => walkDurationMs(index, target),
+          );
           if (activity === entry.activity && motion === entry.motion) {
             next.set(employeeId, entry);
           } else {
