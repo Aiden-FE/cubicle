@@ -39,6 +39,7 @@ export function App() {
   const [handleOpen, setHandleOpen] = useState(false);
   const [rosterOpen, setRosterOpen] = useState(false);
   const [dutyOpen, setDutyOpen] = useState(false);
+  const [offDuty, setOffDuty] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editEmployee, setEditEmployee] = useState(/** @type {RosterEmployeeData | null} */ (null));
   const [benchTaskId, setBenchTaskId] = useState(/** @type {number | null} */ (null));
@@ -190,6 +191,34 @@ export function App() {
     };
   }, [refresh, foldRunEvent]);
 
+  // 票 17: the monitors are part of the office's duty state. The duty phase is
+  // time-driven (schedule.get), so this is the same honest 1s poll as the
+  // 上下班 panel — no event invents a phase. Off duty makes every monitor black.
+  useEffect(() => {
+    const companyId = snapshot?.activeCompanyId ?? null;
+    if (companyId === null) {
+      setOffDuty(false);
+      return undefined;
+    }
+    let disposed = false;
+    const refreshPhase = async () => {
+      try {
+        const info = /** @type {{ status?: { phase?: string } } | null} */ (
+          await window.cubicle.invoke("schedule.get", { companyId })
+        );
+        if (!disposed) setOffDuty(info?.status?.phase === "off");
+      } catch {
+        if (!disposed) setOffDuty(false);
+      }
+    };
+    void refreshPhase();
+    const timer = setInterval(() => void refreshPhase(), 1000);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, [snapshot?.activeCompanyId]);
+
   // The idle clock: 摸鱼/咖啡/归位 + fading expired 拒绝 markers. This is the
   // only timer that moves a desk, and advanceMotion/expireDeskBlocked are
   // no-ops while a run is live.
@@ -251,11 +280,13 @@ export function App() {
       data-testid="app-shell"
       data-online={status.state === "online" ? "true" : "false"}
       data-host-state={status.state ?? "unknown"}
+      data-off-duty={offDuty ? "true" : "false"}
     >
       <OfficeFloor
         snapshot={snapshot}
         status={status}
         bridgeError={bridgeError}
+        offDuty={offDuty}
         onHireAt={openHire}
         onTalkTo={openChat}
         deskStates={deskStates}
@@ -339,15 +370,12 @@ const VIEW_PREFS_KEY = "cubicle.viewPrefs";
 
 /** @returns {ViewPrefs} */
 function readViewPrefs() {
-  const fallback = { plate: true, bubble: true };
+  const fallback = { plate: true };
   try {
     const raw = window.localStorage.getItem(VIEW_PREFS_KEY);
     if (!raw) return fallback;
-    const parsed = /** @type {{ plate?: boolean, bubble?: boolean }} */ (JSON.parse(raw));
-    return {
-      plate: parsed.plate !== false,
-      bubble: parsed.bubble !== false,
-    };
+    const parsed = /** @type {{ plate?: boolean }} */ (JSON.parse(raw));
+    return { plate: parsed.plate !== false };
   } catch {
     return fallback;
   }
@@ -374,7 +402,6 @@ function saveViewPrefs(prefs) {
  *
  * @typedef {object} ViewPrefs
  * @property {boolean} plate 名牌
- * @property {boolean} bubble 气泡
  *
  * @typedef {object} RosterEmployeeData
  * @property {number} id

@@ -13,7 +13,7 @@ renderer/public/office/office.glb   (≈4.7 MB, materials only, no textures)
         │  GLTFLoader
         ▼
 renderer/src/scene/Office3D.jsx      (Three.js, camera + lights + avatars + screens)
-renderer/src/OfficeFloor.jsx         (DOM labels/bubbles projected over the canvas)
+renderer/src/OfficeFloor.jsx         (DOM nameplates/status lights projected over the canvas)
 ```
 
 `scripts/blender/office-backdrop.py` is only the WebGL-failure fallback image
@@ -52,14 +52,52 @@ renderer/src/OfficeFloor.jsx         (DOM labels/bubbles projected over the canv
 
 - **Three.js** owns the room, desks, chairs, coffee/water props, employees and
   monitor textures.
-- **React DOM** owns the hit areas, nameplates, bubbles, status lights, empty
-  bay affordances and amenity tags. Their positions come from projecting 3D
+- **React DOM** owns the hit areas, nameplates, status lights, empty bay
+  affordances and amenity tags. Their positions come from projecting 3D
   anchors (`Office3D -> onProject`), so the labels stay glued to the 3D room
-  at any window size.
+  at any window size. There are no state-text bubbles: posture animations,
+  monitor content and the status light communicate the state.
 - Monitor screens use a per-desk `CanvasTexture`; pass/fail/test states paint
   the whole screen green/red/amber.
 - If WebGL or the GLB fails, `OfficeFloor` falls back to the 2D SVG workstation
   art over `backdrop.png`; interaction and e2e selectors stay identical.
+
+## Desk screens and idle states
+
+`renderer/src/scene/deskScreen.js` is the single screen contract shared by the
+Three.js textures, the 2D fallback and `data-screen` in e2e:
+
+| desk state | screen |
+| --- | --- |
+| no occupant, or company duty phase `off` | pure black |
+| occupied, not running (idle / phone / minesweeper / coffee) | Windows desktop (wallpaper + icons + taskbar) |
+| programmer/tester working | code editor |
+| PM working | office document / table |
+| shell tool running | terminal |
+| tests running / pass / fail | test runner / pass / fail console |
+
+The off-duty phase is polled from the existing `schedule.get` IPC every second
+(`App.jsx`), so the monitor follows the real duty runtime; it is not inferred
+from timestamps in the view. The 3D planes and the 2D SVG fallback both consume
+`screenForDesk()`, so an empty bay cannot show a “standby” picture.
+
+## Idle animation
+
+After 9s without a run (`idleMotion.js`) an occupied desk rolls one of three
+slack states with `Math.random` (injectable in tests):
+
+- `phone` — 12s seated, phone prop, slight lean/bob, Windows desktop.
+- `minesweeper` — 12s seated, alternating hand taps, Windows desktop.
+- `coffee` — 2.5s walk to the left-front espresso bar, 5s at the machine,
+  2.5s walk back, 10s seated with a cup, then idle. A new idle cycle begins
+  after the return; any real work event immediately pulls the employee back to
+  the desk. The monitor stays on the Windows desktop for every coffee phase.
+
+The 3D avatar adds legs (hidden while seated), a phone and a paper cup. The
+walk is interpolated every frame from the state phase timestamps, so the
+500ms React tick only changes posture/phase; it does not step the position.
+Coffee starts beside the counter at `(-3.42, 4.92)`, clear of the counter
+occlusion seen in the first pass.
 
 ## Viewport and inspection zoom
 

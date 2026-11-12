@@ -18,8 +18,8 @@ const TABS = [
  * About all live here; the office canvas stays untouched.
  *
  * @param {{
- *   viewPrefs: { plate: boolean, bubble: boolean },
- *   setViewPref: (key: "plate" | "bubble", value: boolean) => void,
+ *   viewPrefs: { plate: boolean },
+ *   setViewPref: (key: "plate", value: boolean) => void,
  *   status: { state?: string, pid?: number, dataDir?: string },
  *   onClose: () => void,
  * }} props
@@ -95,7 +95,7 @@ export function SettingsModal({ viewPrefs, setViewPref, status, onClose }) {
                 <div className="settings-section-head">
                   <div>
                     <div className="settings-section-title">办公室显示</div>
-                    <div className="settings-section-hint">画布上的员工名牌和状态气泡；关掉后仍能从动作/状态灯看出忙闲。</div>
+                    <div className="settings-section-hint">画布上的员工姓名、角色和 token 名牌；员工状态由动作和电脑屏幕直接表达，不写状态文字。</div>
                   </div>
                 </div>
                 <label className="settings-check settings-check-card">
@@ -108,18 +108,6 @@ export function SettingsModal({ viewPrefs, setViewPref, status, onClose }) {
                   <span>
                     <strong>名牌</strong>
                     <small>显示员工姓名、角色和 token 汇总</small>
-                  </span>
-                </label>
-                <label className="settings-check settings-check-card">
-                  <input
-                    type="checkbox"
-                    data-testid="toggle-bubble"
-                    checked={viewPrefs.bubble}
-                    onChange={(event) => setViewPref("bubble", event.target.checked)}
-                  />
-                  <span>
-                    <strong>气泡</strong>
-                    <small>显示「在写东西 / 被策略拦下」等状态文字</small>
                   </span>
                 </label>
               </div>

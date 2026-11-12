@@ -7,9 +7,11 @@
  * replies drive REAL tool executions in the employee's private workspace
  * (read / write / bash-echo / node test_ok.mjs / node test_fail.mjs / a
  * rm -rf the host policy blocks). The工位 animation is asserted from the
- * live DOM while each run is in flight, the idle clock (9s 摸鱼 / 45s 咖啡 /
- * 回工位) is watched in real time, and 名牌+气泡 toggling is clicked through
- * the real UI. Evidence: tmp/e2e-07/desk.json + tmp/e2e-07/*.png.
+ * live DOM while each run is in flight, the idle clock (9s → random
+ * phone/minesweeper/coffee, 5s at the coffee machine) is watched in real
+ * time, empty/off-duty monitors must be black, and 名牌 toggling is clicked
+ * through the real UI. State is never asserted from status text: the posture,
+ * screen and always-on light are the observable contract.
  */
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
@@ -40,7 +42,8 @@ await mkdir(outDir, { recursive: true });
 
 // BYOK engine config, pointed at the local mock — same trick as ticket 04.
 // chunkPauseMs pads the streamed replies so the工位 screen state (activity /
-// 红绿 tone / 气泡) stays observable for a few hundred ms per tool call.
+// Make the mock pause briefly after each tool call so the action/screen
+// (红绿 tone) stays observable for a few hundred ms per tool call.
 const mock = await startMockModelServer({ chunkPauseMs: 130 });
 await mkdir(path.join(dataDir, "engines", "pi"), { recursive: true });
 await writeFile(
@@ -79,7 +82,7 @@ await seedModelLibrary(dataDir, { baseUrl: mock.baseUrl, protocol: "openai-compl
 
 const started = Date.now();
 
-console.log("ticket 07 e2e · phase desk (工位动画：四类工具 · 测试红绿 · 策略拒绝 · 摸鱼/咖啡 · 名牌气泡开关)");
+console.log("ticket 07 e2e · phase desk (工位动画：四类工具 · 测试红绿 · 策略拒绝 · 随机摸鱼/咖啡 · 名牌开关)");
 
 /**
  * Cold-start note (AGENTS M2): the first phase's desk render can take >5s on

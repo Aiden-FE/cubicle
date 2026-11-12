@@ -4,8 +4,9 @@ import { Office3D } from "./scene/Office3D.jsx";
 import { appearanceFor } from "./roleAppearance.js";
 import { initialDeskActivity } from "./scene/deskActivity.js";
 import { initialMotion } from "./scene/idleMotion.js";
-import { deskSignals, bubbleTextFor } from "./scene/deskReadout.js";
+import { deskSignals } from "./scene/deskReadout.js";
 import { tokenText } from "./scene/tokenReadout.js";
+import { screenForDesk } from "./scene/deskScreen.js";
 
 const INITIAL_SCENE_VIEW = {
   zoom: 1,
@@ -18,12 +19,13 @@ const INITIAL_SCENE_VIEW = {
  * The main canvas — always the office (hard constraint). Desks are drawn
  * from database rows; the工位 ANIMATION layer (ticket 07) rides on top:
  *
- *  - screen picture follows tool activity (读/写/执行/测试), 测试 turns it
- *    green/red;
+ *  - screen picture: empty/off-duty is black, seated idle/slack is the Windows
+ *    desktop, working is code/office/terminal/test; tests turn green/red;
  *  - a 策略拒绝 shows an always-visible marker at the desk;
- *  - idle postures: 9s 摸鱼 (phone glow), 45s 去咖啡 (empty chair), back home;
- *  - 名牌 and 气泡 are switchable — the always-on status light keeps
- *    在忙/在闲 readable with both off (deskReadout.deskSignals).
+ *  - idle postures: 9s then random phone / minesweeper / coffee (walk, 5s at
+ *    the machine, return, sip at the desk);
+ *  - 名牌 is switchable; state is never written as text — posture/animation,
+ *    screen content and the always-on status light carry it.
  *
  * Rendering stays behind the SceneRenderer seam (scene/): this component
  * only maps state → DOM/SVG; swapping the art later touches nothing else.
@@ -32,13 +34,14 @@ const INITIAL_SCENE_VIEW = {
  *   snapshot: import("./App.jsx").OfficeSnapshotData | null,
  *   status: import("./App.jsx").HostStatusData,
  *   bridgeError: string | null,
+ *   offDuty: boolean,
  *   onHireAt: (desk: import("./App.jsx").DeskData) => void,
  *   onTalkTo: (occupant: import("./App.jsx").DeskOccupantData) => void,
  *   deskStates: Map<number, import("./App.jsx").DeskState>,
  *   viewPrefs: import("./App.jsx").ViewPrefs,
  * }} props
  */
-export function OfficeFloor({ snapshot, status, bridgeError, onHireAt, onTalkTo, deskStates, viewPrefs }) {
+export function OfficeFloor({ snapshot, status, bridgeError, offDuty, onHireAt, onTalkTo, deskStates, viewPrefs }) {
   const ready = status.state === "online" && snapshot;
   const [projected, setProjected] = useState(/** @type {Record<number, { x: number, y: number, width: number, height: number, hitLeft: number, hitTop: number, clipPath: string }> | null} */ (null));
   const [amenities, setAmenities] = useState(/** @type {Record<string, { x: number, y: number }> | null} */ (null));
@@ -117,6 +120,7 @@ export function OfficeFloor({ snapshot, status, bridgeError, onHireAt, onTalkTo,
           <Office3D
             desks={snapshot.desks}
             deskStates={deskStates}
+            offDuty={offDuty}
             controlsRef={sceneApiRef}
             onView={(view) => setSceneView(view)}
             onProject={(positions, nextAmenities) => {
@@ -151,6 +155,7 @@ export function OfficeFloor({ snapshot, status, bridgeError, onHireAt, onTalkTo,
               deskState={desk.occupant ? deskStates.get(desk.occupant.id) ?? null : null}
               tokenSummary={desk.occupant ? snapshot?.employeeTokens?.[String(desk.occupant.id)] ?? null : null}
               viewPrefs={viewPrefs}
+              offDuty={offDuty}
               projected={projected}
               showArt={scene3dFailed}
             />
@@ -174,12 +179,13 @@ export function OfficeFloor({ snapshot, status, bridgeError, onHireAt, onTalkTo,
  *   deskState: import("./App.jsx").DeskState | null,
  *   tokenSummary: import("./App.jsx").TokenTotalData | null,
  *   viewPrefs: import("./App.jsx").ViewPrefs,
+ *   offDuty: boolean,
  *   projected: Record<number, { x: number, y: number, width: number, height: number, hitLeft: number, hitTop: number, clipPath: string }> | null,
  *   showArt: boolean,
  * }} props
  */
 const DeskCard = React.memo(function DeskCard(/** @type {any} */ props) {
-  const { desk, onHireAt, onTalkTo, deskState, tokenSummary, viewPrefs, projected, showArt } = props;
+  const { desk, onHireAt, onTalkTo, deskState, tokenSummary, viewPrefs, offDuty, projected, showArt } = props;
   const occupant = desk.occupant;
   const empty = occupant === null;
   const openDesk = empty ? () => onHireAt(desk) : occupant ? () => onTalkTo(occupant) : undefined;
@@ -197,9 +203,9 @@ const DeskCard = React.memo(function DeskCard(/** @type {any} */ props) {
   // fresh idle cycle starts NOW, not at epoch.
   const motion = deskState?.motion ?? initialMotion(Date.now());
   const signals = deskSignals(activity, motion);
-  const bubbleText = viewPrefs.bubble ? bubbleTextFor(activity, motion) : null;
   const working = signals.busy;
   const awayFromDesk = motion.position === "away";
+  const screen = screenForDesk({ occupant, offDuty, activity });
 
   return (
     <div
@@ -211,8 +217,11 @@ const DeskCard = React.memo(function DeskCard(/** @type {any} */ props) {
       data-busy={signals.busy ? "true" : "false"}
       data-activity={activity.activity ?? ""}
       data-tone={activity.screenTone ?? ""}
+      data-screen={screen.kind}
       data-posture={motion.posture}
+      data-coffee-phase={motion.coffeePhase ?? ""}
       data-position={motion.position}
+      data-off-duty={offDuty ? "true" : "false"}
       data-blocked={activity.blocked !== null ? "true" : "false"}
       role="button"
       title={empty ? `${desk.label}（空工位 · 点击招聘）` : `${occupant?.name}（点击对话）`}
@@ -231,7 +240,7 @@ const DeskCard = React.memo(function DeskCard(/** @type {any} */ props) {
         <>
           {/* Fallback painting (WebGL unavailable): desk → seat → person →
               chair back. The normal path leaves this to the 3D scene. */}
-          <DeskArtSvg activity={activity} uid={`desk-${desk.id}`} />
+          <DeskArtSvg activity={activity} screen={screen} uid={`desk-${desk.id}`} />
           <ChairSeatSvg uid={`desk-${desk.id}`} />
           {!empty && !awayFromDesk ? (
             <SeatedPersonSvg uid={`desk-${desk.id}`} roleKey={occupant.roleSnapshot.key} posture={motion.posture} working={working} />
@@ -248,7 +257,7 @@ const DeskCard = React.memo(function DeskCard(/** @type {any} */ props) {
         />
       ) : null}
 
-      {/* ── always-on readout layer（关掉名牌/气泡仍在）──────────── */}
+      {/* ── always-on readout layer（关掉名牌仍在）────────────────── */}
       {!empty ? (
         <>
           <span className={`desk-status-light ${signals.light}`} data-testid="desk-light" data-tone={signals.light} aria-hidden="true" />
@@ -265,19 +274,13 @@ const DeskCard = React.memo(function DeskCard(/** @type {any} */ props) {
         </>
       ) : null}
 
-      {bubbleText !== null ? (
-        <div className="desk-bubble" data-testid="desk-bubble" data-bubble={bubbleText}>
-          {bubbleText}
-        </div>
-      ) : null}
-
       {!empty && viewPrefs.plate ? (
         <div
           className={`desk-plate desk-plate-occupied ${working ? "desk-plate-working" : ""}`}
           data-testid="desk-occupant"
           title={`${occupant.name} · ${occupant.roleSnapshot.name}`}
         >
-          {occupant.name} · {working ? "干活中…" : occupant.roleSnapshot.name}
+          {occupant.name} · {occupant.roleSnapshot.name}
           {/* 票 12 验收 3: 员工名牌上的员工级 token 聚合（host 聚合走信封）；
               未计量的引擎显示「未计量」，不是 0。 */}
           <span
@@ -306,9 +309,9 @@ const DeskCard = React.memo(function DeskCard(/** @type {any} */ props) {
  * activity: 读/写/执行/测试 each get their own picture, 测试结果 turns the
  * whole screen 红/绿.
  *
- * @param {{ activity: import("./scene/deskActivity.js").DeskActivityState, uid: string }} props
+ * @param {{ activity: import("./scene/deskActivity.js").DeskActivityState, screen: import("./scene/deskScreen.js").DeskScreen, uid: string }} props
  */
-function DeskArtSvg({ activity, uid }) {
+function DeskArtSvg({ activity, screen, uid }) {
   return (
     <svg className="desk-art" viewBox="0 0 170 152" aria-hidden="true">
       <defs>
@@ -380,7 +383,7 @@ function DeskArtSvg({ activity, uid }) {
       <path d="M78 47 L92 47 L90.5 38 L79.5 38 Z" fill="#bdbfb7" />
       <rect x="33" y="1" width="104" height="48" rx="7" fill={`url(#${uid}-imac-shell)`} />
       <rect x="41" y="5" width="88" height="36" rx="3.2" fill={`url(#${uid}-screen)`} />
-      <ScreenPicture activity={activity} />
+      <ScreenPicture screen={screen} uid={uid} />
       <rect x="41" y="5" width="88" height="36" rx="3.2" fill="none" stroke="#1b201b" strokeWidth="1.25" />
       <path d="M43 6 H127 L123 12 H47 Z" fill="rgba(255,255,255,0.06)" />
       <path d="M41 36 Q85 44 129 36 L129 41 L41 41 Z" fill="rgba(255,255,255,0.05)" />
@@ -432,131 +435,144 @@ function DeskArtSvg({ activity, uid }) {
 }
 
 /**
- * The monitor's picture, switched by the desk's activity state. Coordinates
- * stay inside the screen rect (41,5)-(129,41).
+ * The monitor's picture. Coordinates stay inside the screen rect
+ * (41,5)-(129,41). Black is intentionally featureless: it means empty desk or
+ * company off duty. Desktop means a seated but idle/slacking employee.
  *
- * @param {{ activity: import("./scene/deskActivity.js").DeskActivityState }} props
+ * @param {{ screen: import("./scene/deskScreen.js").DeskScreen, uid: string }} props
  */
-function ScreenPicture({ activity }) {
-  const tone = activity.screenTone;
-  if (tone === "pass") {
-    // 测试通过 → whole screen goes 绿
+function ScreenPicture({ screen, uid }) {
+  const kind = screen.kind;
+  if (kind === "black") {
     return (
-      <g data-testid="desk-screen" data-screen="test-pass">
-        <rect x="41" y="5" width="88" height="36" rx="3" fill="#3f7d55" className="screen-wash" />
-        <polyline points="70,23 80,32 102,13" fill="none" stroke="#eef6ea" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
+      <g data-testid="desk-screen" data-screen="black">
+        <rect x="41" y="5" width="88" height="36" rx="3" fill="#050607" />
+        <path d="M41 5 L112 5 L58 41 L41 41 Z" fill="rgba(150,178,188,0.05)" />
       </g>
     );
   }
-  if (tone === "fail") {
-    // 测试失败 → whole screen goes 红
+  if (kind === "desktop") {
     return (
-      <g data-testid="desk-screen" data-screen="test-fail">
-        <rect x="41" y="5" width="88" height="36" rx="3" fill="#a03a28" className="screen-wash" />
-        <g stroke="#fbeeea" strokeWidth="5" strokeLinecap="round">
-          <line x1="74" y1="14" x2="96" y2="33" />
-          <line x1="96" y1="14" x2="74" y2="33" />
+      <g data-testid="desk-screen" data-screen="desktop">
+        <defs>
+          <linearGradient id={uid + "-desktop-sky"} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="#0b527f" />
+            <stop offset="0.55" stopColor="#0a83a3" />
+            <stop offset="1" stopColor="#082a4a" />
+          </linearGradient>
+        </defs>
+        <rect x="41" y="5" width="88" height="36" rx="3" fill={"url(#" + uid + "-desktop-sky)"} />
+        <path d="M41 25 Q74 8 112 5 L129 5 L129 14 Q92 19 41 34 Z" fill="rgba(190,246,250,0.15)" />
+        <rect x="45" y="10" width="7" height="5" rx="1" fill="#e8b44a" />
+        <rect x="46" y="11" width="4" height="2" rx="0.5" fill="#f5d27a" />
+        <rect x="46" y="18" width="5" height="5" rx="1" fill="#5bbad6" />
+        <rect x="46" y="26" width="5" height="5" rx="1" fill="#7e9caf" />
+        <rect x="41" y="34" width="88" height="7" fill="rgba(5,18,27,0.9)" />
+        <g fill="#d9f4ff">
+          <rect x="45" y="36" width="2" height="2" />
+          <rect x="48" y="36" width="2" height="2" />
+          <rect x="45" y="39" width="2" height="2" />
+          <rect x="48" y="39" width="2" height="2" />
+        </g>
+        <rect x="53" y="36" width="15" height="3" rx="1.5" fill="rgba(255,255,255,0.16)" />
+        <rect x="75" y="36" width="4" height="4" rx="1" fill="#7b95a8" />
+        <rect x="82" y="36" width="4" height="4" rx="1" fill="#d9b14d" />
+        <rect x="89" y="36" width="4" height="4" rx="1" fill="#5e9dc0" />
+        <rect x="112" y="36" width="10" height="3" rx="1.5" fill="rgba(225,245,255,0.55)" />
+      </g>
+    );
+  }
+  if (kind === "office") {
+    return (
+      <g data-testid="desk-screen" data-screen="office">
+        <rect x="41" y="5" width="88" height="36" rx="3" fill="#d8d3c6" />
+        <rect x="41" y="5" width="88" height="5" rx="3" fill="#2d6e9c" />
+        <rect x="44" y="7" width="18" height="1.5" rx="0.8" fill="#e7f4fa" />
+        <rect x="45" y="13" width="15" height="24" rx="1.5" fill="#eceae1" />
+        <rect x="48" y="16" width="8" height="1.5" fill="#b0a897" />
+        <rect x="48" y="20" width="9" height="1" fill="#c8c2b5" />
+        <rect x="63" y="12" width="61" height="26" rx="1.5" fill="#fbfaf4" />
+        <rect x="67" y="15" width="31" height="2.5" rx="1" fill="#2e3a42" />
+        <rect x="67" y="20" width="45" height="1.2" fill="#c8c4b8" />
+        <rect x="67" y="23" width="38" height="1.2" fill="#c8c4b8" />
+        <rect x="67" y="28" width="54" height="4" fill="#2d6e9c" />
+        <g fill="#e9e6dc">
+          <rect x="67" y="32" width="54" height="3.3" />
+          <rect x="67" y="35.3" width="54" height="2.2" fill="#f4f1e9" />
         </g>
       </g>
     );
   }
-
-  if (activity.activity === null) {
-    // 空闲：暗屏 + 待机电源点
+  if (kind === "terminal") {
     return (
-      <g data-testid="desk-screen" data-screen="idle">
-        <circle cx="85" cy="39.5" r="0.9" fill="#8fa08c" />
+      <g data-testid="desk-screen" data-screen="terminal">
+        <rect x="41" y="5" width="88" height="36" rx="3" fill="#070b10" />
+        <rect x="41" y="5" width="88" height="5" rx="3" fill="#18212b" />
+        <circle cx="46" cy="7.5" r="1.2" fill="#ca6b5d" />
+        <circle cx="50" cy="7.5" r="1.2" fill="#d7b65a" />
+        <circle cx="54" cy="7.5" r="1.2" fill="#6eaa75" />
+        <rect x="45" y="14" width="4" height="2" fill="#80d49c" />
+        <rect x="51" y="14" width="22" height="2" fill="#e3edf2" />
+        <g fill="#7f8c96">
+          <rect x="45" y="19" width="35" height="1.6" />
+          <rect x="45" y="23" width="28" height="1.6" />
+        </g>
+        <g fill="#b3c4ce">
+          <rect x="45" y="28" width="30" height="1.6" />
+          <rect x="45" y="32" width="38" height="1.6" />
+        </g>
+        <rect x="45" y="36" width="2" height="3" fill="#80d49c" />
+        <rect x="49" y="37" width="9" height="1.5" fill="#d7e4e8" />
       </g>
     );
   }
-
-  switch (activity.activity) {
-    case "read":
-      // 阅读：一页文档 + 段落行
-      return (
-        <g data-testid="desk-screen" data-screen="read">
-          <rect x="47" y="8" width="46" height="30" rx="2" fill="#f2ede0" />
-          <g fill="#7d7466">
-            <rect x="51" y="12" width="34" height="2" rx="1" />
-            <rect x="51" y="17" width="38" height="2" rx="1" />
-            <rect x="51" y="22" width="30" height="2" rx="1" />
-            <rect x="51" y="27" width="36" height="2" rx="1" />
-            <rect x="51" y="32" width="24" height="2" rx="1" />
-          </g>
-          <g fill="#c9c0ae">
-            <rect x="99" y="10" width="24" height="3" rx="1.5" />
-            <rect x="99" y="16" width="20" height="3" rx="1.5" />
-            <rect x="99" y="22" width="24" height="3" rx="1.5" className="screen-line-b" />
-            <rect x="99" y="28" width="16" height="3" rx="1.5" />
-            <rect x="99" y="34" width="22" height="3" rx="1.5" />
-          </g>
+  if (kind === "test" || kind === "test-pass" || kind === "test-fail") {
+    const accent = kind === "test-pass" ? "#6bc58b" : kind === "test-fail" ? "#d36b56" : "#d7ad52";
+    return (
+      <g data-testid="desk-screen" data-screen={kind}>
+        <rect x="41" y="5" width="88" height="36" rx="3" fill="#0b1015" />
+        <rect x="41" y="5" width="88" height="4" rx="3" fill="#171f28" />
+        <g fill={accent}>
+          <rect x="45" y="12" width="3" height="3" />
+          <rect x="45" y="18" width="3" height="3" />
+          <rect x="45" y="24" width="3" height="3" />
         </g>
-      );
-    case "write":
-      // 写代码：彩色代码行 + 闪烁光标
-      return (
-        <g data-testid="desk-screen" data-screen="write">
-          <g>
-            <rect x="45" y="9" width="26" height="3" rx="1.5" fill="#c8a24a" />
-            <rect x="50" y="15" width="42" height="3" rx="1.5" fill="#8fb0c9" />
-            <rect x="50" y="21" width="34" height="3" rx="1.5" fill="#8fb0c9" />
-            <rect x="55" y="27" width="48" height="3" rx="1.5" fill="#9ec98f" />
-            <rect x="50" y="33" width="22" height="3" rx="1.5" fill="#c9a3b0" />
-          </g>
-          <rect x="76" y="32" width="3" height="6" fill="#f2ede0" className="screen-cursor" />
-          <path d="M104 12 l10 8 -10 8 z" fill="rgba(255,255,255,0.14)" />
+        <g fill="#687986">
+          <rect x="51" y="12" width="36" height="2" />
+          <rect x="51" y="18" width="30" height="2" />
+          <rect x="51" y="24" width="40" height="2" />
         </g>
-      );
-    case "exec":
-      // 终端：提示符 + 输出行 + 光标
-      return (
-        <g data-testid="desk-screen" data-screen="exec">
-          <g fill="#9ec98f">
-            <rect x="45" y="9" width="4" height="3" rx="1" />
-            <rect x="51" y="9" width="30" height="3" rx="1.5" fill="#f2ede0" />
-          </g>
-          <g fill="#c9c0ae">
-            <rect x="51" y="15" width="44" height="3" rx="1.5" />
-            <rect x="51" y="21" width="30" height="3" rx="1.5" />
-            <rect x="51" y="27" width="52" height="3" rx="1.5" className="screen-line-b" />
-          </g>
-          <g fill="#9ec98f">
-            <rect x="45" y="33" width="4" height="3" rx="1" />
-            <rect x="51" y="33" width="12" height="3" rx="1.5" fill="#f2ede0" />
-          </g>
-          <rect x="66" y="32" width="3" height="6" fill="#f2ede0" className="screen-cursor" />
-        </g>
-      );
-    case "test":
-      // 测试进行中：跑条清单 + 进度条（结果出来整屏红/绿，见上）
-      return (
-        <g data-testid="desk-screen" data-screen="test-run">
-          <g stroke="#9ec98f" strokeWidth="1.6" strokeLinecap="round">
-            <polyline points="47,11 49,13 53,8" fill="none" />
-            <polyline points="47,18 49,20 53,15" fill="none" />
-          </g>
-          <g fill="#c9c0ae">
-            <rect x="57" y="9" width="38" height="3" rx="1.5" />
-            <rect x="57" y="16" width="30" height="3" rx="1.5" />
-          </g>
-          <rect x="57" y="23" width="4" height="3" rx="1.5" fill="#c8a24a" className="screen-line-b" />
-          <rect x="45" y="33" width="76" height="5" rx="2.5" fill="#2c332b" />
-          <rect x="47" y="35" width="40" height="1.6" rx="0.8" fill="#9ec98f" className="screen-progress" />
-        </g>
-      );
-    default:
-      // 未知工具：通用敲键盘画面（干活，只是说不出在干啥）
-      return (
-        <g data-testid="desk-screen" data-screen="work">
-          <g fill="#c9c0ae">
-            <rect x="45" y="11" width="38" height="3" rx="1.5" />
-            <rect x="45" y="18" width="52" height="3" rx="1.5" className="screen-line-b" />
-            <rect x="45" y="25" width="30" height="3" rx="1.5" />
-          </g>
-          <rect x="79" y="24" width="3" height="6" fill="#f2ede0" className="screen-cursor" />
-        </g>
-      );
+        <rect x="45" y="30" width="76" height="4" rx="2" fill="#19232d" />
+        <rect x="46" y="31.5" width={kind === "test-pass" ? 74 : kind === "test-fail" ? 34 : 52} height="1" rx="0.5" fill={accent} />
+        <rect x="45" y="37" width="20" height="2" fill={accent} />
+      </g>
+    );
   }
+  return (
+    <g data-testid="desk-screen" data-screen="code">
+      <rect x="41" y="5" width="88" height="36" rx="3" fill="#0d1219" />
+      <rect x="41" y="5" width="19" height="36" fill="#141c26" />
+      <rect x="60" y="5" width="69" height="5" fill="#1b2633" />
+      <g fill="#778b9e">
+        <rect x="44" y="10" width="8" height="1.5" />
+        <rect x="44" y="15" width="11" height="1.2" />
+        <rect x="44" y="19" width="9" height="1.2" />
+      </g>
+      <rect x="63" y="8" width="18" height="4" rx="1" fill="#243549" />
+      <g>
+        <rect x="64" y="16" width="12" height="2" fill="#c792ea" />
+        <rect x="78" y="16" width="18" height="2" fill="#82aaff" />
+        <rect x="64" y="21" width="8" height="2" fill="#5f7e9b" />
+        <rect x="74" y="21" width="30" height="2" fill="#c3e88d" />
+        <rect x="64" y="26" width="5" height="2" fill="#89ddff" />
+        <rect x="71" y="26" width="24" height="2" fill="#ffcb6b" />
+        <rect x="64" y="31" width="20" height="2" fill="#f07178" />
+        <rect x="86" y="31" width="16" height="2" fill="#82aaff" />
+        <rect x="70" y="36" width="30" height="2" fill="#c3e88d" />
+      </g>
+      <rect x="108" y="35" width="2" height="4" fill="#e6edf2" />
+    </g>
+  );
 }
 
 /** Chair seat cushion — painted under the seated person.
@@ -657,17 +673,20 @@ function CoffeeChairSvg() {
 /**
  * The seated employee, BACK view — they face the monitor, away from the
  * dollhouse camera. Role reads from clothing color + back-readable features.
- * Posture (ticket 07): work = typing at the keyboard; idle = hands down;
- * slack = leaning back at a glowing phone; coffee = not here (see CoffeeChairSvg).
+ * Posture (ticket 07 + 17): work = typing at the keyboard; idle = hands down;
+ * phone = leaning back at a glowing phone; minesweeper = clicking at the
+ * computer; coffee = seated with a cup after the machine trip.
  *
- * @param {{ uid: string, roleKey: string, posture: "idle" | "slack" | "coffee" | "work", working: boolean }} props
+ * @param {{ uid: string, roleKey: string, posture: "idle" | "work" | "phone" | "minesweeper" | "coffee", working: boolean }} props
  */
 function SeatedPersonSvg({ uid, roleKey, posture, working }) {
   const color = appearanceFor(roleKey);
-  const slacking = posture === "slack";
+  const phone = posture === "phone";
+  const minesweeper = posture === "minesweeper";
+  const coffee = posture === "coffee";
   return (
     <svg
-      className={`desk-art desk-person ${working ? "person-typing" : ""} ${slacking ? "person-slack" : ""}`}
+      className={`desk-art desk-person ${working ? "person-typing" : ""} ${phone ? "person-slack" : ""} ${minesweeper ? "person-minesweeper" : ""} ${coffee ? "person-coffee" : ""}`}
       viewBox="0 0 170 152"
       aria-hidden="true"
       data-testid="desk-person"
@@ -686,7 +705,7 @@ function SeatedPersonSvg({ uid, roleKey, posture, working }) {
         </radialGradient>
       </defs>
 
-      {slacking ? (
+      {phone ? (
         <g className="person-slack-body">
           {/* leaning back, phone held up — screen glow reaches the head */}
           <path d="M72 70 L63 60" stroke={color.top} strokeWidth="8" strokeLinecap="round" />
@@ -728,6 +747,14 @@ function SeatedPersonSvg({ uid, roleKey, posture, working }) {
           <circle cx="85" cy="53.5" r="11" fill={`url(#${uid}-person-hair)`} />
           <path d="M75 51 Q78 44 85 43.5" stroke="rgba(255,255,255,0.24)" strokeWidth="1.2" fill="none" />
           <path d="M92 45 Q98 48 96 54" stroke="rgba(255,255,255,0.10)" strokeWidth="1.2" fill="none" />
+          {coffee ? (
+            <g className="person-coffee-cup">
+              <path d="M108 67 L119 67 L118 75 Q113 78 109 75 Z" fill="#e8dfd1" stroke="#a39580" strokeWidth="0.9" />
+              <ellipse cx="113.5" cy="67" rx="5.4" ry="1.8" fill="#f4ecdf" />
+              <path d="M119 69 Q124 69 123 72 Q122 75 118 74" fill="none" stroke="#b1a38e" strokeWidth="1.2" />
+              <path d="M110 64 Q108 60 111 58 M115 64 Q117 60 114 57" stroke="rgba(255,255,255,0.38)" strokeWidth="1.1" fill="none" />
+            </g>
+          ) : null}
           {/* glasses temples running to the ears */}
           {color.decor === "glasses" ? (
             <g stroke="#1d211e" strokeWidth="1.35">

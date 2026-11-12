@@ -3,6 +3,8 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 import { appearanceFor } from "../roleAppearance.js";
+import { IDLE_THRESHOLDS } from "./idleMotion.js";
+import { paintDeskScreen, screenForDesk } from "./deskScreen.js";
 
 /**
  * The eight desk bays in the Blender room. This order mirrors the DB desk
@@ -20,69 +22,17 @@ export const DESK_LAYOUT = [
   { x: 3.45, z: 3.45 },
 ];
 
-/** @type {Record<string, string>} */
-const SCREEN_COLORS = {
-  pass: "#68b37d",
-  fail: "#cf604b",
-  test: "#e0ad4f",
-  read: "#d9b677",
-  write: "#85b58a",
-  exec: "#7baeb9",
-  idle: "#0b100d",
-};
+/** Where the coffee trip ends: beside the left-front machine, clear of the counter. */
+const COFFEE_STAND = { x: -3.42, z: 4.92 };
 
-/** @param {string} tone @param {string} activity */
-function screenTexture(tone, activity) {
+/** @param {import("./deskScreen.js").DeskScreen} screen */
+function screenTexture(screen) {
   const canvas = document.createElement("canvas");
-  canvas.width = 192;
-  canvas.height = 108;
+  canvas.width = 320;
+  canvas.height = 180;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
-  const accent = SCREEN_COLORS[tone] ?? SCREEN_COLORS.write;
-  ctx.fillStyle = "#132019";
-  ctx.fillRect(0, 0, 192, 108);
-  ctx.fillStyle = accent;
-  ctx.globalAlpha = 0.22;
-  ctx.fillRect(0, 0, 192, 108);
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = accent;
-  ctx.fillRect(0, 0, 192, 9);
-  ctx.globalAlpha = 0.9;
-  ctx.fillRect(12, 18, 34, 4);
-  ctx.fillRect(12, 26, 22, 3);
-  ctx.globalAlpha = 1;
-
-  if (tone === "pass") {
-    ctx.strokeStyle = "#effbef";
-    ctx.lineWidth = 12;
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(58, 58);
-    ctx.lineTo(86, 86);
-    ctx.lineTo(138, 28);
-    ctx.stroke();
-  } else if (tone === "fail") {
-    ctx.strokeStyle = "#ffe9e1";
-    ctx.lineWidth = 11;
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(66, 30);
-    ctx.lineTo(126, 88);
-    ctx.moveTo(126, 30);
-    ctx.lineTo(66, 88);
-    ctx.stroke();
-  } else {
-    const rows = activity === "read" ? [40, 55, 70, 85] : [34, 49, 64, 79, 94];
-    for (let i = 0; i < rows.length; i += 1) {
-      ctx.fillStyle = i % 3 === 0 ? accent : "rgba(233,244,226,0.64)";
-      ctx.globalAlpha = i === rows.length - 1 ? 0.6 : 1;
-      const width = i === 0 ? 78 : i % 2 === 0 ? 116 : 94;
-      ctx.fillRect(22, rows[i], width, 6);
-    }
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = accent;
-    ctx.fillRect(22, 100, 12, 4);
-  }
+  paintDeskScreen(ctx, screen.kind, canvas.width, canvas.height);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 4;
@@ -197,13 +147,39 @@ function buildAvatar(occupant) {
     }
   }
 
-  // the phone glow is the only prop for the slack posture
-  const phoneMesh = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.06, 0.012), phone);
-  phoneMesh.position.set(0, 0.91, 0.22);
+  // legs are hidden while seated; the coffee trip reveals them for the walk.
+  const legMaterial = new THREE.MeshStandardMaterial({ color: 0x2b3238, roughness: 0.86 });
+  /** @type {THREE.Mesh[]} */
+  const legs = [];
+  for (const side of [-1, 1]) {
+    const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.058, 0.34, 4, 8), legMaterial);
+    leg.position.set(side * 0.09, 0.30, 0.02);
+    leg.rotation.z = side * 0.05;
+    leg.castShadow = true;
+    leg.visible = false;
+    group.add(leg);
+    legs.push(leg);
+  }
+
+  // the phone glow is the only prop for the phone posture; hold it to the
+  // right so the back-view camera still reads the screen edge.
+  const phoneMesh = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.085, 0.012), phone);
+  phoneMesh.position.set(0.21, 0.93, 0.18);
+  phoneMesh.rotation.z = -0.18;
   phoneMesh.visible = false;
   group.add(phoneMesh);
 
-  return { group, arms, phone: phoneMesh, seatZ: 0.62 };
+  // a warm paper cup rides in the right hand during the coffee beat.
+  const cup = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.036, 0.030, 0.078, 12),
+    new THREE.MeshStandardMaterial({ color: 0xeee4d2, roughness: 0.62 }),
+  );
+  cup.position.set(0.23, 0.96, 0.14);
+  cup.rotation.z = -0.12;
+  cup.visible = false;
+  group.add(cup);
+
+  return { group, arms, legs, phone: phoneMesh, cup, seatZ: 0.62 };
 }
 
 /**
@@ -211,12 +187,13 @@ function buildAvatar(occupant) {
  *   desks: import("../App.jsx").DeskData[],
  *   deskStates: Map<number, import("../App.jsx").DeskState>,
  *   onProject: (positions: Record<number, { x: number, y: number, width: number, height: number, hitLeft: number, hitTop: number, clipPath: string }>, amenities: Record<string, { x: number, y: number }>) => void,
+ *   offDuty?: boolean,
  *   onError?: (message: string) => void,
  *   controlsRef?: React.MutableRefObject<{ zoomIn: () => void, zoomOut: () => void, reset: () => void } | null>,
  *   onView?: (view: { zoom: number, percent: number, canZoomIn: boolean, canZoomOut: boolean }) => void,
  * }} props
  */
-export function Office3D({ desks, deskStates, onProject, onError, controlsRef, onView }) {
+export function Office3D({ desks, deskStates, onProject, offDuty = false, onError, controlsRef, onView }) {
   const hostRef = React.useRef(/** @type {HTMLDivElement | null} */ (null));
   const projectRef = React.useRef(onProject);
   projectRef.current = onProject;
@@ -224,6 +201,8 @@ export function Office3D({ desks, deskStates, onProject, onError, controlsRef, o
   errorRef.current = onError;
   const viewRef = React.useRef(onView);
   viewRef.current = onView;
+  const offDutyRef = React.useRef(offDuty);
+  offDutyRef.current = offDuty;
   const apiRef = React.useRef(/** @type {any} */ (null));
   const desksRef = React.useRef(desks);
   const statesRef = React.useRef(deskStates);
@@ -485,6 +464,111 @@ export function Office3D({ desks, deskStates, onProject, onError, controlsRef, o
       notifyView();
     }
 
+    /**
+     * Walk route: desk → front aisle → coffee stand, then mirror the same path
+     * on the way back. The 2.5s leg is visual; the 5s machine stay is state.
+     * @param {{ x: number, z: number }} layout
+     * @param {number} t 0..1
+     */
+    function coffeePoint(layout, t) {
+      const start = { x: layout.x, z: layout.z + 0.78 };
+      const aisle = { x: layout.x, z: 4.92 };
+      const end = COFFEE_STAND;
+      const lerp = (/** @type {number} */ a, /** @type {number} */ b, /** @type {number} */ u) => a + (b - a) * u;
+      if (t <= 0.45) {
+        const u = Math.min(1, Math.max(0, t / 0.45));
+        return { x: lerp(start.x, aisle.x, u), z: lerp(start.z, aisle.z, u) };
+      }
+      const u = Math.min(1, Math.max(0, (t - 0.45) / 0.55));
+      return { x: lerp(aisle.x, end.x, u), z: lerp(aisle.z, end.z, u) };
+    }
+
+    /**
+     * Drive one avatar from its current idle/coffee/phone/work state. This runs
+     * every frame so the walk and the little idle motions are continuous, not
+     * 500ms steps; React only changes the posture/phase.
+     * @param {any} avatar
+     * @param {import("../App.jsx").DeskState | null} state
+     * @param {number} now
+     */
+    function poseAvatar(avatar, state, now) {
+      const layout = avatar.layout;
+      if (!layout) return;
+      const motion = state?.motion;
+      const posture = motion?.posture ?? "idle";
+      const phase = motion?.coffeePhase ?? null;
+      const started = motion?.phaseStartedAt ?? now;
+      let x = layout.x;
+      let z = layout.z + 0.78;
+      let y = 0.04;
+      let rotX = 0;
+      let rotY = 0;
+      let legs = false;
+      let phone = false;
+      let cup = false;
+      for (const leg of avatar.legs) leg.rotation.x = 0;
+      for (const arm of avatar.arms) arm.rotation.x = -0.35;
+      avatar.group.visible = true;
+
+      if (posture === "coffee") {
+        if (phase === "to-machine" || phase === "returning") {
+          const elapsed = Math.max(0, now - started);
+          const raw = Math.min(1, elapsed / IDLE_THRESHOLDS.coffeeWalkMs);
+          const t = phase === "returning" ? 1 - raw : raw;
+          const point = coffeePoint(layout, t);
+          x = point.x;
+          z = point.z;
+          legs = true;
+          cup = phase === "returning";
+          const swing = Math.sin(now / 105) * 0.52;
+          avatar.legs[0].rotation.x = swing;
+          avatar.legs[1].rotation.x = -swing;
+          avatar.arms[0].rotation.x = -0.35 + swing * 0.45;
+          avatar.arms[1].rotation.x = -0.35 - swing * 0.45;
+          rotY = phase === "returning" ? 0.32 : -0.32;
+        } else if (phase === "at-machine") {
+          x = COFFEE_STAND.x;
+          z = COFFEE_STAND.z;
+          legs = true;
+          cup = true;
+          rotY = -0.45;
+          avatar.arms[0].rotation.x = -0.62;
+          avatar.arms[1].rotation.x = -0.22;
+          y = 0.04 + Math.sin(now / 620) * 0.006;
+        } else if (phase === "sipping") {
+          // back at the chair with the cup; small lean + sip bob
+          cup = true;
+          rotX = 0.035;
+          avatar.arms[0].rotation.x = -0.7;
+          avatar.arms[1].rotation.x = -0.18;
+          y = 0.04 + Math.sin(now / 700) * 0.005;
+        }
+      } else if (posture === "phone") {
+        phone = true;
+        rotX = -0.12;
+        avatar.arms[0].rotation.x = -0.78;
+        avatar.arms[1].rotation.x = -0.78;
+        y = 0.04 + Math.sin(now / 600) * 0.006;
+      } else if (posture === "minesweeper") {
+        const tap = Math.sin(now / 240) * 0.10;
+        avatar.arms[0].rotation.x = -0.55 + tap;
+        avatar.arms[1].rotation.x = -0.55 - tap;
+        y = 0.04 + Math.sin(now / 850) * 0.004;
+      } else if (posture === "work") {
+        const typing = Math.sin(now / 135) * 0.06;
+        avatar.arms[0].rotation.x = -0.55 + typing;
+        avatar.arms[1].rotation.x = -0.55 - typing;
+        y = 0.04 + Math.sin(now / 130) * 0.004;
+      }
+
+      avatar.group.position.set(x, y, z);
+      avatar.group.rotation.x = rotX;
+      avatar.group.rotation.y = rotY;
+      for (const leg of avatar.legs) leg.visible = legs;
+      avatar.phone.visible = phone;
+      avatar.cup.visible = cup;
+    }
+
     /** @param {import("../App.jsx").DeskData} desk @param {any} state @param {number} index */
     function syncOne(desk, state, index) {
       const layout = DESK_LAYOUT[index];
@@ -496,17 +580,12 @@ export function Office3D({ desks, deskStates, onProject, onError, controlsRef, o
           if (avatar) scene.remove(avatar.group);
           avatar = buildAvatar(occupant);
           avatar.employeeId = occupant.id;
-          avatar.group.position.set(layout.x, 0.04, layout.z + 0.78);
+          avatar.layout = layout;
           scene.add(avatar.group);
           avatars.set(desk.id, avatar);
         }
-        const posture = state?.motion?.posture ?? "idle";
-        const busy = state?.activity?.activity !== null && state?.activity?.activity !== undefined;
-        avatar.group.visible = posture !== "coffee";
-        avatar.group.position.set(layout.x, 0.04, layout.z + (posture === "slack" ? 0.86 : 0.78));
-        avatar.group.rotation.x = posture === "slack" ? -0.12 : 0;
-        avatar.phone.visible = posture === "slack";
-        for (const arm of avatar.arms) arm.rotation.x = busy ? -0.55 : -0.35;
+        avatar.layout = layout;
+        poseAvatar(avatar, state, Date.now());
       } else {
         const avatar = avatars.get(desk.id);
         if (avatar) {
@@ -516,26 +595,31 @@ export function Office3D({ desks, deskStates, onProject, onError, controlsRef, o
       }
 
       // Dynamic monitor picture, painted on a JS plane just in front of the
-      // Blender monitor. The GLB screen stays as the physical bezel/back.
+      // Blender monitor. Empty desks and off-duty offices get a truly black
+      // screen; a seated idle/slacking employee sees the Windows desktop.
       const screen = screens.get(index + 1);
       if (screen) {
-        const tone = state?.activity?.screenTone ?? "idle";
-        const activity = state?.activity?.activity ?? "idle";
-        const key = `${tone}:${activity}`;
-        if (screen.key !== key) {
-          const texture = screenTexture(tone, activity);
+        const model = screenForDesk({
+          occupant,
+          offDuty: offDutyRef.current,
+          activity: state?.activity ?? null,
+        });
+        if (screen.key !== model.kind) {
+          const texture = screenTexture(model);
           if (texture) {
             if (screen.texture) screen.texture.dispose();
             screen.texture = texture;
             screen.material.map = texture;
+            screen.material.color.set(0xffffff);
             screen.material.needsUpdate = true;
-            screen.key = key;
+            screen.key = model.kind;
           }
         }
       }
     }
 
-    function sync(/** @type {import("../App.jsx").DeskData[]} */ nextDesks, /** @type {Map<number, any>} */ nextStates) {
+    function sync(/** @type {import("../App.jsx").DeskData[]} */ nextDesks, /** @type {Map<number, any>} */ nextStates, /** @type {boolean} */ nextOffDuty = offDutyRef.current) {
+      offDutyRef.current = nextOffDuty;
       setDeskVisibility(nextDesks.length);
       const active = new Set(nextDesks.map((desk) => desk.id));
       for (const [deskId, avatar] of avatars) {
@@ -574,7 +658,7 @@ export function Office3D({ desks, deskStates, onProject, onError, controlsRef, o
         // live monitor planes (screen state per desk)
         for (let index = 0; index < DESK_LAYOUT.length; index += 1) {
           const layout = DESK_LAYOUT[index];
-          const material = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+          const material = new THREE.MeshBasicMaterial({ color: 0x050607, toneMapped: false });
           const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.78, 0.43), material);
           mesh.position.set(layout.x, 1.15, layout.z - 0.125);
           mesh.renderOrder = 3;
@@ -614,10 +698,12 @@ export function Office3D({ desks, deskStates, onProject, onError, controlsRef, o
     resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(hostEl);
     // A window resize does not always fire the element ResizeObserver before
-    // the next React probe (observed on this Windows/Electron build). Belt and
-    // braces: reproject from the window event too, coalesced to one frame.
+    // the next React probe (observed on this Windows/Electron build), and a
+    // hidden/lost display surface can stall requestAnimationFrame. Resize
+    // synchronously; the rAF is only a follow-up for a late layout pass.
     let resizeRaf = 0;
     const onWindowResize = () => {
+      resize();
       cancelAnimationFrame(resizeRaf);
       resizeRaf = requestAnimationFrame(resize);
     };
@@ -718,14 +804,14 @@ export function Office3D({ desks, deskStates, onProject, onError, controlsRef, o
 
     const animate = () => {
       raf = requestAnimationFrame(animate);
-      // gentle idle bob for the whole office; avatars keep their own posture
-      const now = performance.now();
-      for (const avatar of avatars.values()) {
-        const occupant = desksRef.current.find((desk) => desk.occupant?.id === avatar.employeeId)?.occupant;
-        if (!occupant) continue;
-        const state = statesRef.current.get(occupant.id);
-        const busy = state?.activity?.activity !== null && state?.activity?.activity !== undefined;
-        avatar.group.position.y = busy ? Math.sin(now / 130 + avatar.employeeId) * 0.006 : 0;
+      // Continuous avatar motion: walk interpolation, phone/coffee sway and
+      // minesweeper taps. React only changes posture/phase; this loop owns the
+      // frame-level interpolation.
+      const now = Date.now();
+      for (const [deskId, avatar] of avatars) {
+        const desk = desksRef.current.find((candidate) => candidate.id === deskId);
+        const state = desk?.occupant ? statesRef.current.get(desk.occupant.id) ?? null : null;
+        poseAvatar(avatar, state, now);
       }
       renderer.render(scene, camera);
     };
@@ -754,8 +840,8 @@ export function Office3D({ desks, deskStates, onProject, onError, controlsRef, o
   }, []);
 
   useEffect(() => {
-    if (apiRef.current) apiRef.current.sync(desks, deskStates);
-  }, [desks, deskStates]);
+    if (apiRef.current) apiRef.current.sync(desks, deskStates, offDuty);
+  }, [desks, deskStates, offDuty]);
 
   return <div className="office-3d" data-testid="office-3d" data-desk-count={desks.length} ref={hostRef} />;
 }

@@ -1378,36 +1378,6 @@ body {
   }
 }
 
-/* switchable 气泡 */
-.desk-bubble {
-  position: absolute;
-  top: -18px;
-  left: 50%;
-  transform: translateX(-50%);
-  white-space: nowrap;
-  font-size: 12px;
-  color: var(--ink);
-  background: var(--paper-raised);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 2px 10px;
-  box-shadow: 0 3px 8px rgba(43, 38, 32, 0.12);
-  animation: screen-wash-in 180ms ease-out;
-}
-
-.desk-bubble::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  bottom: -5px;
-  transform: translateX(-50%) rotate(45deg);
-  width: 8px;
-  height: 8px;
-  background: var(--paper-raised);
-  border-right: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-}
-
 /* person micro-motion: typing hands + 摸鱼 lean */
 .person-typing .person-hand-l {
   animation: person-type 0.42s ease-in-out infinite alternate;
@@ -1415,6 +1385,31 @@ body {
 
 .person-typing .person-hand-r {
   animation: person-type 0.42s ease-in-out infinite alternate-reverse;
+}
+
+.person-minesweeper .person-hand-l {
+  animation: person-type 0.28s ease-in-out infinite alternate;
+}
+
+.person-minesweeper .person-hand-r {
+  animation: person-type 0.28s ease-in-out infinite alternate-reverse;
+}
+
+.person-coffee-cup {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: person-coffee-sip 3.2s ease-in-out infinite;
+}
+
+@keyframes person-coffee-sip {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  38%,
+  58% {
+    transform: translate(0, -1.2px);
+  }
 }
 
 @keyframes person-type {
@@ -1459,7 +1454,7 @@ body {
   opacity: 0.9;
 }
 
-/* view preference toggles (名牌/气泡) */
+/* view preference toggle (名牌) */
 .view-toggles {
   position: absolute;
   top: 46px;
@@ -2584,7 +2579,7 @@ body {
   }
 }
 
-/* Status popover collided with the 名牌/气泡 toggles (same top-right corner). */
+/* Status popover collided with the 名牌 toggle (same top-right corner). */
 .status-zone {
   z-index: 20;
 }

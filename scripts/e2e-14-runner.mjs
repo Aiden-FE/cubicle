@@ -76,10 +76,8 @@ async function phaseSettings(app, ctx, checks) {
   add(checks, "设置顶部显示宿主运行状态", statusState === "online", `state=${statusState}`);
 
   await click(contents, '[data-testid="toggle-plate"]');
-  await click(contents, '[data-testid="toggle-bubble"]');
   await click(contents, '[data-testid="toggle-plate"]');
-  await click(contents, '[data-testid="toggle-bubble"]');
-  add(checks, "外观 tab 的 名牌/气泡 开关可切换", true);
+  add(checks, "外观 tab 的名牌开关可切换", true);
 
   await click(contents, '[data-testid="settings-tab-models"]');
   const emptyShown = await waitFor(
