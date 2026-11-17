@@ -59,10 +59,12 @@ Cubicle 里长出一个**学院**：本机级的公共能力资源库（技能 +
 | 票 | 内容 | 为什么排这个位置 | 状态（2026-11-17） |
 |---|---|---|---|
 | [N1 materialize](neo-tickets/N1-materialize.md) | `neo materialize --role <r> --agent <a> --out <dir>`：只落盘不 launch | 没有它，Cubicle 只能自己重算「default ∪ role ∪ domain」与 hash；有它，装配规则只存在一份 | **已合并**（neo main `fa37a6c`，lead 验收） |
-| [N2 library + domain](neo-tickets/N2-library-domain.md) | `~/.neo/library/<domain>/…`，角色声明 `domain:` | 领域的载体；落地前领域只能手写在角色文件里 | 施工中（neo 分支 `academy/02-library-domain`） |
-| [N3 角色写口](neo-tickets/N3-role-write.md) | `create` 只写 stub，缺「改」（AGENTS.md 正文 / 领域 / 装配） | Cubicle 不直接写 `~/.neo`，没有写口学院就只能只读 | 待开工（Blocked by N2） |
+| [N2 library + domain](neo-tickets/N2-library-domain.md) | `~/.neo/library/<domain>/…`，角色声明 `domain:` | 领域的载体；落地前领域只能手写在角色文件里 | **已合并**（neo main `447ee80`，lead 验收终记 `71b863d`） |
+| [N3 角色写口](neo-tickets/N3-role-write.md) | `create` 只写 stub，缺「改」（AGENTS.md 正文 / 领域 / 装配） | Cubicle 不直接写 `~/.neo`，没有写口学院就只能只读 | **已合并**（neo main `4ee1dcd`，`neo role set`，lead 验收） |
 
 **消费侧注意（N1 审查结论）**：`materialize` 产物与启动根同形，可能含 auth 凭据副本（convergeRoot 原生行为）。Cubicle 把 `--out` 指到员工引擎根时，员工根是**机器本地数据**（`CUBICLE_DATA_DIR` 下，绝不入 git）；「无凭据导出」若要做得回决策票，不在实现侧发明。
+
+**N3 落地后的锁语义（宿主合同）**：`neo role set` 改动装配 → `state/locks/<role>.yaml` 标 `dirty: true`，`status` 走漂移通道（ok=false/exit 1）；**清脏只认 `neo update` 或 `neo use --global`**（`materialize` 保持只读、不清脏）。Cubicle 下发后要把「收敛」当显式步骤（下发 → update/use 清脏 → materialize），不要把 `status` 当健康闸。`--json` 返回 `{ok, role, dryRun, changed{…}, dirty, files[…]}`。
 
 ## 怎么开工（Cubicle 侧）
 
