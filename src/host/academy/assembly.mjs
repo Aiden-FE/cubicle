@@ -23,11 +23,13 @@
  * to null — their behavior stays exactly as before this ticket.
  */
 import fs from "node:fs/promises";
+import { createHash } from "node:crypto";
 import path from "node:path";
 
 import { appError } from "../../shared/apperror.mjs";
 import { enginePaths } from "../engine/paths.mjs";
 import { runMaterialize } from "./neo-cli.mjs";
+import { readRoleMcpServers, resolveMcpEnv, renderPiMcpJson } from "./neo-mcp.mjs";
 import { resolveNeoHome } from "./neo-roles.mjs";
 
 /**
@@ -152,13 +154,53 @@ export function createAcademyAssembler({ dataDir, nodeBinary, cliEntry, env = pr
       // non-link leftovers are Cubicle's or the user's: left in place, never used.
     }
 
+    // 3) MCP: read the role's full mcp.yaml (strict env:VAR secret rule),
+    //    resolve against the host env, and render this engine's native config.
+    //    No servers → remove any previous render: engines keep passing empty.
+    const rawServers = await readRoleMcpServers(neoHome, roleKey);
+    const resolvedServers = resolveMcpEnv(rawServers, env);
+    const canonPath = path.join(agentDir, "academy-mcp.json");
+    const piMcpPath = path.join(agentDir, "mcp.json");
+    const serverNames = Object.keys(resolvedServers).sort();
+    if (serverNames.length > 0) {
+      await fs.writeFile(
+        canonPath,
+        `${JSON.stringify({ version: 1, roleKey, servers: resolvedServers }, null, 2)}\n`,
+        "utf8",
+      );
+      if (engine === "pi") {
+        // pi's built-in MCP extension reads exactly <agentDir>/mcp.json.
+        await fs.writeFile(piMcpPath, renderPiMcpJson(resolvedServers), "utf8");
+      }
+    } else {
+      await fs.rm(canonPath, { force: true });
+      await fs.rm(piMcpPath, { force: true });
+    }
+
+    // Fingerprint: everything a live engine session would need to re-open for.
+    // The manifest hash covers skill content; MCP rides as name/transport +
+    // command shape (secret VALUES never enter the fingerprint).
+    const mcpShape = JSON.stringify(
+      Object.entries(rawServers)
+        .sort(([a], [b]) => (a < b ? -1 : 1))
+        .map(([name, server]) =>
+          server.transport === "stdio"
+            ? { name, transport: "stdio", command: server.command, args: server.args, env: server.env ?? {} }
+            : { name, transport: "http", url: server.url, headers: server.headers ?? {} },
+        ),
+    );
     return {
-      fingerprint: `${roleKey}|${engine}|${manifest.hash}`,
+      fingerprint: `${roleKey}|${engine}|${manifest.hash}|${hashOf(mcpShape)}`,
       roleKey,
       skills: manifest.skills.map((skill) => ({ name: skill.name, hash: skill.hash, source: skill.source })),
-      mcp: [],
+      mcp: serverNames.map((name) => ({ name, transport: resolvedServers[name].transport })),
     };
   }
 
   return { assemble };
+}
+
+/** @param {string} text @returns {string} */
+function hashOf(text) {
+  return createHash("sha256").update(text, "utf8").digest("hex");
 }
