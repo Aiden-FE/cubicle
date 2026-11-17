@@ -50,7 +50,7 @@ contextBridge.exposeInMainWorld("cubicle", {
    * @returns {Promise<unknown>}
    */
   invoke(method, payload, options) {
-    const timeoutMs = Number.isFinite(options?.timeoutMs) && options.timeoutMs > 0 ? options.timeoutMs : INVOKE_TIMEOUT_MS;
+    const timeoutMs = typeof options?.timeoutMs === "number" && options.timeoutMs > 0 ? options.timeoutMs : INVOKE_TIMEOUT_MS;
     return new Promise((resolve, reject) => {
       seq += 1;
       const id = `r${seq}-${Date.now().toString(36)}`;

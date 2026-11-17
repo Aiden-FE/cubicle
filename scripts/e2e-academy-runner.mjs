@@ -47,6 +47,7 @@ const DESKS_JS = `(() =>
   })
 )()`;
 
+/** @param {string} resourceKey */
 const ROW_CELLS_JS = (resourceKey) =>
   `(() => {
     const row = [...document.querySelectorAll('[data-testid="academy-row"]')].find((el) => el.dataset.resourceKey === ${JSON.stringify(resourceKey)});
@@ -60,10 +61,7 @@ const ROW_CELLS_JS = (resourceKey) =>
     };
   })()`;
 
-/**
- * @param {import("electron").WebContents} contents
- * @param {string} name
- */
+/** @param {import("electron").WebContents} contents */
 const echoText = async (contents) => String(await evalIn(contents, `document.querySelector('[data-testid="academy-echo"]')?.textContent ?? ''`));
 
 /**
@@ -217,15 +215,14 @@ async function phasePanel(ctx) {
 }
 
 /**
- * @typedef {{
- *   app: import("electron").App,
- *   getMainWindow: () => import("electron").BrowserWindow | null,
- *   supervisor: { state: string, stop(): Promise<void> | void },
- *   dataDir: string,
- *   bootStartMs: number,
- *   phase: string,
- *   outDir: string,
- * }} E2EContext
+ * @typedef {object} E2EContext
+ * @property {import("electron").App} app
+ * @property {() => import("electron").BrowserWindow | null} getMainWindow
+ * @property {{ state: string, pid: number | null, send: (m: unknown) => boolean }} supervisor
+ * @property {string} dataDir
+ * @property {number} bootStartMs
+ * @property {string} phase
+ * @property {string} outDir
  */
 
 /**
