@@ -136,9 +136,15 @@ function requirePositiveId(payload, field) {
  *   engineFacts?: (engine: string) => { configured: boolean },
  *   engineCapabilities?: EngineCapabilities,
  *   notifyDomain?: (payload: Record<string, unknown>) => void,
+ *   academy?: {
+ *     probe(): Promise<{ available: boolean, version: string | null, reason: string | null }>,
+ *     snapshot(): Promise<unknown>,
+ *     install(payload: unknown): Promise<{ ok: true, echo: string, snapshot: unknown }>,
+ *     dispatch(payload: unknown): Promise<{ ok: true, echo: string, snapshot: unknown }>,
+ *   },
  * }} deps
  */
-export function createService({ store, hostInfo, runManager, git, duty, engineProbe, engineFacts, engineCapabilities, notifyDomain }) {
+export function createService({ store, hostInfo, runManager, git, duty, engineProbe, engineFacts, engineCapabilities, notifyDomain, academy }) {
   /** 引擎运行方法共用同一道闸门：没有 run manager 就没有 run.*。 */
   function requireRunManager() {
     if (!runManager) throw appError("engine_unavailable", "引擎运行时未启动");
@@ -149,6 +155,12 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
   function requireGit() {
     if (!git) throw appError("git_unavailable", "git 访问未配置：工单需要 git 工作区才能记录起点。");
     return git;
+  }
+
+  /** 票 a03: 学院门（vendored neo CLI 面板）。没接上门 = 可读的 academy_unavailable。 */
+  function requireAcademy() {
+    if (!academy) throw appError("academy_unavailable", "学院未接线（本宿主没有 vendored Neo CLI 面板门）");
+    return academy;
   }
 
   /**
@@ -1017,6 +1029,25 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
       if (!duty) throw appError("duty_unavailable", "上下班调度未启动");
       const { phase } = duty.applyOverride(companyId, mode);
       return { payload: { phase }, event: { reason: "duty.override", companyId } };
+    },
+
+    // — 票 a03: 学院浮层 — snapshot 是列表（含只读降级位）；装/下发都经
+    //   vendored Neo CLI，失败以 { code, message } 错误信封回显（preload
+    //   原样转成纯对象）。写完角色装配会刷投影缓存，办公室侧数据跟着变，
+    //   所以配 domain.changed 事件。
+
+    async "academy.snapshot"() {
+      return { payload: await requireAcademy().snapshot() };
+    },
+
+    async "academy.install"(payload) {
+      const result = await requireAcademy().install(payload);
+      return { payload: result, event: { reason: "academy.install" } };
+    },
+
+    async "academy.dispatch"(payload) {
+      const result = await requireAcademy().dispatch(payload);
+      return { payload: result, event: { reason: "academy.dispatch" } };
     },
 
     /**

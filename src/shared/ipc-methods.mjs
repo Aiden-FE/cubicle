@@ -52,6 +52,10 @@ export const RENDERER_METHODS = new Set([
   "schedule.get",
   "schedule.set",
   "duty.override",
+  // 票 a03: 学院浮层 — 列表 / 装 / 下发（写入全部经 vendored Neo CLI）。
+  "academy.snapshot",
+  "academy.install",
+  "academy.dispatch",
 ]);
 
 /** Main-process-only methods (never reachable from a renderer). */

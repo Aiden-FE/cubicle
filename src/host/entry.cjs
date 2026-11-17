@@ -26,6 +26,7 @@ async function main() {
     { taskPrompt },
     { engineLedgerFile, sweepPidLedger },
     { createAcademyAssembler },
+    { createAcademyPanel },
     { existsSync },
     path,
     { parseEnvelope, createEvent, TOPICS },
@@ -44,6 +45,7 @@ async function main() {
     import("./task/playbook.mjs"),
     import("./engine/child-ledger.mjs"),
     import("./academy/assembly.mjs"),
+    import("./academy/panel.mjs"),
     import("node:fs"),
     import("node:path"),
     import("../shared/envelope.mjs"),
@@ -110,11 +112,20 @@ async function main() {
   // process.execPath is electron.exe here, so ELECTRON_RUN_AS_NODE=1 goes in
   // **the child env only** (never leaks into any Electron launch, per the M0
   // pitfall). NEO_HOME override works through process.env as usual.
+  const neoCliEntry = path.join(__dirname, "..", "..", "vendor", "neo", "bin", "neo.js");
+  const neoChildEnv = { ...process.env, ELECTRON_RUN_AS_NODE: "1" };
   const academyAssembler = createAcademyAssembler({
     dataDir: store.dataDir,
     nodeBinary: process.execPath,
-    cliEntry: path.join(__dirname, "..", "..", "vendor", "neo", "bin", "neo.js"),
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+    cliEntry: neoCliEntry,
+    env: neoChildEnv,
+  });
+  // 票 a03: 学院浮层的 host 门 — 列表/装/下发都经同一份 vendored CLI 约定。
+  const academyPanel = createAcademyPanel({
+    store,
+    nodeBinary: process.execPath,
+    cliEntry: neoCliEntry,
+    env: neoChildEnv,
   });
   // Abrupt host exit (supervisor stop → kill) must still reclaim engine
   // children, so no codex/dsh process is left under this host pid.
@@ -185,6 +196,7 @@ async function main() {
     engineProbe: probeRunner,
     engineFacts,
     engineCapabilities,
+    academy: academyPanel,
     notifyDomain: (payload) => send(createEvent(TOPICS.domainChanged, payload)),
   });
 

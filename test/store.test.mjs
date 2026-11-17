@@ -2063,3 +2063,57 @@ test("票 10 中断列表：开库自愈后列出两种形状的 interrupted 任
     await dispose();
   }
 });
+
+// — 票 a03: 学院来源标记（academy_mark）—
+
+test("academy marks: upsert/list/get round-trip; ack survives re-install upserts", async () => {
+  const { dataDir, dispose } = await withTempDir("academy-marks");
+  try {
+    const store = openStore({ dataDir });
+
+    store.upsertAcademyMark({ resourceKey: "d:demo", kind: "remote", source: "https://github.com/acme/skills" });
+    store.upsertAcademyMark({ resourceKey: "d:web/skill-x", kind: "local", source: "C:\\dev\\src" });
+
+    const got = store.getAcademyMark("d:demo");
+    assert.equal(got.kind, "remote");
+    assert.equal(got.source, "https://github.com/acme/skills");
+    assert.equal(got.remoteAck, false);
+    assert.equal(store.getAcademyMark("d:nope"), null);
+
+    // 首次下发确认 → ack 落库；之后重装同一容器 upsert 不抹掉 ack 与 kind。
+    store.ackAcademyRemote("d:demo");
+    store.upsertAcademyMark({ resourceKey: "d:demo", kind: "remote", source: "https://github.com/acme/skills-v2" });
+    const acked = store.getAcademyMark("d:demo");
+    assert.equal(acked.remoteAck, true);
+    assert.equal(acked.source, "https://github.com/acme/skills-v2", "重装更新 source 字符串");
+
+    const listed = store.listAcademyMarks();
+    assert.deepEqual(listed.map((m) => m.resourceKey), ["d:demo", "d:web/skill-x"]);
+    assert.equal(listed[0].updatedAt.length > 0, true);
+
+    store.close();
+    const reopened = openStore({ dataDir });
+    assert.equal(reopened.getAcademyMark("d:demo").remoteAck, true, "标记跨重启持久（验收：来源标记持久化）");
+    reopened.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("academy marks: ack on an unknown key creates the row (kind remote), bad kind refused", async () => {
+  const { dataDir, dispose } = await withTempDir("academy-marks-ack");
+  try {
+    const store = openStore({ dataDir });
+    store.ackAcademyRemote("r:dev");
+    const row = store.getAcademyMark("r:dev");
+    assert.equal(row.kind, "remote");
+    assert.equal(row.remoteAck, true);
+    assert.throws(
+      () => store.upsertAcademyMark({ resourceKey: "x", kind: "weird", source: null }),
+      /invalid_academy_mark|CHECK/,
+    );
+    store.close();
+  } finally {
+    await dispose();
+  }
+});

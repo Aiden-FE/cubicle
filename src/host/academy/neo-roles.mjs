@@ -217,11 +217,13 @@ async function readPersona(agentsMdPath) {
 /**
  * Deterministic content hash for a skill directory: sorted rel paths
  * (POSIX separators, so the pin survives Windows) + per-file sha256.
+ * (票 a03: also used by the panel's list view to show library-domain skill
+ * hashes — display only, assembly never consumes this.)
  *
  * @param {string} dir
  * @returns {Promise<string>}
  */
-async function dirContentSha(dir) {
+export async function dirContentSha(dir) {
   /** @type {{ rel: string, full: string }[]} */
   const files = [];
   await walkFiles(dir, "", files);
@@ -265,8 +267,9 @@ async function walkFiles(dir, rel, out) {
 /**
  * @param {string} dir
  * @returns {Promise<string[]>} names of readable immediate sub-directories; [] when absent
+ * (票 a03: exported for the panel's library/<domain> listing — read-only.)
  */
-async function readableChildDirs(dir) {
+export async function readableChildDirs(dir) {
   try {
     const entries = await fs.readdir(dir, { withFileTypes: true });
     return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
