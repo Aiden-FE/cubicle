@@ -6,6 +6,7 @@ import { TaskBench } from "./TaskBench.jsx";
 import { LeftRail } from "./LeftRail.jsx";
 import { RosterPanel } from "./RosterPanel.jsx";
 import { WorkClockPanel } from "./WorkClockPanel.jsx";
+import { AcademyPanel } from "./AcademyPanel.jsx";
 import { TaskHandle } from "./TaskHandle.jsx";
 import { SettingsModal } from "./SettingsModal.jsx";
 import { EmployeeEditModal } from "./EmployeeEditModal.jsx";
@@ -36,10 +37,12 @@ export function App() {
   const [deskStates, setDeskStates] = useState(/** @type {() => Map<number, DeskState>} */ (() => new Map()));
   const [viewPrefs, setViewPrefs] = useState(/** @type {() => ViewPrefs} */ (readViewPrefs));
   // 票 08 外壳：四个左轨入口 + 右把手各自开合，全是浮层（画布永远 100%）。
+  // 票 a03 加入第五个入口「学院」——同样只是浮层。
   const [benchOpen, setBenchOpen] = useState(false);
   const [handleOpen, setHandleOpen] = useState(false);
   const [rosterOpen, setRosterOpen] = useState(false);
   const [dutyOpen, setDutyOpen] = useState(false);
+  const [academyOpen, setAcademyOpen] = useState(false);
   const [offDuty, setOffDuty] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editEmployee, setEditEmployee] = useState(/** @type {RosterEmployeeData | null} */ (null));
@@ -56,6 +59,7 @@ export function App() {
     setBenchOpen(false);
     setRosterOpen(false);
     setDutyOpen(false);
+    setAcademyOpen(false);
     setBenchTaskId(null);
   }, []);
 
@@ -91,6 +95,12 @@ export function App() {
     closeLeftOverlays();
     setDutyOpen(next);
   }, [dutyOpen, closeLeftOverlays]);
+
+  const toggleAcademy = useCallback(() => {
+    const next = !academyOpen;
+    closeLeftOverlays();
+    setAcademyOpen(next);
+  }, [academyOpen, closeLeftOverlays]);
 
   /** Settings is the global modal: it clears every other overlay (Q20 A). */
   const openSettings = useCallback(() => {
@@ -320,7 +330,7 @@ export function App() {
       >
         ⚙ 设置
       </button>
-      {/* 左轨四入口：公司切换 / 工单台 / 花名册 / 上下班。工单创建与列表只在
+      {/* 左轨五入口：公司切换 / 工单台 / 花名册 / 上下班 / 学院。工单创建与列表只在
           浮层，主画布永远是办公室（硬约束）。 */}
       <LeftRail
         snapshot={snapshot}
@@ -331,6 +341,8 @@ export function App() {
         onToggleRoster={toggleRoster}
         dutyOpen={dutyOpen}
         onToggleDuty={toggleDuty}
+        academyOpen={academyOpen}
+        onToggleAcademy={toggleAcademy}
       />
       {benchOpen ? <TaskBench snapshot={snapshot} initialTaskId={benchTaskId} onClose={() => { setBenchOpen(false); setBenchTaskId(null); }} /> : null}
       {rosterOpen ? (
@@ -343,6 +355,7 @@ export function App() {
         />
       ) : null}
       {dutyOpen ? <WorkClockPanel snapshot={snapshot} onClose={() => setDutyOpen(false)} /> : null}
+      {academyOpen ? <AcademyPanel onClose={() => setAcademyOpen(false)} /> : null}
       {/* 右缘任务把手：徽标 = 活跃工单数（进行中+待验收），拉开三段
           进行中 / 待验收 / 档案（done+failed）。 */}
       <button

@@ -51,6 +51,7 @@ function seedTestLibrary(dataDir) {
 
 import { openStore } from "../src/host/store.mjs";
 import { createService } from "../src/host/service.mjs";
+import { appError } from "../src/shared/apperror.mjs";
 import { createRunManager } from "../src/host/engine/run-manager.mjs";
 import { createTaskRunHook } from "../src/host/task/artifacts.mjs";
 import { createDutyRuntime } from "../src/host/duty/runtime.mjs";
@@ -1872,5 +1873,65 @@ test("票 10 task.detail 带中断判决：工单台详情据此渲染三选（c
     void healthy;
   } finally {
     await h.dispose();
+  }
+});
+
+// — 票 a03: academy.* 信封形状（stub 门；真门在 test/academy-panel.test.mjs）—
+
+test("academy.* envelopes: snapshot no events, install/dispatch emit domain.changed, rejects stay plain {code,message}", async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "cubicle-service-academy-"));
+  const store = openStore({ dataDir });
+  const fakeAcademy = {
+    async probe() {
+      return { available: true, version: "0.2.8", reason: null };
+    },
+    async snapshot() {
+      return { readOnly: false, rows: [{ resourceKey: "d:demo/hello" }] };
+    },
+    async install(/** @type {unknown} */ payload) {
+      const record = /** @type {{ targetName?: string }} */ (payload ?? {});
+      return { ok: /** @type {const} */ (true), echo: `installed into ${record.targetName}`, snapshot: { rows: [] } };
+    },
+    async dispatch(/** @type {unknown} */ payload) {
+      const record = /** @type {{ confirmed?: boolean }} */ (payload ?? {});
+      if (record.confirmed !== true) throw appError("academy_remote_unconfirmed", "远端来源：第一次下发要确认一次");
+      return { ok: /** @type {const} */ (true), echo: "demo → editor", snapshot: { rows: [] } };
+    },
+  };
+  const service = createService({
+    store,
+    hostInfo: { pid: 4242, startedAt: "2026-11-17T09:00:00.000Z" },
+    academy: fakeAcademy,
+  });
+  try {
+    const snap = await service.handleEnvelope(createInvoke("a1", "academy.snapshot", {}));
+    assert.equal(snap.reply.ok, true);
+    assert.equal(/** @type {any} */ (snap.reply.payload).rows.length, 1);
+    assert.deepEqual(snap.events, []);
+
+    const inst = await service.handleEnvelope(createInvoke("a2", "academy.install", { source: "C:\\src", target: "domain", targetName: "demo" }));
+    assert.equal(inst.reply.ok, true);
+    assert.equal(/** @type {any} */ (inst.reply.payload).echo, "installed into demo");
+    assert.equal(inst.events.length, 1);
+    assert.equal(inst.events[0].topic, "domain.changed");
+    assert.equal(/** @type {any} */ (inst.events[0].payload).reason, "academy.install");
+
+    // 未确认的远端下发：错误信封保持纯对象 { code, message }（contextBridge 规矩）。
+    const denied = await service.handleEnvelope(createInvoke("a3", "academy.dispatch", { domain: "demo", roles: ["editor"] }));
+    assert.equal(denied.reply.ok, false);
+    assert.equal(/** @type {any} */ (denied.reply.error).code, "academy_remote_unconfirmed");
+    assert.equal(typeof /** @type {any} */ (denied.reply.error).message, "string");
+
+    const acked = await service.handleEnvelope(createInvoke("a4", "academy.dispatch", { domain: "demo", roles: ["editor"], confirmed: true }));
+    assert.equal(acked.reply.ok, true);
+
+    // 没接学院门的宿主诚实报错，不是 unknown_method（方法存在）。
+    const bare = createService({ store, hostInfo: { pid: 4242, startedAt: "2026-11-17T09:00:00.000Z" } });
+    const missing = await bare.handleEnvelope(createInvoke("a5", "academy.snapshot", {}));
+    assert.equal(missing.reply.ok, false);
+    assert.equal(/** @type {any} */ (missing.reply.error).code, "academy_unavailable");
+  } finally {
+    store.close();
+    await rm(dataDir, { recursive: true, force: true });
   }
 });

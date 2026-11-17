@@ -338,6 +338,16 @@ CREATE TABLE IF NOT EXISTS engine_state (
   probe_at TEXT,
   updated_at TEXT NOT NULL
 );
+-- 票 a03: 学院来源标记 — Cubicle 自己的账（Neo 没有 library 技能的「来源」台账）。
+-- key 形态：容器级 "d:<domain>" / "r:<role>"，或行级 "d:<domain>/<skill>"。
+-- kind: local=本机目录, remote=远端源, written=手写。remote_ack: 远端首次下发确认（一次，持久）。
+CREATE TABLE IF NOT EXISTS academy_mark (
+  resource_key TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('local', 'remote', 'written')),
+  source TEXT,
+  remote_ack INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL
+);
 `;
 
 /**
@@ -579,6 +589,20 @@ function toRole(row) {
     mcp: /** @type {RoleMcpEntry[]} */ (parseJsonOr(row.mcp, [])),
     source: row.source === "neo" || row.source === "probe" ? row.source : "preset",
     syncedAt: row.synced_at === null || row.synced_at === undefined ? null : String(row.synced_at),
+  };
+}
+
+/** 票 a03: academy_mark 行 → 面板视图。 */
+/** @param {Record<string, unknown>} row */
+function toAcademyMark(row) {
+  return {
+    resourceKey: String(row.resource_key),
+    kind: /** @type {"local" | "remote" | "written"} */ (
+      row.kind === "local" || row.kind === "remote" || row.kind === "written" ? row.kind : "written"
+    ),
+    source: row.source === null || row.source === undefined ? null : String(row.source),
+    remoteAck: Number(row.remote_ack) === 1,
+    updatedAt: String(row.updated_at),
   };
 }
 
@@ -1180,6 +1204,65 @@ export function openStore({ dataDir }) {
         throw err;
       }
       return { inserted, updated, removed };
+    },
+
+    // — 票 a03: 学院来源标记（来源=本机/远端/手写 + 远端首次下发的一次性确认）—
+
+    /**
+     * Upsert a panel-side mark for an academy resource (container key
+     * `d:<domain>` / `r:<role>` or row key `d:<domain>/<skill>`). Never
+     * touches remote_ack — a re-install does not re-ask what the boss already
+     * confirmed once.
+     *
+     * @param {{ resourceKey: string, kind: "local" | "remote" | "written", source?: string | null }} input
+     */
+    upsertAcademyMark({ resourceKey, kind, source }) {
+      if (typeof resourceKey !== "string" || resourceKey.length === 0 || resourceKey.length > 200) {
+        throw appError("invalid_academy_mark", "resourceKey must be a non-empty short string");
+      }
+      if (kind !== "local" && kind !== "remote" && kind !== "written") {
+        throw appError("invalid_academy_mark", `unknown academy mark kind: ${String(kind)}`);
+      }
+      db.prepare(
+        `INSERT INTO academy_mark (resource_key, kind, source, remote_ack, updated_at)
+         VALUES (?, ?, ?, 0, ?)
+         ON CONFLICT(resource_key) DO UPDATE SET
+           kind = excluded.kind,
+           source = excluded.source,
+           updated_at = excluded.updated_at`,
+      ).run(resourceKey, kind, source ?? null, new Date().toISOString());
+    },
+
+    /**
+     * Record the one-time 远端下发 confirmation. Creates the row (kind
+     * 'remote') when the mark was inferred (e.g. from a lock sourceType) and
+     * no panel install had happened yet.
+     *
+     * @param {string} resourceKey
+     */
+    ackAcademyRemote(resourceKey) {
+      if (typeof resourceKey !== "string" || resourceKey.length === 0 || resourceKey.length > 200) {
+        throw appError("invalid_academy_mark", "resourceKey must be a non-empty short string");
+      }
+      db.prepare(
+        `INSERT INTO academy_mark (resource_key, kind, source, remote_ack, updated_at)
+         VALUES (?, 'remote', NULL, 1, ?)
+         ON CONFLICT(resource_key) DO UPDATE SET remote_ack = 1, updated_at = excluded.updated_at`,
+      ).run(resourceKey, new Date().toISOString());
+    },
+
+    /** @param {string} resourceKey @returns {{ resourceKey: string, kind: "local" | "remote" | "written", source: string | null, remoteAck: boolean, updatedAt: string } | null} */
+    getAcademyMark(resourceKey) {
+      const row = db.prepare("SELECT * FROM academy_mark WHERE resource_key = ?").get(resourceKey);
+      return row ? toAcademyMark(/** @type {Record<string, unknown>} */ (row)) : null;
+    },
+
+    /** @returns {{ resourceKey: string, kind: "local" | "remote" | "written", source: string | null, remoteAck: boolean, updatedAt: string }[]} */
+    listAcademyMarks() {
+      return db
+        .prepare("SELECT * FROM academy_mark ORDER BY resource_key")
+        .all()
+        .map((row) => toAcademyMark(/** @type {Record<string, unknown>} */ (row)));
     },
 
     /**

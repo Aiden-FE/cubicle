@@ -1475,6 +1475,158 @@ body {
   overflow-y: auto;
 }
 
+/* 票 a03 · 学院浮层（.rail-drawer 同族，更宽一点放资源表）。
+   它只是 absolute 浮层：office-floor / room 完全不受影响（e2e 断画布不变）。 */
+.academy-panel {
+  width: 520px;
+  max-width: calc(100vw - 80px);
+}
+
+.academy-panel > section,
+.academy-panel > .academy-degraded,
+.academy-panel > .academy-echo,
+.academy-panel > .academy-table,
+.academy-panel > .task-note,
+.academy-panel > .task-empty {
+  margin: 12px 18px 0;
+}
+
+.academy-panel > .academy-dispatch {
+  margin-bottom: 18px;
+}
+
+.academy-section-title {
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  margin-bottom: 6px;
+}
+
+.academy-degraded {
+  font-size: 12.5px;
+  color: var(--warn);
+  background: rgba(138, 90, 18, 0.08);
+  border: 1px solid rgba(138, 90, 18, 0.35);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.academy-install,
+.academy-dispatch {
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.academy-install-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.academy-input {
+  font: inherit;
+  font-size: 12.5px;
+  padding: 5px 8px;
+  border: 1px solid rgba(92, 68, 56, 0.35);
+  border-radius: 7px;
+  background: #fffaf3;
+  color: var(--ink);
+  min-width: 0;
+  flex: 1;
+}
+
+.academy-source {
+  width: 100%;
+}
+
+.academy-echo {
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.academy-echo pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
+}
+
+.academy-echo-ok {
+  color: #33691e;
+  background: rgba(51, 105, 30, 0.07);
+  border: 1px solid rgba(51, 105, 30, 0.3);
+}
+
+.academy-echo-fail {
+  color: var(--bad);
+  background: rgba(180, 72, 47, 0.08);
+  border: 1px solid rgba(180, 72, 47, 0.35);
+}
+
+.academy-table {
+  font-size: 12.5px;
+}
+
+.academy-row {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 0.7fr 1fr 1.5fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 2px;
+  border-top: 1px solid var(--line);
+}
+
+.academy-row span {
+  overflow-wrap: anywhere;
+}
+
+.academy-row-head {
+  color: var(--ink-soft);
+  font-size: 12px;
+  border-top: none;
+}
+
+.academy-row [data-testid="academy-row-hash"] {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+}
+
+.academy-role-pick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  margin: 4px 0;
+}
+
+.academy-role-pick em {
+  color: var(--ink-soft);
+  font-style: normal;
+  font-size: 11.5px;
+}
+
+.academy-confirm {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--warn);
+  background: rgba(138, 90, 18, 0.08);
+  border: 1px solid rgba(138, 90, 18, 0.35);
+  border-radius: 8px;
+  padding: 7px 9px;
+}
+
+.academy-home {
+  margin-top: 6px;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
 /* 花名册 */
 .roster-body {
   padding: 10px 14px;

@@ -52,17 +52,20 @@ Cubicle 里长出一个**学院**：本机级的公共能力资源库（技能 +
 - [MCP 与风险边界](issues/04-mcp-and-risk.md): MCP 由用户自带、自负审查、不设白名单；应用只标来源 + 首次确认；tool 代码仍不开放。
 - [首切片与验收](issues/05-first-slice-acceptance.md): 全链路但只 1 技能 / 1 角色 / 1 引擎 / 1 员工；`e2e:15` 正反双向断言。
 
-## 与 Neo 的接缝（三张待提票）
+## 与 Neo 的接缝（协作边界，2026-11-17 人工裁定）
 
-**已落到 Neo 仓库**（2026-11-17）：`neo/.scratch/academy/` —— `spec.md` + `issues/01-materialize.md`、`02-library-domain.md`、`03-role-write.md`。Cubicle 侧的 [`neo-tickets/`](neo-tickets/) 留作跨仓库索引，改动以 Neo 侧为准。**顺序不能换**：
+**边界**：Neo 项目的任务一律**提工单**，Cubicle 会话不得在 neo 仓库实施/合并/改历史。2026-11-17 18:45–18:50 的 revert 系列**不是 lead 做的**（是一次越界清理时的整批回撤，把 01–04 的实现一起撤掉了）；lead 已于 19:0x 从 `e66282a` 恢复实现并逐项复验（Neo `894e5bf`），01–04 已在 Neo main 上生效。Cubicle 侧的 [`neo-tickets/`](neo-tickets/) 只保留说明性索引，**不携带任何 Neo 源码或 patch**（handoff patch 已删除，N4 已作废）。写入边界见 [`impl/SCOPE.md`](impl/SCOPE.md)。
 
-| 票 | 内容 | 为什么排这个位置 | 状态（2026-11-17） |
-|---|---|---|---|
-| [N1 materialize](neo-tickets/N1-materialize.md) | `neo materialize --role <r> --agent <a> --out <dir>`：只落盘不 launch | 没有它，Cubicle 只能自己重算「default ∪ role ∪ domain」与 hash；有它，装配规则只存在一份 | **已合并**（neo main `fa37a6c`，lead 验收） |
-| [N2 library + domain](neo-tickets/N2-library-domain.md) | `~/.neo/library/<domain>/…`，角色声明 `domain:` | 领域的载体；落地前领域只能手写在角色文件里 | **已合并**（neo main `447ee80`，lead 验收终记 `71b863d`） |
-| [N3 角色写口](neo-tickets/N3-role-write.md) | `create` 只写 stub，缺「改」（AGENTS.md 正文 / 领域 / 装配） | Cubicle 不直接写 `~/.neo`，没有写口学院就只能只读 | **已合并**（neo main `4ee1dcd`，`neo role set`，lead 验收） |
+| 票 | 内容 | Cubicle 侧现状 |
+|---|---|---|
+| [N1 materialize](neo-tickets/N1-materialize.md) | `neo materialize --role <r> --agent <a> --out <dir>` | **已交付**（Neo `894e5bf`）；Cubicle 直接消费，不自己算装配 |
+| [N2 library + domain](neo-tickets/N2-library-domain.md) | `~/.neo/library/<domain>/…`，角色 `domains:` | **已交付**（Neo `894e5bf`） |
+| [N3 角色写口](neo-tickets/N3-role-write.md) | `neo role set` 写入口 | **已交付**（Neo `894e5bf`） |
+| [N4 导出合同 T1–T5](neo-tickets/N4-export-contract.md) | `envRefs` / env 校验归 run / `--no-auth` / `--agent-models` / help | **已交付并复验**（Neo `894e5bf`）；Cubicle 恒传 `--no-auth --agent-models` |
 
-**消费侧注意（N1 审查结论）**：`materialize` 产物与启动根同形，可能含 auth 凭据副本（convergeRoot 原生行为）。Cubicle 把 `--out` 指到员工引擎根时，员工根是**机器本地数据**（`CUBICLE_DATA_DIR` 下，绝不入 git）；「无凭据导出」若要做得回决策票，不在实现侧发明。
+**vendor 再钉**：Neo main 已恢复 01–04（`894e5bf`），vendor bundle 应重钉到该提交并复跑装配 e2e；在此之前 `4ee1dcd` 钉仍可用（提交对象永久存在，可复现）。
+
+**消费侧注意**：`materialize` 默认与启动根同形（含 auth 凭据副本）；Cubicle **恒传 `--no-auth`**，导出目录不得出现 `auth.json`。`--out` 必须是本命令独占目录（`root.json` marker 认领），不要指向已有员工引擎根；模型由 Cubicle 自带，**恒传 `--agent-models`**。
 
 **N3 落地后的锁语义（宿主合同）**：`neo role set` 改动装配 → `state/locks/<role>.yaml` 标 `dirty: true`，`status` 走漂移通道（ok=false/exit 1）；**清脏只认 `neo update` 或 `neo use --global`**（`materialize` 保持只读、不清脏）。Cubicle 下发后要把「收敛」当显式步骤（下发 → update/use 清脏 → materialize），不要把 `status` 当健康闸。`--json` 返回 `{ok, role, dryRun, changed{…}, dirty, files[…]}`。
 

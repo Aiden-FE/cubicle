@@ -154,11 +154,18 @@ export function createAcademyAssembler({ dataDir, nodeBinary, cliEntry, env = pr
       // non-link leftovers are Cubicle's or the user's: left in place, never used.
     }
 
-    // 3) MCP: read the role's full mcp.yaml (strict env:VAR secret rule),
-    //    resolve against the host env, and render this engine's native config.
-    //    No servers → remove any previous render: engines keep passing empty.
-    const rawServers = await readRoleMcpServers(neoHome, roleKey);
-    const resolvedServers = resolveMcpEnv(rawServers, env);
+    // 3) MCP wiring — HELD (TODO(T1-T4)): the vendored materialize export
+    //    still loses `env:VAR` bindings (T1), hard-fails when referenced env
+    //    vars are absent (T2), copies credentials into --out (T3) and renders
+    //    model config we must ignore (T4) — see the Neo-side review
+    //    neo/.scratch/academy/reviews/2026-11-17-lead-review.md. Until those
+    //    land, the DEFAULT behavior must equal "no academy MCP configured"
+    //    (a02 acceptance wording): we never even read the role's mcp.yaml —
+    //    that also keeps T2 out of every run. Opt-in for unit tests / manual
+    //    experiments: CUBICLE_ACADEMY_MCP=1 in the assembler env.
+    const mcpEnabled = env.CUBICLE_ACADEMY_MCP === "1";
+    const rawServers = mcpEnabled ? await readRoleMcpServers(neoHome, roleKey) : {};
+    const resolvedServers = mcpEnabled ? resolveMcpEnv(rawServers, env) : {};
     const canonPath = path.join(agentDir, "academy-mcp.json");
     const piMcpPath = path.join(agentDir, "mcp.json");
     const serverNames = Object.keys(resolvedServers).sort();

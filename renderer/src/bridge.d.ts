@@ -17,7 +17,7 @@ export interface BridgeError {
 
 export interface CubicleBridge {
   /** Resolves with the reply payload; rejects with a plain {@link BridgeError} (Error subclasses do not survive contextBridge). */
-  invoke(method: string, payload?: unknown): Promise<unknown>;
+  invoke(method: string, payload?: unknown, options?: { timeoutMs?: number }): Promise<unknown>;
   subscribe(topic: string, handler: (event: EventEnvelope) => void): () => void;
   /** 票 13: 关于页 metadata（main 的业务，不走 AgentHost 信封总线）。 */
   appInfo(): Promise<AppInfo>;

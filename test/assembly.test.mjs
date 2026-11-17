@@ -176,7 +176,7 @@ const MCP_YAML = [
   "",
 ].join("\n");
 
-test("MCP env:VAR: pi employee gets a rendered <agentDir>/mcp.json (resolved values)", async () => {
+test("MCP env:VAR (flag-enabled): pi employee gets a rendered <agentDir>/mcp.json (resolved values)", async () => {
   const { dir, dispose } = await withTempDir("mcp-pi");
   try {
     const neoHome = path.join(dir, "neo-home");
@@ -188,7 +188,10 @@ test("MCP env:VAR: pi employee gets a rendered <agentDir>/mcp.json (resolved val
       dataDir,
       nodeBinary: process.execPath,
       cliEntry: VENDOR_CLI,
-      env: { ...process.env, NEO_HOME: neoHome, GITHUB_TOKEN: "tok-42" },
+      // TODO(T1-T4): engine-side academy MCP is HELD by default (lead review
+      // neo/.scratch/academy/reviews/2026-11-17-lead-review.md); these unit
+      // tests pin the wiring behind its opt-in flag, not the default behavior.
+      env: { ...process.env, NEO_HOME: neoHome, GITHUB_TOKEN: "tok-42", CUBICLE_ACADEMY_MCP: "1" },
     });
     const outcome = await assembler.assemble({ employee: neoEmployee(1, "A", "dev", "pi"), engine: "pi" });
     assert.ok(outcome);
@@ -216,7 +219,7 @@ test("MCP literal secret: assembly refuses the role (readable error), run never 
       dataDir,
       nodeBinary: process.execPath,
       cliEntry: VENDOR_CLI,
-      env: { ...process.env, NEO_HOME: neoHome },
+      env: { ...process.env, NEO_HOME: neoHome, CUBICLE_ACADEMY_MCP: "1" },
     });
     await assert.rejects(
       () => assembler.assemble({ employee: neoEmployee(1, "A", "dev", "pi"), engine: "pi" }),
@@ -226,6 +229,37 @@ test("MCP literal secret: assembly refuses the role (readable error), run never 
         return true;
       },
     );
+  } finally {
+    await dispose();
+  }
+});
+
+test("MCP gate OFF (default): role skills assemble; the MCP part behaves like no MCP", async () => {
+  const { dir, dispose } = await withTempDir("mcp-gate-off");
+  try {
+    const neoHome = path.join(dir, "neo-home");
+    const dataDir = path.join(dir, "data");
+    await seedSkill(neoHome, "dev", "alpha", "ALPHA");
+    await seedMcpYaml(neoHome, "dev", MCP_YAML);
+
+    // GITHUB_TOKEN is set ONLY because the vendored materialize itself checks
+    // env:VAR references (Neo-side T2, see lead review) — with the gate off,
+    // Cubicle must never read/render mcp.yaml itself. A role whose MCP env
+    // vars are NOT in the environment fails inside materialize (T2 until
+    // neo@T1-T4 land); that is recorded in the a03 Answer, not asserted here.
+    const assembler = createAcademyAssembler({
+      dataDir,
+      nodeBinary: process.execPath,
+      cliEntry: VENDOR_CLI,
+      env: { ...process.env, NEO_HOME: neoHome, GITHUB_TOKEN: "tok-42" },
+    });
+    const outcome = await assembler.assemble({ employee: neoEmployee(1, "A", "dev", "pi"), engine: "pi" });
+    assert.ok(outcome, "assembly succeeds with the MCP gate off");
+    assert.deepEqual(outcome.mcp, []);
+    assert.deepEqual(outcome.skills.map((s) => s.name), ["alpha"]);
+    const agentDir = enginePaths(dataDir, "pi", 1).agentDir;
+    assert.equal(await readFile(path.join(agentDir, "mcp.json"), "utf8").catch(() => null), null);
+    assert.equal(await readFile(path.join(agentDir, "academy-mcp.json"), "utf8").catch(() => null), null);
   } finally {
     await dispose();
   }

@@ -45,16 +45,19 @@ contextBridge.exposeInMainWorld("cubicle", {
   /**
    * @param {string} method
    * @param {unknown} [payload]
+   * @param {{ timeoutMs?: number }} [options] 票 a03: 长动作（学院装/下发要跑
+   *   vendored CLI + npx）可显式放宽超时；默认仍是 8s，宿主失联照常快速暴露。
    * @returns {Promise<unknown>}
    */
-  invoke(method, payload) {
+  invoke(method, payload, options) {
+    const timeoutMs = typeof options?.timeoutMs === "number" && options.timeoutMs > 0 ? options.timeoutMs : INVOKE_TIMEOUT_MS;
     return new Promise((resolve, reject) => {
       seq += 1;
       const id = `r${seq}-${Date.now().toString(36)}`;
       const timer = setTimeout(() => {
         pending.delete(id);
-        reject({ code: "host_timeout", message: `后台服务未在 ${INVOKE_TIMEOUT_MS / 1000} 秒内响应（${method}）` });
-      }, INVOKE_TIMEOUT_MS);
+        reject({ code: "host_timeout", message: `后台服务未在 ${Math.round(timeoutMs / 1000)} 秒内响应（${method}）` });
+      }, timeoutMs);
       pending.set(id, { resolve, reject, timer });
       ipcRenderer.send("cubicle:invoke", {
         v: 1,
