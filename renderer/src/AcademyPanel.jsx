@@ -87,12 +87,17 @@ export function AcademyPanel({ onClose }) {
     setBusy(true);
     try {
       const out = /** @type {{ echo: string }} */ (
-        await window.cubicle.invoke("academy.install", {
-          source,
-          target: targetKind,
-          targetName,
-          ...(skills.trim().length > 0 ? { skills: skills.trim() } : {}),
-        })
+        await window.cubicle.invoke(
+          "academy.install",
+          {
+            source,
+            target: targetKind,
+            targetName,
+            ...(skills.trim().length > 0 ? { skills: skills.trim() } : {}),
+          },
+          // 装要走 vendored CLI + 上游 npx（可能联网）：放宽这一发的桥超时。
+          { timeoutMs: 200_000 },
+        )
       );
       setEcho({ kind: "ok", text: out.echo.length > 0 ? out.echo : "装好了。" });
       setSource("");
@@ -115,11 +120,16 @@ export function AcademyPanel({ onClose }) {
     setBusy(true);
     try {
       const out = /** @type {{ echo: string }} */ (
-        await window.cubicle.invoke("academy.dispatch", {
-          domain,
-          roles,
-          ...(confirmed ? { confirmed: true } : {}),
-        })
+        await window.cubicle.invoke(
+          "academy.dispatch",
+          {
+            domain,
+            roles,
+            ...(confirmed ? { confirmed: true } : {}),
+          },
+          // 下发 = role set + 每角色 update 收敛（可能联网拉源）：放宽这一发。
+          { timeoutMs: 200_000 },
+        )
       );
       setEcho({ kind: "ok", text: out.echo.length > 0 ? out.echo : "下发完成。" });
       setDispatching(null);
