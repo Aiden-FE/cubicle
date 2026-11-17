@@ -18,7 +18,7 @@
 
 /**
  * @param {{
- *   occupant: { roleSnapshot?: { key?: string } } | null,
+ *   occupant: { roleSnapshot?: { roleKey?: string, key?: string } } | null,
  *   offDuty?: boolean,
  *   activity?: import("./deskActivity.js").DeskActivityState | null,
  * }} input
@@ -36,7 +36,8 @@ export function screenForDesk({ occupant, offDuty = false, activity = null }) {
   }
   if (tool === "exec") return { kind: "terminal" };
 
-  const role = occupant.roleSnapshot?.key ?? "programmer";
+  // 票 a01: the snapshot keys the role by roleKey (v1 rows still carry key).
+  const role = occupant.roleSnapshot?.roleKey ?? occupant.roleSnapshot?.key ?? "programmer";
   return { kind: role === "pm" ? "office" : "code" };
 }
 

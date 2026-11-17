@@ -16,16 +16,17 @@ import { LookPicker } from "./LookPicker.jsx";
  */
 export function EmployeeEditModal({ employee, onClose, onSaved }) {
   const dialogRef = useDialog(onClose);
-  const manifest = employee.roleSnapshot.manifest;
+  // 票 a01 v2: the model choice is pinned at the snapshot's top level.
+  const pins = employee.roleSnapshot;
   const [name, setName] = useState(employee.name);
   const [appearance, setAppearance] = useState(() => lookFor(employee).id);
-  const [engine, setEngine] = useState(String(manifest.engine ?? "pi"));
+  const [engine, setEngine] = useState(String(pins.engine ?? "pi"));
   const [modelRef, setModelRef] = useState(() => {
-    if (typeof manifest.model === "string" && manifest.model.includes("/")) return manifest.model;
-    if (manifest.provider && manifest.model && manifest.model !== "default") return `${manifest.provider}/${manifest.model}`;
+    if (typeof pins.model === "string" && pins.model.includes("/")) return pins.model;
+    if (pins.provider && pins.model && pins.model !== "default") return `${pins.provider}/${pins.model}`;
     return "";
   });
-  const [reasoning, setReasoning] = useState(/** @type {string} */ (typeof manifest.reasoningEffort === "string" ? manifest.reasoningEffort : ""));
+  const [reasoning, setReasoning] = useState(/** @type {string} */ (typeof pins.reasoningEffort === "string" ? pins.reasoningEffort : ""));
   const [engines, setEngines] = useState(/** @type {any[]} */ ([]));
   const [library, setLibrary] = useState(/** @type {any} */ (null));
   const [error, setError] = useState(/** @type {string | null} */ (null));

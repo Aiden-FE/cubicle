@@ -269,50 +269,61 @@ test("hiring occupies the desk and the employee with its role snapshot survives 
 
     const desks = store.listDesks({ groupId: group.id });
     assert.equal(/** @type {any} */ (desks[0].occupant).name, "小程");
-    assert.equal(/** @type {any} */ (desks[0].occupant).roleSnapshot.key, "programmer");
-    assert.ok(/** @type {any} */ (desks[0].occupant).roleSnapshot.manifest.skills.includes("git 工作流"));
+    assert.equal(/** @type {any} */ (desks[0].occupant).roleSnapshot.roleKey, "programmer");
+    assert.equal(/** @type {any} */ (desks[0].occupant).roleName, "程序员");
+    assert.ok(
+      /** @type {any} */ (store.listRoles().find((r) => r.key === "programmer")).manifest.skills.includes("git 工作流"),
+      "技能清单在角色行（投影缓存）上，不在快照里",
+    );
     assert.equal(desks[1].occupant, null);
     store.close();
 
     const reopened = openStore({ dataDir });
     const after = reopened.listDesks({ groupId: group.id });
     assert.equal(/** @type {any} */ (after[0].occupant).name, "小程");
-    assert.equal(/** @type {any} */ (after[0].occupant).roleSnapshot.manifest.engine, "pi");
+    assert.equal(/** @type {any} */ (after[0].occupant).roleSnapshot.engine, "pi");
     reopened.close();
   } finally {
     await dispose();
   }
 });
 
-test("a later role edit never infects an already-hired employee, and the same role can staff another desk", async () => {
+test("a later role edit never infects an already-hired employee's pins, and the same role can staff another desk", async () => {
   const { dataDir, dispose } = await withTempDir("snapshot");
   try {
     const store = openStore({ dataDir });
+    store.syncRoleProjection([
+      neoProjection("reviewer", { name: "评审员", skills: [{ name: "checklist", hash: "h1", via: "lock" }] }),
+    ]);
     const group = store.officeSnapshot().groups[0];
     const [desk1, desk2] = store.listDesks({ groupId: group.id });
-    const programmer = /** @type {any} */ (store.listRoles().find((r) => r.key === "programmer"));
+    const reviewer = /** @type {any} */ (store.listRoles().find((r) => r.key === "reviewer"));
+    assert.ok(reviewer, "投影角色可招聘");
 
-    const first = store.hireEmployee({ deskId: desk1.id, roleId: programmer.id });
-    const personaAtHire = first.employee.roleSnapshot.manifest.persona;
+    const first = store.hireEmployee({ deskId: desk1.id, roleId: reviewer.id });
 
-    // Change the factory role AFTER hiring (as a future role editor would).
-    const db = new DatabaseSync(store.dbPath);
-    db.prepare("UPDATE role SET name = ?, manifest = JSON_SET(manifest, '$.persona', ?) WHERE id = ?").run(
-      "资深程序员",
-      "改过的人格：什么都敢改。",
-      programmer.id,
-    );
-    db.close();
-
-    const second = store.hireEmployee({ deskId: desk2.id, roleId: programmer.id, name: "阿程" });
-    assert.equal(second.employee.roleId, programmer.id);
+    // The library moves AFTER hiring (as a Neo refresh would): the second hire
+    // pins the NEW skill versions, the first hire keeps what was pinned at his
+    // hire — 票 a01 的冻结语义从「复制整份 manifest」变成「钉版本」。
+    store.syncRoleProjection([
+      neoProjection("reviewer", {
+        name: "资深评审员",
+        skills: [
+          { name: "checklist", hash: "h2", via: "lock" },
+          { name: "extra", hash: "h3", via: "lock" },
+        ],
+      }),
+    ]);
+    const second = store.hireEmployee({ deskId: desk2.id, roleId: reviewer.id, name: "阿评" });
+    assert.equal(second.employee.roleId, reviewer.id);
     assert.notEqual(second.employee.id, first.employee.id);
+    assert.deepEqual(/** @type {any} */ (second.employee.roleSnapshot.locks), { checklist: "h2", extra: "h3" });
 
     const desks = store.listDesks({ groupId: group.id });
-    assert.equal(/** @type {any} */ (desks[0].occupant).roleSnapshot.manifest.persona, personaAtHire);
-    assert.equal(/** @type {any} */ (desks[0].occupant).roleSnapshot.name, "程序员");
-    // the second hire happened after the edit: it gets the new definition
-    assert.equal(/** @type {any} */ (desks[1].occupant).roleSnapshot.name, "资深程序员");
+    assert.deepEqual(/** @type {any} */ (desks[0].occupant).roleSnapshot.locks, { checklist: "h1" });
+    // display names are content: they ride the live role row, both hires follow it
+    assert.equal(/** @type {any} */ (desks[0].occupant).roleName, "资深评审员");
+    assert.equal(/** @type {any} */ (desks[1].occupant).roleName, "资深评审员");
     store.close();
   } finally {
     await dispose();
@@ -368,8 +379,9 @@ test("employeeById answers with the frozen role snapshot, and null for unknown i
     const row = /** @type {any} */ (store.employeeById(employee.id));
     assert.equal(row.id, employee.id);
     assert.equal(row.name, "小程");
-    assert.equal(row.roleSnapshot.manifest.engine, "pi");
-    assert.ok(row.roleSnapshot.manifest.persona.includes("严谨务实"));
+    assert.equal(row.roleSnapshot.engine, "pi");
+    // 票 a01: persona 不再进快照；它骑在实时角色行（投影缓存）上。
+    assert.ok(row.role.manifest.persona.includes("严谨务实"));
     assert.equal(store.employeeById(99999), null);
     store.close();
   } finally {
@@ -1442,11 +1454,261 @@ test("旧库角色 manifest 在一次升级里补齐新工具与 cost，已录�
     assert.ok(programmer?.manifest.tools.includes("powershell"), "旧库角色库补上了 ticket 07 的 powershell");
     assert.equal(programmer?.manifest.cost.tokenBudgetPerTask, 500000, "旧库角色库补上了 ticket 12 的 cost");
     const frozen = /** @type {any} */ (reopened.employeeById(employee.id));
+    assert.equal(frozen.roleSnapshot.roleKey, "programmer", "已录用员工的钉住身份不随角色库升级而变");
+    assert.equal(frozen.roleSnapshot.engine, "pi", "已录用员工的钉住引擎不随角色库升级而变");
+    reopened.close();
+  } finally {
+    await dispose();
+  }
+});
+
+// — 票 a01: 学院投影缓存 + role_snapshot v2 —
+
+/**
+ * A projection shaped exactly like src/host/academy/neo-roles.mjs emits.
+ * @param {string} key
+ * @param {{ name?: string, tagline?: string, domains?: string[], skills?: { name: string, hash: string, via: "lock" | "dir", sourceType?: string }[], mcp?: { name: string, transport: string }[], persona?: string }} [fixture]
+ */
+function neoProjection(key, fixture = {}) {
+  return {
+    key,
+    name: fixture.name ?? key,
+    tagline: fixture.tagline ?? "",
+    domains: fixture.domains ?? [],
+    skills: fixture.skills ?? [],
+    mcp: fixture.mcp ?? [],
+    persona: fixture.persona ?? "",
+  };
+}
+
+test("Neo 投影落成 source=neo 的角色行：domains / skills+hash / mcp 摘要 / 同步时间", async () => {
+  const { dataDir, dispose } = await withTempDir("neo-projection");
+  try {
+    const store = openStore({ dataDir });
+    // 空 ~/.neo：预设三角色照常存在，都标 preset，没有同步时间。
+    const presets = store.listRoles();
+    assert.equal(presets.length, 3);
+    assert.ok(presets.every((role) => role.source === "preset" && role.syncedAt === null));
+
+    store.syncRoleProjection([
+      neoProjection("reviewer", {
+        name: "评审员",
+        tagline: "代码评审",
+        domains: ["review"],
+        skills: [
+          { name: "git-workflow", hash: "a1b2c3", via: "lock", sourceType: "git" },
+          { name: "checklist", hash: "d4e5f6", via: "dir" },
+        ],
+        mcp: [{ name: "github", transport: "stdio" }],
+        persona: "苛刻的评审员。",
+      }),
+    ]);
+    const reviewer = store.listRoles().find((role) => role.key === "reviewer");
+    assert.ok(reviewer, "Neo 角色出现在投影里");
+    assert.equal(reviewer.source, "neo");
+    assert.equal(reviewer.name, "评审员");
+    assert.deepEqual(reviewer.domains, ["review"]);
     assert.deepEqual(
-      frozen.roleSnapshot.manifest.tools,
-      ["read", "write", "edit", "powershell", "grep"],
-      "已录用员工的冻结快照不随角色库升级而变",
+      reviewer.skills.map((s) => [s.name, s.hash]),
+      [
+        ["git-workflow", "a1b2c3"],
+        ["checklist", "d4e5f6"],
+      ],
     );
+    assert.deepEqual(reviewer.mcp, [{ name: "github", transport: "stdio" }]);
+    assert.equal(typeof reviewer.syncedAt, "string");
+    // Neo 角色的 manifest 只带装配兜底（engine/model/cost），persona 来自 AGENTS.md。
+    assert.equal(reviewer.manifest.engine, "pi");
+    assert.equal(reviewer.manifest.persona, "苛刻的评审员。");
+
+    // 验收：增删技能后，下次刷新（重读）投影反映新集合。
+    store.syncRoleProjection([
+      neoProjection("reviewer", {
+        skills: [{ name: "checklist", hash: "d4e5f6", via: "dir" }],
+      }),
+    ]);
+    const refreshed = store.listRoles().find((role) => role.key === "reviewer");
+    assert.ok(refreshed);
+    assert.deepEqual(
+      refreshed.skills.map((s) => s.name),
+      ["checklist"],
+    );
+    store.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("Neo 同名角色接管预设（source 变 neo）；预设不被 Neo 缺席抹掉", async () => {
+  const { dataDir, dispose } = await withTempDir("neo-takeover");
+  try {
+    const store = openStore({ dataDir });
+    store.syncRoleProjection([neoProjection("programmer", { skills: [{ name: "pdf", hash: "ff00", via: "lock" }] })]);
+    const roles = store.listRoles();
+    assert.equal(roles.length, 3, "同名接管不新增行");
+    const programmer = roles.find((r) => r.key === "programmer");
+    assert.ok(programmer);
+    assert.equal(programmer.source, "neo");
+    assert.deepEqual(programmer.skills.map((s) => s.hash), ["ff00"]);
+
+    // Neo 里删掉 programmer：没有员工引用的投影行被清掉；预设们仍在。
+    store.syncRoleProjection([]);
+    const after = store.listRoles();
+    const restored = after.find((r) => r.key === "programmer");
+    assert.ok(restored, "同名回到 preset 兜底（行还在，source 回 preset）");
+    assert.equal(restored.source, "preset");
+    store.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("Neo 删除的角色：被员工引用的投影行保留，没人引用的投影行删除", async () => {
+  const { dataDir, dispose } = await withTempDir("neo-drop");
+  try {
+    const store = openStore({ dataDir });
+    store.syncRoleProjection([neoProjection("archivist", { skills: [{ name: "docs", hash: "aa", via: "lock" }] })]);
+    const archivist = store.listRoles().find((r) => r.key === "archivist");
+    assert.ok(archivist);
+    const group = store.officeSnapshot().groups[0];
+    const [desk] = store.listDesks({ groupId: group.id });
+    store.hireEmployee({ deskId: desk.id, roleId: archivist.id, name: "档案员" });
+
+    store.syncRoleProjection([]);
+    const roles = store.listRoles();
+    assert.ok(roles.find((r) => r.key === "archivist"), "有员工引用的角色行不被投影删除抹掉");
+
+    store.syncRoleProjection([neoProjection("temp")]);
+    assert.ok(store.listRoles().find((r) => r.key === "temp"));
+    store.syncRoleProjection([]);
+    assert.ok(!store.listRoles().find((r) => r.key === "temp"), "没人引用的 Neo 角色随刷新移出");
+    store.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("role_snapshot 落新结构：只有 roleKey / domains / locks / engine / model / cost，没有技能正文", async () => {
+  const { dataDir, dispose } = await withTempDir("snapshot-v2");
+  try {
+    const store = openStore({ dataDir });
+    const group = store.officeSnapshot().groups[0];
+    const [desk] = store.listDesks({ groupId: group.id });
+    const programmer = store.listRoles().find((r) => r.key === "programmer");
+    assert.ok(programmer);
+
+    const hire = store.hireEmployee({
+      deskId: desk.id,
+      roleId: programmer.id,
+      name: "小程",
+      engine: "pi",
+      provider: "acme",
+      model: "m1",
+      reasoningEffort: "low",
+    });
+    const snapshot = /** @type {any} */ (hire.employee.roleSnapshot);
+    assert.equal(snapshot.roleKey, "programmer");
+    assert.deepEqual(snapshot.domains, []);
+    assert.deepEqual(snapshot.locks, {});
+    assert.equal(snapshot.engine, "pi");
+    assert.equal(snapshot.model, "m1");
+    assert.equal(snapshot.provider, "acme");
+    assert.equal(snapshot.reasoningEffort, "low");
+    assert.equal(snapshot.cost.tokenBudgetPerTask, 500000);
+    // 旧字段不再存在：整份 manifest / persona / tagline 都不进快照。
+    assert.equal(snapshot.manifest, undefined);
+    assert.equal(snapshot.persona, undefined);
+    assert.equal(snapshot.key, undefined);
+
+    // 落库的 JSON 字段齐全且没有 manifest 包装。
+    const raw = new DatabaseSync(store.dbPath);
+    const stored = /** @type {any} */ (raw.prepare("SELECT role_snapshot FROM employee WHERE id = ?").get(hire.employee.id));
+    raw.close();
+    const parsed = JSON.parse(stored.role_snapshot);
+    assert.equal(parsed.roleKey, "programmer");
+    assert.equal(parsed.manifest, undefined);
+    store.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("招 Neo 投影角色时把 locks 钉成 技能名 → sha，不含正文", async () => {
+  const { dataDir, dispose } = await withTempDir("snapshot-locks");
+  try {
+    const store = openStore({ dataDir });
+    store.syncRoleProjection([
+      neoProjection("reviewer", {
+        skills: [
+          { name: "git-workflow", hash: "a1b2c3", via: "lock" },
+          { name: "secret-skill", hash: "9f8e7d", via: "dir" },
+        ],
+      }),
+    ]);
+    const reviewer = store.listRoles().find((r) => r.key === "reviewer");
+    assert.ok(reviewer);
+    const group = store.officeSnapshot().groups[0];
+    const [desk] = store.listDesks({ groupId: group.id });
+    const hire = store.hireEmployee({ deskId: desk.id, roleId: reviewer.id, name: "评审" });
+    const snapshot = /** @type {any} */ (hire.employee.roleSnapshot);
+    assert.deepEqual(snapshot.locks, { "git-workflow": "a1b2c3", "secret-skill": "9f8e7d" });
+    assert.deepEqual(snapshot.domains, []);
+    // 「只钉版本，不复制内容」：快照里没有 persona / 技能正文可抄。
+    assert.equal(JSON.stringify(snapshot).includes("苛刻"), false);
+    store.close();
+  } finally {
+    await dispose();
+  }
+});
+
+test("旧库 role_snapshot（整份 manifest）在一次打开里升级为 v2，engine/model/cost 保留", async () => {
+  const { dataDir, dispose } = await withTempDir("snapshot-migrate");
+  try {
+    const store = openStore({ dataDir });
+    const employee = hireProgrammer(store);
+    store.close();
+
+    // 手写一份 票 14 时代的旧结构快照（manifest 包 + key/name/tagline）。
+    const raw = new DatabaseSync(path.join(dataDir, "cubicle.db"));
+    raw
+      .prepare("UPDATE employee SET role_snapshot = ? WHERE id = ?")
+      .run(
+        JSON.stringify({
+          key: "programmer",
+          name: "程序员",
+          tagline: "旧标语",
+          manifest: {
+            persona: "旧人格",
+            skills: ["git 工作流"],
+            tools: ["read"],
+            mcpServers: [],
+            engine: "codex",
+            model: "gpt-old",
+            provider: "legacy",
+            reasoningEffort: "high",
+            cost: { tokenBudgetPerTask: 123456 },
+          },
+        }),
+        employee.id,
+      );
+    raw.close();
+
+    const reopened = openStore({ dataDir });
+    const migrated = /** @type {any} */ (reopened.employeeById(employee.id));
+    assert.equal(migrated.roleSnapshot.roleKey, "programmer");
+    assert.equal(migrated.roleSnapshot.engine, "codex");
+    assert.equal(migrated.roleSnapshot.model, "gpt-old");
+    assert.equal(migrated.roleSnapshot.provider, "legacy");
+    assert.equal(migrated.roleSnapshot.reasoningEffort, "high");
+    assert.equal(migrated.roleSnapshot.cost.tokenBudgetPerTask, 123456);
+    assert.deepEqual(migrated.roleSnapshot.locks, {}, "旧快照没有 hash 可钉，locks 留空而不是造 hash");
+    assert.equal(migrated.roleSnapshot.manifest, undefined);
+
+    // 升级是落库的，不是每次读现场换算：重开后库里已是 v2。
+    const raw2 = new DatabaseSync(path.join(dataDir, "cubicle.db"));
+    const stored = /** @type {any} */ (raw2.prepare("SELECT role_snapshot FROM employee WHERE id = ?").get(employee.id));
+    raw2.close();
+    assert.equal(JSON.parse(stored.role_snapshot).roleKey, "programmer");
     reopened.close();
   } finally {
     await dispose();

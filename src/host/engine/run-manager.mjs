@@ -340,7 +340,9 @@ export function createRunManager({
     // store.beginTaskRun, in the SAME transaction as the task_session + run
     // rows. A rejected dispatch can therefore never leave the task 进行中 with
     // no run behind (the ticket-06 "no dangling rows" rule, made structural).
-    const engine = employee.roleSnapshot.manifest.engine || "pi";
+    // 票 a01: the engine is a top-level snapshot pin (openStore has already
+    // upgraded any v1 snapshot by the time a run can start).
+    const engine = employee.roleSnapshot.engine || "pi";
 
     // Ticket 11 admission gate: an engine must be enabled (probe passed, or
     // hand-enabled with the risk flag) before it may take REAL work. The

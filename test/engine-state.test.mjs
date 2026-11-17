@@ -132,14 +132,14 @@ test("switching an employee's engine rewrites the frozen role snapshot", () => {
   const { store, dir } = tempStore();
   try {
     const employee = firstDeskWithEmployee(store);
-    assert.equal(employee.roleSnapshot.manifest.engine, "pi");
+    assert.equal(employee.roleSnapshot.engine, "pi");
 
     const updated = /** @type {any} */ (store.setEmployeeEngine({ employeeId: employee.id, engine: "codex" }));
-    assert.equal(updated.roleSnapshot.manifest.engine, "codex");
-    // the rest of the frozen snapshot survives the rewrite
-    assert.equal(updated.roleSnapshot.manifest.persona, employee.roleSnapshot.manifest.persona);
-    assert.deepEqual(updated.roleSnapshot.manifest.tools, employee.roleSnapshot.manifest.tools);
-    assert.equal(/** @type {any} */ (store.employeeById(employee.id)).roleSnapshot.manifest.engine, "codex");
+    assert.equal(updated.roleSnapshot.engine, "codex");
+    // the rest of the pinned snapshot survives the rewrite
+    assert.equal(updated.roleSnapshot.model, employee.roleSnapshot.model);
+    assert.deepEqual(updated.roleSnapshot.locks, employee.roleSnapshot.locks);
+    assert.equal(/** @type {any} */ (store.employeeById(employee.id)).roleSnapshot.engine, "codex");
   } finally {
     store.close();
     rmSync(dir, { recursive: true, force: true });

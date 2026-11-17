@@ -1,5 +1,5 @@
 /**
- * Academy reader: the file contract between Neo (`~/.neo`) and Cubicle.
+ * Academy reader: the file contract between Neo (`~/.neo`) and Cubicle's cache.
  *
  * Neo is the fact source for roles (`~/.neo/roles/<role>/`) and their install
  * ledger (`~/.neo/state/locks/<role>.yaml`, schema v1: skills.<name>.hash is
@@ -224,6 +224,7 @@ async function readPersona(agentsMdPath) {
  * @returns {Promise<string>}
  */
 async function dirContentSha(dir) {
+  /** @type {{ rel: string, full: string }[]} */
   const files = [];
   await walkFiles(dir, "", files);
   files.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));

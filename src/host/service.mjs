@@ -44,10 +44,11 @@ import {
  * @returns {number | undefined}
  */
 function readRoleTokenBudget(roleSnapshot) {
-  const manifest = /** @type {Record<string, unknown> | undefined} */ (
-    /** @type {Record<string, unknown> | undefined} */ (roleSnapshot)?.manifest
+  // 票 a01 v2: cost is a top-level snapshot pin (v1 kept it under manifest).
+  const snapshot = /** @type {Record<string, unknown> | undefined} */ (
+    /** @type {Record<string, unknown> | undefined} */ (roleSnapshot)
   );
-  const cost = /** @type {Record<string, unknown> | undefined} */ (manifest?.cost);
+  const cost = /** @type {Record<string, unknown> | undefined} */ (snapshot?.cost);
   const budget = cost?.tokenBudgetPerTask;
   return typeof budget === "number" && Number.isInteger(budget) && budget > 0 ? budget : undefined;
 }
@@ -307,7 +308,7 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
   /**
    * Auto-reassign employees that would be orphaned by a delete (Q33 B).
    * Throws (and blocks the delete) when an engine has no compatible fallback.
-   * @param {{ id: number, name: string, roleSnapshot: { manifest: Record<string, any> } }[]} affected
+   * @param {{ id: number, name: string, roleSnapshot: { engine?: string } }[]} affected
    * @param {{ providerKey: string, modelId?: string }} removal
    */
   function reassignEmployees(affected, removal) {
@@ -316,7 +317,7 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
     /** @type {{ employeeId: number, name: string, engine: string, ref: string }[]} */
     const reassigned = [];
     for (const employee of affected) {
-      const engine = String(employee.roleSnapshot.manifest.engine ?? "pi");
+      const engine = String(employee.roleSnapshot.engine ?? "pi");
       let resolved;
       try {
         resolved = resolveModelForManifest(library, engine, { provider: "", model: "default" });
@@ -494,7 +495,7 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
       const appearance = readAppearance(record.appearance);
       const engine = typeof record.engine === "string" && record.engine.trim().length > 0
         ? record.engine.trim()
-        : String(existing.roleSnapshot.manifest.engine ?? "pi");
+        : String(existing.roleSnapshot.engine ?? "pi");
       const modelTouched =
         typeof record.provider === "string" ||
         typeof record.model === "string" ||
@@ -505,12 +506,12 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
         requireAdmittedEngine(engine);
         const explicit = readModelChoice({ ...record, engine });
         const resolved = resolveChoice(engine, {
-          provider: explicit?.provider ?? (typeof record.provider === "string" ? record.provider : existing.roleSnapshot.manifest.provider ?? ""),
-          model: explicit?.model ?? (typeof record.model === "string" ? record.model : existing.roleSnapshot.manifest.model ?? "default"),
+          provider: explicit?.provider ?? (typeof record.provider === "string" ? record.provider : existing.roleSnapshot.provider ?? ""),
+          model: explicit?.model ?? (typeof record.model === "string" ? record.model : existing.roleSnapshot.model ?? "default"),
           reasoningEffort:
             record.reasoningEffort === null
               ? null
-              : (explicit?.reasoningEffort ?? existing.roleSnapshot.manifest.reasoningEffort ?? null),
+              : (explicit?.reasoningEffort ?? existing.roleSnapshot.reasoningEffort ?? null),
         });
         const employee = store.updateEmployee({
           employeeId,
@@ -550,7 +551,7 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
       const providerKey = requireName(payload, "providerKey");
       const affected = store
         .listAllEmployees()
-        .filter((employee) => employee.roleSnapshot.manifest?.provider === providerKey);
+        .filter((employee) => employee.roleSnapshot.provider === providerKey);
       const reassigned = reassignEmployees(affected, { providerKey });
       const library = deleteProvider(store.dataDir, providerKey);
       syncDerivedModels();
@@ -571,8 +572,8 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
         .listAllEmployees()
         .filter(
           (employee) =>
-            employee.roleSnapshot.manifest?.provider === providerKey &&
-            employee.roleSnapshot.manifest?.model === modelId,
+            employee.roleSnapshot.provider === providerKey &&
+            employee.roleSnapshot.model === modelId,
         );
       const reassigned = reassignEmployees(affected, { providerKey, modelId });
       const library = deleteModel(store.dataDir, providerKey, modelId);

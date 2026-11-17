@@ -95,7 +95,7 @@ test("open without a model library reports engine_model_missing", async () => {
   try {
     const adapter = createCodexAdapter({ dataDir: dir, spawnProcess: () => fakeChild() });
     await assert.rejects(
-      () => adapter.open({ employee: { name: "甲", roleSnapshot: { manifest: {} } }, session: sessionFixture(dir), onEvent: () => {} }),
+      () => adapter.open({ employee: { name: "甲", roleSnapshot: { roleKey: "programmer", domains: [], locks: {} } }, session: sessionFixture(dir), onEvent: () => {} }),
       (/** @type {any} */ err) => err.code === "engine_model_missing",
     );
   } finally {
@@ -117,7 +117,12 @@ test("prompt streams codex JSONL into normalized events and resolves on close", 
       },
     });
     const live = await adapter.open({
-      employee: { name: "甲", roleSnapshot: { name: "程序员", manifest: { persona: "严谨务实", tools: ["read"] } } },
+      employee: {
+        name: "甲",
+        roleName: "程序员",
+        roleSnapshot: { roleKey: "programmer", domains: [], locks: {} },
+        role: { name: "程序员", manifest: { persona: "严谨务实", tools: ["read"] } },
+      },
       session: sessionFixture(dir),
       onEvent: (event) => events.push(event),
     });
@@ -178,7 +183,12 @@ test("the CLI launch keeps the app-private CODEX_HOME, absolute -C, and the hook
       },
     });
     const live = await adapter.open({
-      employee: { name: "甲", roleSnapshot: { name: "程序员", manifest: { persona: "persona-text" } } },
+      employee: {
+        name: "甲",
+        roleName: "程序员",
+        roleSnapshot: { roleKey: "programmer", domains: [], locks: {} },
+        role: { name: "程序员", manifest: { persona: "persona-text" } },
+      },
       session,
       onEvent: () => {},
     });
@@ -242,7 +252,7 @@ test("a second prompt continues the same engine thread (exec resume)", async () 
       },
     });
     const live = await adapter.open({
-      employee: { name: "甲", roleSnapshot: { manifest: {} } },
+      employee: { name: "甲", roleSnapshot: { roleKey: "programmer", domains: [], locks: {} } },
       session: sessionFixture(dir),
       onEvent: () => {},
     });
@@ -279,7 +289,7 @@ test("abort kills the codex process; the run still ends with exactly one agent_e
       },
     });
     const live = await adapter.open({
-      employee: { name: "甲", roleSnapshot: { manifest: {} } },
+      employee: { name: "甲", roleSnapshot: { roleKey: "programmer", domains: [], locks: {} } },
       session: sessionFixture(dir),
       onEvent: (event) => events.push(event),
     });
@@ -318,7 +328,7 @@ test("codex dying before its first JSONL line reports why instead of settling qu
       },
     });
     const live = await adapter.open({
-      employee: { name: "甲", roleSnapshot: { manifest: {} } },
+      employee: { name: "甲", roleSnapshot: { roleKey: "programmer", domains: [], locks: {} } },
       session: sessionFixture(dir),
       onEvent: (event) => events.push(event),
     });
@@ -349,7 +359,7 @@ test("a non-zero exit after a completed turn still fails the run", async () => {
       },
     });
     const live = await adapter.open({
-      employee: { name: "甲", roleSnapshot: { manifest: {} } },
+      employee: { name: "甲", roleSnapshot: { roleKey: "programmer", domains: [], locks: {} } },
       session: sessionFixture(dir),
       onEvent: (event) => events.push(event),
     });
@@ -388,7 +398,7 @@ test("abort resolves only after the child really closed", async () => {
       },
     });
     const live = await adapter.open({
-      employee: { name: "甲", roleSnapshot: { manifest: {} } },
+      employee: { name: "甲", roleSnapshot: { roleKey: "programmer", domains: [], locks: {} } },
       session: sessionFixture(dir),
       onEvent: () => {},
     });
@@ -419,7 +429,7 @@ test("a deny verdict from the injected policy hook rides the stream as policy_bl
     });
     adapterRef = adapter;
     const live = await adapter.open({
-      employee: { name: "甲", roleSnapshot: { manifest: {} } },
+      employee: { name: "甲", roleSnapshot: { roleKey: "programmer", domains: [], locks: {} } },
       session: sessionFixture(dir),
       onEvent: (event) => events.push(event),
     });
@@ -488,7 +498,7 @@ test("shutdown kills live codex children (host exit reclamation)", async () => {
       },
     });
     const live = await adapter.open({
-      employee: { name: "甲", roleSnapshot: { manifest: {} } },
+      employee: { name: "甲", roleSnapshot: { roleKey: "programmer", domains: [], locks: {} } },
       session: sessionFixture(dir),
       onEvent: () => {},
     });

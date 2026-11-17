@@ -238,8 +238,14 @@ test("the runner drives two probe runs through the run-manager seam and records 
     const probeEmployee = /** @type {any} */ (store.employeeByName("准入探针·codex"));
     assert.ok(probeEmployee, "probe employee row exists");
     assert.ok(!seated.has(probeEmployee.id), "the probe employee sits at no desk");
-    assert.ok(probeEmployee.roleSnapshot.manifest.persona.includes("CUBICLE_PROBE_MARKER"));
-    assert.equal(probeEmployee.roleSnapshot.manifest.engine, "codex");
+    // 票 a01: the marker persona rides the hidden probe role row, not the snapshot.
+    assert.ok(probeEmployee.role?.manifest?.persona?.includes("CUBICLE_PROBE_MARKER"));
+    assert.equal(probeEmployee.roleSnapshot.engine, "codex");
+    const rolesAfter = store.listRoles();
+    assert.ok(
+      !rolesAfter.some((role) => role.key === "cubicle-probe"),
+      "probe 角色行不进可招聘的角色库",
+    );
   } finally {
     store.close();
     rmSync(dir, { recursive: true, force: true });

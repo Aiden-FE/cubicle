@@ -158,8 +158,9 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
    */
   function writeEngineConfig(session, employee) {
     const library = readModelLibrary(dataDir);
-    const manifest = /** @type {Record<string, unknown>} */ (employee?.roleSnapshot?.manifest ?? {});
-    const resolved = resolveModelForManifest(library, "codex", manifest);
+    // 票 a01: model choice is pinned on the snapshot itself (v1 kept it under manifest).
+    const pins = /** @type {Record<string, unknown>} */ (employee?.roleSnapshot ?? {});
+    const resolved = resolveModelForManifest(library, "codex", pins);
     const home = homeFor(session);
     const reasoning = resolved.reasoningEffort && resolved.reasoningEffort !== "off" ? resolved.reasoningEffort : null;
 
@@ -227,9 +228,11 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
    * @param {any} employee
    */
   function writePersonaFile(session, employee) {
-    const manifest = /** @type {Record<string, any>} */ (employee?.roleSnapshot?.manifest ?? {});
-    const persona = String(manifest.persona ?? "").trim();
-    const roleLabel = String(employee?.roleSnapshot?.name ?? employee?.name ?? "员工");
+    // 票 a01: persona / role label are role content — they ride the live role
+    // row the store attaches (employee.role), not the version-pin snapshot.
+    const roleManifest = /** @type {Record<string, any>} */ (employee?.role?.manifest ?? {});
+    const persona = String(roleManifest.persona ?? "").trim();
+    const roleLabel = String(employee?.roleName ?? employee?.role?.name ?? employee?.name ?? "员工");
     const employeeName = String(employee?.name ?? "员工");
     mkdirSync(session.workspaceDir, { recursive: true });
     writeFileSync(

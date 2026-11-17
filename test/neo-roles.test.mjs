@@ -179,6 +179,7 @@ test("role.yaml declares domains (and optional display name); missing file = no 
     assert.equal(projections.length, 2);
     const programmer = projections.find((role) => role.key === "programmer");
     const bare = projections.find((role) => role.key === "bare");
+    assert.ok(programmer && bare);
     assert.deepEqual(programmer.domains, ["coding", "review"]);
     assert.equal(programmer.name, "程序员");
     assert.equal(programmer.tagline, "工作区主力");
@@ -231,6 +232,7 @@ test("AGENTS.md becomes the role persona; the create-stub reads as no persona", 
     const projections = await readNeoRoleProjections(dir);
     const programmer = projections.find((role) => role.key === "programmer");
     const fresh = projections.find((role) => role.key === "fresh");
+    assert.ok(programmer && fresh);
     assert.equal(programmer.persona, "严谨务实的程序员：测试先行。");
     assert.equal(fresh.persona, "");
   } finally {
