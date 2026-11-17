@@ -1,55 +1,28 @@
-# N4: neo materialize 导出合同修补(交接记录,reference material)
+# N4: materialize 导出合同修补（T1–T5）· 交接记录
 
-**Type:** handoff / 记录 · **Status:** handed-off · **对应 neo 票:** academy `04-export-contract`
+> 跨仓库索引票。**归属裁定（人工，2026-11-17）**：Neo 侧任务一律以工单形式提给 Neo 项目处理；Cubicle 侧不再直接实现 Neo 代码。
 
-> 定位:Cubicle 侧只向 neo 项目**开票**;实现由 **neo 项目的合法并行会话**执行。本文件与
-> [`N4-export-contract-handoff.patch`](N4-export-contract-handoff.patch)(`format-patch 00eedd6..e66282a`,2 个提交)
-> 都是 **Cubicle 侧留存的参考材料**,不是我方合并动作。neo 侧 main 上已有 `25964c5`/`e66282a`
-> 两个提交(含票面收尾文档),**原样保留,由 neo 项目自行对账/改写**,本侧不再触碰 neo。
+## 工单
 
-**目标(review 2026-11-17 裁定,推荐选项已采纳):** 让外部宿主(Cubicle)能在「不携带密钥、
-不依赖导出进程 env、不重复模型配置」的前提下消费 `neo materialize`。
+与 Neo 仓库 `.scratch/academy/issues/04-export-contract.md`（Cubicle 侧提单 `00eedd6`）同体：T1 `mcp.envRefs`、T2 env 存在性校验只归 `run`、T3 `--no-auth`、T4 `--agent-models`、T5 help 文案。
 
-## 合同项
+## 现状（2026-11-17 撤销后）
 
-- **T1** `--json` 清单增 `mcp.envRefs = { "<server>": { "<KEY>": "<VAR>" } }`(引用形状,不落值;
-  两次调用逐字节一致;无 MCP 时 `{}`)。采「清单带引用」方案,`mcp.json` 渲染层不动。
-- **T2** env 存在性校验只属于 `run`(convergeRoot 新 `strictEnv`,缺省 true=run 语义零变化;
-  materialize 恒 false;模型引用照常渲染 `$VAR` 插值;非 Claude http header 能力闸与 strict 无关恒抛)。
-- **T3** `--no-auth` **opt-in** 排除 auth 凭据副本,清单 `authExcluded: false/true`(入 hash);
-  缺省保持票 01 同形(auth 副本照旧,diff-equal 判据未改)。**Cubicle 契约:恒传 `--no-auth`。**
-- **T4** `--agent-models` → 透传 `skipModels`;清单 `model: { file: null, owner: "host", reason }`
-  (owner "neo"/"host";reason 三枚举:agent-models / no-neo-model-declaration / agent-has-no-model-file)。
-- **T5** `--help` 写入 `--out` 独占契约(MUST be a dir owned by this command / dedicated subdir /
-  never an existing agent config root);`--no-auth`/`--agent-models` 进帮助。
-- T6(review 观察项)只记录不实现;合同形状:`mcp` 维持对象(与 N1 草稿数组形状的偏差维持原 review 结论)。
+- 按人工裁定「Neo 任务归 Neo 项目」，Cubicle 侧全部 neo 代码已回撤：neo main 上现为一串 Revert（`80f9bfc` 票 04、`e24a1f1` 票 03、`d58dc37` 票 02、`21ed91f` 票 01），票面复位 ready-for-agent；`pnpm verify` 复跑绿。
+- Cubicle 侧留存的实施参考：`handoff-fa37a6c.patch`（票 01）、`handoff-447ee80.patch`（票 02）、`handoff-4ee1dcd.patch`（票 03）、`N4-export-contract-handoff.patch`（票 04）。Neo 项目可按 T 系列自行重落，语义与代码均可改写。
+- **Cubicle 的 vendored CLI（`vendor/neo/bin/neo.js`，pin `4ee1dcd`）不受回撤影响**：pin 提交对象永久存在、bundle 已内置三票功能，装配链路照常；T1–T4 的合同（`envRefs`/`--no-auth`/`--agent-models`）要等 Neo 项目重落稳定后再钉新 pin。
 
-## 两个提交的内容摘要(patch 内全文)
+## 移交 Neo 项目的两个安全尾巴
 
-- `25964c5` — feat(materialize):全部实现+squash。源分支 `academy/04-export-contract@2476fe0` +
-  后续清理(`.gitignore` 补 `tmp/`;roots.ts 注释)。改动 11 文件:+`collectMcpEnvRefs`/
-  `resolveMcpEnv strict`/`resolveModelEnv strict`/`convergeRoot strictEnv·skipAuth`/
-  `materializeRoot skipModels·noAuth` + CLI flag 与帮助 + 测试(core materialize T1–T4、mcp envRefs/strict、
-  CLI T2/T3/T4/help)+ `docs/schema/neo-home.md` §9.1。
-- `e66282a` — docs(academy):neo 票 04 勾验收 + `## Answer`、review 处置记录、spec 执行记录一行。纯文档。
+1. 悬空对象 `ca263ed`（无分支引用）的对象库内含一份当时临时 `NEO_HOME` 的 **auth.json 副本**（本机 pi 凭据派生）。建议人工确认后 `git gc --prune=now`（或等默认 gc 策略），并确认 `--out` 类临时目录一律在 `.gitignore`（已随 `25964c5` 的 `.gitignore` 修正覆盖 `tmp/`）。
+2. 一次 `NEO_HOME` 为空的 `node dist run pi` 在模型前置闸 exit 1（未达 convergeRoot、未 spawn）；真实 `~/.neo` 判定为只读，未被写入。
 
-## 验证证据(交接时点)
+## 归责更正（此前记录的修正）
 
-- `pnpm verify` 全绿两次:`academy/04-export-contract@2476fe0` 与 `main@e66282a`(2026-11-17 18:35,
-  40 文件 / **650 测试** / 版本 lockstep 0.2.8;基线 641,+9)。
-- 手打 E2E(临时 NEO_HOME 在 neo 仓库 gitignored `tmp/`,已清理):manifest 两次逐字节一致;缺省 auth
-  照旧、`models.json` 落 `$FAKE_KEY` 不落值;`--no-auth --agent-models` 面全空 + `owner:"host"`;
-  `run` 缺 env 照旧 exit 1 原报错。
+本 effort 期间 Cubicle 侧曾在票面写下「不存在任何第三方写入者」的裁定——**该表述不实**：Neo 项目一侧确有并行会话（处理 T 系列改进、review 记录、`447ee80`/`25964c5` 合并等均出自该侧）；同时 Cubicle 自家若干会话也存在失忆后的自我误归因（agent-3/5/6 自认）。两侧并发的完整时间线以两边 reflog 为准，人工终裁。
 
-## neo 项目可保留/可改写
+## Cubicle 侧后续（等 Neo 项目把 T1–T5 稳定后）
 
-- 实现语义(T1–T5 各项的缺省与 flag 行为)是票面合同,**建议保留**;代码落点/命名/测试组织可自由改写。
-- 兼容性红线不变:不带新 flag = 票 01/02/03 行为逐字节不变;`run` 校验面不变。
-- 已知遗留(交 neo 项目决断):悬空对象 `ca263ed`(曾混入 `tmp/` 复现残骸,含一处临时 auth 副本)
-  无分支引用,可 `git gc --prune=now`;neo 真实 `~/.neo` 曾被一次 `NEO_HOME` 为空的 `run` 读取
-  (模型前置闸即 exit 1,判断未写,请核验)。
-
-## Cubicle 侧影响
-
-- Cubicle 02 票消费面:`materialize --no-auth --agent-models --json` → 技能链接 + `mcp.envRefs`
-  自行注入 + 模型全由我方 14 票模型库供给;MCP 路不再需要保持空。
+- vendor 重新钉到含票 04 的 neo main commit（`--no-auth` + `--agent-models` + `envRefs` 合同）。
+- 翻转 `CUBICLE_ACADEMY_MCP` 默认（T1/T2 已落地时），MCP 装配从「等 T」转「接」。
+- `e2e:15`（票 a04）按新 vendor 合同跑技能链；MCP 只加装配层断言，不进正反断言主面。

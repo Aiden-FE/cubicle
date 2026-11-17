@@ -1,0 +1,1197 @@
+From fa37a6c1f864caf961cd9093d3b3c147a20a8226 Mon Sep 17 00:00:00 2001
+From: Aiden_FE <aiden_fe@outlook.com>
+Date: Tue, 17 Nov 2026 15:04:35 +0800
+Subject: [PATCH] =?UTF-8?q?feat(materialize):=20=E5=90=AF=E5=8A=A8?=
+ =?UTF-8?q?=E6=A0=B9=E8=B5=84=E6=BA=90=E5=AF=BC=E5=87=BA=20neo=20materiali?=
+ =?UTF-8?q?ze(academy=20=E7=A5=A8=2001)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- core: materializeRoot 复用 convergeRoot 同一条渲染路径,产物与
+  roots/<role>/<agent>/ 资源部分同形;守卫先行、同父暂存 + rename、
+  owned 产物换出/换入回滚、LinkPort 解链不穿透;NEO_HOME 全程只读
+- roots: RootReport.skillSources(装配胜者 name/role/dir),不开第二份装配
+- cli: 命令表/--help/--json 矩阵注册;usage=2 / state·failure=1
+- 测试: core 11 例 + CLI 面 10 例(diff-equal、清单形状、幂等、
+  拒绝条件、mtimeNs 只读断言、child_process 炸点零调用、pi 端到端)
+- 票据勾选 + ready-for-human + Answer 简报(含并发写入事故记录)
+
+squad-merge: academy/01-materialize 12 commits(agent-2 主笔,
+core/CLI 两线合流;agent-1 异常续写已由 lead 冻结)
+---
+ .scratch/academy/issues/01-materialize.md |  65 ++--
+ packages/cli/src/cli-surface.test.ts      |  12 +-
+ packages/cli/src/cli.ts                   |  69 ++++-
+ packages/cli/src/materialize-cli.test.ts  | 214 +++++++++++++
+ packages/core/src/index.ts                |   9 +
+ packages/core/src/materialize.test.ts     | 357 ++++++++++++++++++++++
+ packages/core/src/materialize.ts          | 252 +++++++++++++++
+ packages/core/src/roots.ts                |  29 +-
+ 8 files changed, 974 insertions(+), 33 deletions(-)
+ create mode 100644 packages/cli/src/materialize-cli.test.ts
+ create mode 100644 packages/core/src/materialize.test.ts
+ create mode 100644 packages/core/src/materialize.ts
+
+diff --git a/.scratch/academy/issues/01-materialize.md b/.scratch/academy/issues/01-materialize.md
+index 60daaa1..7f3e532 100644
+--- a/.scratch/academy/issues/01-materialize.md
++++ b/.scratch/academy/issues/01-materialize.md
+@@ -1,19 +1,46 @@
+-# 01: 启动根导出(neo materialize)
+-
+-**What to build:** 新增 `neo materialize --role <role> --agent <agent> --out <dir> [--json]`：把 `role × agent` 启动根里「资源部分」物化到外部目录，但**不启动任何进程** —— 技能链接（沿用 `link-node` 的 win junction / POSIX symlink 策略）、渲染后的指令文件、MCP 配置、模型文件与 `root.json`。产物与 `roots/<role>/<agent>/` 的资源部分**同形**，由同一渲染路径产出，不允许复制两份实现。
+-
+-**Blocked by:** —
+-
+-**Status:** ready-for-agent
+-
+-- [ ] 命令注册进 CLI 面（`cli.ts` 的命令表 + `--help`）；`--role` / `--agent` / `--out` 缺失或非法 → exit 2；角色不存在、agent 非 launchable → exit 1 且原因可读
+-- [ ] 产物由现有渲染函数产出（同一路径），`roots/` 与 `--out` 两次渲染可 diff 相等（除时间戳字段）
+-- [ ] `--json` 输出 `{ ok, role, agent, outDir, skills: [{ name, hash, source }], mcp, model, hash }`；两次调用清单一致
+-- [ ] **只读**：不写 `state/locks/`、不改 `roles/`（测试断言前后 mtime 与内容不变）
+-- [ ] `--out` 已存在且含非本命令产物 → exit 1，不半写（暂存目录 + rename）
+-- [ ] 不启动进程：实现不复用 `launch.ts` 的 spawn 路径，测试断言无子进程
+-- [ ] 单测覆盖：幂等、JSON 形状、拒绝条件；`pnpm verify` 全绿
+-
+-## Comments
+-
+-- 由 Cubicle 侧起草（`cubicle/.scratch/academy/neo-tickets/N1-materialize.md`），2026-11-17 转入本仓库。Cubicle 的 e2e 判据依赖本条：把 `--out` 指向 `engines/pi/employee-<id>/agent` 后，pi SDK 能读到 `<out>/skills/<name>/SKILL.md`。
++# 01: 启动根导出(neo materialize)
++
++**What to build:** 新增 `neo materialize --role <role> --agent <agent> --out <dir> [--json]`：把 `role × agent` 启动根里「资源部分」物化到外部目录，但**不启动任何进程** —— 技能链接（沿用 `link-node` 的 win junction / POSIX symlink 策略）、渲染后的指令文件、MCP 配置、模型文件与 `root.json`。产物与 `roots/<role>/<agent>/` 的资源部分**同形**，由同一渲染路径产出，不允许复制两份实现。
++
++**Blocked by:** —
++
++**Status:** ready-for-human
++
++- [x] 命令注册进 CLI 面（`cli.ts` 的命令表 + `--help`）；`--role` / `--agent` / `--out` 缺失或非法 → exit 2；角色不存在、agent 非 launchable → exit 1 且原因可读
++- [x] 产物由现有渲染函数产出（同一路径），`roots/` 与 `--out` 两次渲染可 diff 相等（除时间戳字段）
++- [x] `--json` 输出 `{ ok, role, agent, outDir, skills: [{ name, hash, source }], mcp, model, hash }`；两次调用清单一致
++- [x] **只读**：不写 `state/locks/`、不改 `roles/`（测试断言前后 mtime 与内容不变）
++- [x] `--out` 已存在且含非本命令产物 → exit 1，不半写（暂存目录 + rename）
++- [x] 不启动进程：实现不复用 `launch.ts` 的 spawn 路径，测试断言无子进程
++- [x] 单测覆盖：幂等、JSON 形状、拒绝条件；`pnpm verify` 全绿
++
++## Comments
++
++- 由 Cubicle 侧起草（`cubicle/.scratch/academy/neo-tickets/N1-materialize.md`），2026-11-17 转入本仓库。Cubicle 的 e2e 判据依赖本条：把 `--out` 指向 `engines/pi/employee-<id>/agent` 后，pi SDK 能读到 `<out>/skills/<name>/SKILL.md`。
++
++- 实施简报见下方 `## Answer`。过程记录(供人工复核):本票实施期间同一工作目录出现并发写入(agent-1 会话的错位续写;lead 已冻结 agent-1),分支上 33667c9/c1d82fe/e3af1a7/ae54259/bc5bf85 等 commit 的发起者混杂;agent-2(agent-1 冻结后的唯一 writer)对最终树逐行复核并全量跑绿后才提交收尾。另存在一个停在 e5593b0 的空分支 `ticket/01-materialize`(并行会话产物,无提交)。
++
++## Answer
++
++**改了什么**
++
++- `packages/core/src/materialize.ts`（新增）：`materializeRoot(ports, home, homedir, {role, agent, out, env?})`。拒绝条件先行（`--out` 是文件/链接、目录里有非本命令产物 → state 错），随后渲染进与目标同盘的兄弟暂存目录（`.out.materialize-<uuid>.tmp`），由 **`convergeRoot` 同一条渲染路径**产出资源部分；替换既有产物走「换出再换入」（旧根 rename 成 `.out.old-<uuid>.tmp` → 新根 rename 进来 → 解链安全删旧根），任一 rename 失败都把旧根改回，绝不半写。删除全程经 `LinkPort` 解 win junction / POSIX symlink，不穿透角色技能与用户全局目录。
++- `packages/core/src/roots.ts`：`RootReport` 增 `skillSources`（每个 desired 技能的装配胜者角色与内容目录）——清单的唯一来源，不开第二份装配逻辑；`desiredSkillSources` 相应返回 `{dirs, roles}`（仍私有）。
++- `packages/cli/src/cli.ts`：命令表 + `--help` + `--json` 矩阵注册；`cmdMaterialize` 只做参数解析、`path.resolve(cwd)` 与输出（人读报告 stdout / `--json` 清单独占 stdout）。退出码沿用 `NeoError.kind` 映射：usage=2（缺 flag、非法角色名、未知 agent id）、state/failure=1（角色不存在、agent 非 launchable、`--out` 非本命令产物）。
++- 测试：`materialize.test.ts`（core 接缝 11 例：diff-equal、清单形状与两次一致、幂等换出、角色/agent 拒绝、`--out` 三类拒绝、中途失败清暂存、**整 home 内容与纳秒 mtime 前后不变**（覆盖 `state/locks/` 与 `roles/`）、child_process 全换炸点仍零调用）；`materialize-cli.test.ts`（CLI 面 10 例：帮助面、矩阵放行、退出码全列、fake-agent junction/auth/models 落盘、内置 pi 端到端、spawnAgent/ExecPort 零调用）。
++
++**怎么验证的**
++
++- `pnpm verify` 全绿（build + lint + typecheck + 36 文件 556 测试 + 版本锁）。
++- diff-equal 判据：`convergeRoot` 到 `roots/<role>/<agent>/` 与 `materializeRoot` 到 `--out` 各渲染一次，逐路径快照（文件内容 sha256 / 链接 readlink 原文 / root.json 剥 `createdAt`）全等。
++- 只读判据：materialize 前后对 NEO_HOME 整树取 `lstat(bigint).mtimeNs` + 内容摘要，逐路径相等；CLI 侧另断言成功路径不产生 `state/`、`roots/`，`.neo.lock` 已清。
++- 无进程判据：core 测试文件把 `node:child_process` 的 spawn/exec/execFile/fork 换成会抛的 spy（导入图内任何一处触 spawn 即红）；CLI 测试的 `spawnAgent` 端口同为炸点，ExecPort 记录零调用。
++
++**判断点（供复核）**
++
++- 清单形状钉死：`skills[].source` = **胜出的装配层**（角色名或 `default`，同名胜者可读）；`mcp.file`/`model.file` = **out 内相对文件名**（未渲染为 null）；`hash` = sha256(role/agent/skills/mcp/model 规范化 JSON) —— 与 `outDir`、时间戳无关，两次调用逐字节一致；清单不含 env 引用值（密钥不落盘也不落清单）。
++- 未知 agent id 是 usage（exit 2），注册了但非 launchable 是 state（exit 1）——与 `planLaunch` 既有语义一致；「非法」`--out`（空串/缺）为 usage。
++- 幂等替换判据 = `root.json` 标记（version/role/agent 匹配）；空目录视同可写（不含非本命令产物）。Windows 实证：rename 不能落到已存在目录（哪怕空壳），先摘壳；旧产物换出用 rename 而非先删（EPERM/半写风险）。
++- 不加 `neo run` 的「模型前置闸」（那是启动路径的门）：无 provider 时产物没有 models.json，清单 `model.file=null`，导出照做——导出不是启动。
++- 未同步 `docs/schema/neo-home.md`：本票不在家目录新增布局（产物落外部 `--out`），布局文档改动留给 02（`library/`）一并做。
++- 分支协作说明：票面要求 `ticket/01-materialize`，实际工作分支为 `academy/01-materialize`（会话中途由并行代理切换/重建；`ticket/01-materialize` 分支存在但停在 e5593b0 无提交）。本票实现由两个代理在同一分支上合流（core 实现与 CLI 注册/测试各有贡献），提交史内可见。
+diff --git a/packages/cli/src/cli-surface.test.ts b/packages/cli/src/cli-surface.test.ts
+index cb9aa7a..1105a0b 100644
+--- a/packages/cli/src/cli-surface.test.ts
++++ b/packages/cli/src/cli-surface.test.ts
+@@ -8,7 +8,7 @@ import { PromptCanceled, type PromptPort } from './prompts.js';
+ 
+ /**
+  * 票 09(CLI 面收口)核心接缝:帮助文本统一出口、全局 flag(--version/--help/--yes)、
+- * ls 别名、--json 矩阵拒收、退出码全表(0/1/2 × 13 命令)、stdout/stderr 分层、init 非 TTY、ui 指引。
++ * ls 别名、--json 矩阵拒收、退出码全表(0/1/2 × 15 命令)、stdout/stderr 分层、init 非 TTY、ui 指引。
+  */
+ 
+ let home: string;
+@@ -123,12 +123,13 @@ const scriptedPrompts = (script: {
+ };
+ 
+ describe('帮助文本全套(统一出口;upgrade 不出现)', () => {
+-  it('neo --help:stdout、exit 0、含全部 14 命令与别名/全局 flag,绝不含 upgrade', async () => {
++  it('neo --help:stdout、exit 0、含全部 15 命令与别名/全局 flag,绝不含 upgrade', async () => {
+     const r = await runWith(['--help']);
+     expect(r.exitCode).toBe(0);
+     expect(r.err).toBe('');
+     for (const cmd of [
+       'init', 'target', 'migrate', 'create', 'list', 'add', 'update', 'remove', 'use', 'run', 'off', 'roots', 'sync', 'status',
++      'materialize',
+     ]) {
+       expect(r.out).toContain(cmd);
+     }
+@@ -238,7 +239,7 @@ describe('--json 矩阵(决策票 10:只读/预览类;变更类拒收 exit 2)',
+     }
+   });
+ 
+-  it('矩阵内命令接受 --json:status/list/migrate/sync/update --dry-run', async () => {
++  it('矩阵内命令接受 --json:status/list/migrate/sync/update --dry-run/materialize', async () => {
+     expect((await runWith(['list', '--json'])).exitCode).toBe(0);
+ 
+     const status = await runWith(['status', '--json']); // 未初始化 → 业务失败 1(非用法 2)
+@@ -253,6 +254,11 @@ describe('--json 矩阵(决策票 10:只读/预览类;变更类拒收 exit 2)',
+     expect((await runWith(['update', '--dry-run', '--json'])).exitCode).toBe(0); // 无锁角色 → 信息性 0
+     // update --json 无 --dry-run 仍为用法错误(矩阵内但形态受限)
+     expect((await runWith(['update', '--json'])).exitCode).toBe(2);
++
++    // materialize 在矩阵内:--json 不再被矩阵拒收;缺 --role 是 usage 错
++    const mat = await runWith(['materialize', '--json']);
++    expect(mat.exitCode).toBe(2);
++    expect(mat.err).not.toContain('not available');
+   });
+ });
+ 
+diff --git a/packages/cli/src/cli.ts b/packages/cli/src/cli.ts
+index 46647d9..8f627dc 100644
+--- a/packages/cli/src/cli.ts
++++ b/packages/cli/src/cli.ts
+@@ -72,6 +72,7 @@ import {
+   gitAvailable,
+   gitSync,
+   listRoots,
++  materializeRoot,
+   planLaunch,
+   validateRemoteUrl,
+   type ConvergeReport,
+@@ -273,6 +274,16 @@ const COMMANDS: readonly CommandSpec[] = [
+       '--clean <role>  remove roots/<role>/ (auth copies + agent session history included)',
+     ],
+   },
++  {
++    name: 'materialize',
++    summary: 'export a role×agent launch root (resources only) to an external dir; never launches',
++    usage: ['neo materialize --role <name> --agent <agent-id> --out <dir> [--json]'],
++    flags: [
++      '--role <name>   role to assemble (required; default ∪ role, role wins same names)',
++      '--agent <id>    launchable agent id (required; see: neo list agents)',
++      '--out <dir>     external dir owned by this command (staged + swapped in; foreign content refused)',
++    ],
++  },
+   {
+     name: 'sync',
+     summary: 'project materialization preview (bare run) / apply',
+@@ -296,8 +307,8 @@ const COMMANDS: readonly CommandSpec[] = [
+   },
+ ];
+ 
+-/** --json 矩阵(决策票 10:只读/预览类;变更类命令一律拒收)。 */
+-const JSON_MATRIX = new Set(['status', 'list', 'migrate', 'sync', 'update', 'model']);
++/** --json 矩阵(决策票 10:只读/预览类;materialize 对 home 只读、只写外部 --out;其余变更类一律拒收)。 */
++const JSON_MATRIX = new Set(['status', 'list', 'migrate', 'sync', 'update', 'model', 'materialize']);
+ 
+ function resolveCommand(name: string): CommandSpec | undefined {
+   return COMMANDS.find(
+@@ -343,7 +354,7 @@ async function printFullHelp(io: CliIo, deps: CliDeps): Promise<void> {
+     '  --version   print version and exit',
+     '  --help      show this help (per command: neo <command> --help)',
+     '  --yes       assume yes (v1: only remove consumes it; elsewhere a no-op)',
+-    '  --json      machine output (only: status, list, update --dry-run, migrate, sync)',
++    '  --json      machine output (only: status, list, update --dry-run, migrate, sync, materialize)',
+     '',
+     'aliases: ls → list · rm → remove',
+     `home: ${helpHome(deps)} (override with NEO_HOME)`,
+@@ -462,6 +473,8 @@ async function dispatch(argv: readonly string[], io: CliIo, deps: CliDeps): Prom
+       return cmdOff(rest, io, deps);
+     case 'roots':
+       return cmdRoots(rest, io, deps);
++    case 'materialize':
++      return cmdMaterialize(rest, io, deps);
+     case 'sync':
+       return cmdSync(rest, io, deps);
+     case 'status':
+@@ -1299,6 +1312,56 @@ async function cmdRoots(args: readonly string[], io: CliIo, deps: CliDeps): Prom
+   return 0;
+ }
+ 
++/**
++ * `neo materialize --role <name> --agent <id> --out <dir> [--json]`(academy 票 01):
++ * 把 `role × agent` 启动根的「资源部分」导出到外部目录;只落盘、绝不启动进程。
++ * 产物与 `roots/<role>/<agent>/` 同形(同一 `convergeRoot` 渲染路径),落盘恒「暂存 + 换出」,
++ * NEO_HOME 只读(不写 state/,不建 roots/)。退出码:usage=2 / state·failure=1(reportError 映射)。
++ */
++async function cmdMaterialize(args: readonly string[], io: CliIo, deps: CliDeps): Promise<number> {
++  const parsed = parseArgs(args, {
++    valued: new Set(['role', 'agent', 'out']),
++    boolean: boolFlags('json'),
++  });
++  if (parsed.positionals.length > 0) {
++    throw new NeoError('usage', 'materialize: takes no positional arguments');
++  }
++  const role = lastFlag(parsed, 'role');
++  const agent = lastFlag(parsed, 'agent');
++  const out = lastFlag(parsed, 'out');
++  if (role === undefined) throw new NeoError('usage', 'materialize: --role <name> is required');
++  if (agent === undefined) {
++    throw new NeoError(
++      'usage',
++      `materialize: --agent <agent-id> is required (neo materialize launches: ${(await launchableIds(deps)).join(', ')})`,
++    );
++  }
++  if (out === undefined || out.trim().length === 0) {
++    throw new NeoError('usage', 'materialize: --out <dir> is required');
++  }
++  const cwd = deps.cwd ?? process.cwd();
++  const { manifest } = await materializeRoot(
++    { link: nodeLinkPort(), now: deps.now },
++    resolveHome(deps),
++    deps.homedir,
++    { role, agent, out: path.resolve(cwd, out), env: deps.env },
++  );
++  if (parsed.bools.has('json')) {
++    io.stdout(`${JSON.stringify(manifest, null, 2)}\n`);
++    return 0;
++  }
++  io.stdout(`materialized role=${role} agent=${agent}: ${manifest.outDir}\n`);
++  io.stdout(`  skills: ${manifest.skills.map((s) => `${s.name} (${s.source})`).join(', ') || 'none'}\n`);
++  io.stdout(
++    `  mcp: ${manifest.mcp.servers} server(s)${manifest.mcp.file === null ? '' : ` -> ${manifest.mcp.file}`}\n`,
++  );
++  io.stdout(
++    `  model: ${manifest.model.default ?? 'none'}${manifest.model.file === null ? '' : ` -> ${manifest.model.file}`}\n`,
++  );
++  io.stdout('  (resources only: neo materialize never launches a process)\n');
++  return 0;
++}
++
+ /**
+  * `neo off`:清默认角色(不触盘);`--global` 卸全局挂载;`--project` 解绑项目。
+  */
+diff --git a/packages/cli/src/materialize-cli.test.ts b/packages/cli/src/materialize-cli.test.ts
+new file mode 100644
+index 0000000..b8a102e
+--- /dev/null
++++ b/packages/cli/src/materialize-cli.test.ts
+@@ -0,0 +1,214 @@
++import fs from 'node:fs/promises';
++import os from 'node:os';
++import path from 'node:path';
++import { stringify } from 'yaml';
++import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import { ensureConfigSkeleton } from '@compass-aiden/neo-core';
++import { runCli, type CliDeps, type CliIo } from './cli.js';
++
++/**
++ * 票 01(CLI 面接缝):`neo materialize` 的注册、flag 校验、退出码分层
++ * (0 成功 / 1 state / 2 usage)、--json 矩阵放行、人读输出走 stdout。
++ */
++
++let home: string;
++let agentHome: string;
++let outRoot: string;
++
++const runWith = async (argv: readonly string[], extra?: Partial<CliDeps>) => {
++  const out: string[] = [];
++  const err: string[] = [];
++  const runs: string[][] = [];
++  const deps: CliDeps = {
++    env: { NEO_HOME: home, LITELLM_API_KEY: 'k' },
++    homedir: agentHome,
++    exec: {
++      async run(command) {
++        runs.push([...command]);
++        return { code: 1, stdout: '', stderr: 'no upstream expected' };
++      },
++    },
++    now: () => new Date('2026-11-04T06:00:00.000Z'),
++    // 无子进程断言:CLI 的 spawn 端口换成炸点 —— materialize 若走 run 的启动路径即红。
++    spawnAgent: async () => {
++      throw new Error('materialize must not launch agents');
++    },
++    ...extra,
++  };
++  const io: CliIo = { stdout: (t) => out.push(t), stderr: (t) => err.push(t) };
++  const exitCode = await runCli([...argv], io, deps);
++  return { exitCode, out: out.join(''), err: err.join(''), runs };
++};
++
++beforeEach(async () => {
++  home = await fs.mkdtemp(path.join(os.tmpdir(), 'neo-matcli-home-'));
++  agentHome = await fs.mkdtemp(path.join(os.tmpdir(), 'neo-matcli-agent-'));
++  outRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'neo-matcli-out-'));
++  await fs.mkdir(path.join(agentHome, 'fakeagent', 'plugins'), { recursive: true });
++  await fs.writeFile(path.join(agentHome, 'fakeagent', 'auth.json'), '{}', 'utf8');
++  await fs.writeFile(
++    path.join(home, 'agents.yaml'),
++    stringify({
++      version: 1,
++      agents: {
++        fake: {
++          skillsDir: path.join(agentHome, 'fakeagent', 'skills'),
++          isolate: {
++            homeEnv: 'FAKE_HOME',
++            homeDir: path.join(agentHome, 'fakeagent'),
++            skillsDir: 'skills',
++            instructionFile: 'AGENTS.md',
++            authFiles: ['auth.json'],
++            shareDirs: ['plugins'],
++            mcp: { format: 'pi-json', file: 'mcp.json' },
++            models: { format: 'pi-models-json', file: 'models.json', settingsFile: 'settings.json' },
++            supports: ['launch'],
++            supportLevel: 'full',
++          },
++        },
++      },
++    }),
++    'utf8',
++  );
++  await fs.mkdir(path.join(home, 'roles', 'default', 'skills', 'slides'), { recursive: true });
++  await fs.writeFile(path.join(home, 'roles', 'default', 'skills', 'slides', 'SKILL.md'), '# slides\n', 'utf8');
++  await fs.mkdir(path.join(home, 'roles', 'work', 'skills', 'docx'), { recursive: true });
++  await fs.writeFile(path.join(home, 'roles', 'work', 'skills', 'docx', 'SKILL.md'), '# docx\n', 'utf8');
++  await ensureConfigSkeleton(home);
++  await fs.writeFile(
++    path.join(home, 'config.yaml'),
++    ['version: 1', 'providers:', '  litellm:', '    baseUrl: https://litellm.example/v1', '    apiKey: env:LITELLM_API_KEY', '    models:', '      - id: flash', 'defaultModel: litellm/flash', ''].join('\n'),
++    'utf8',
++  );
++});
++
++afterEach(async () => {
++  await fs.rm(home, { recursive: true, force: true });
++  await fs.rm(agentHome, { recursive: true, force: true });
++  await fs.rm(outRoot, { recursive: true, force: true });
++});
++
++describe('neo materialize(CLI 面)', () => {
++  it('--help:命令注册进命令表,per-command 帮助含 usage', async () => {
++    const full = await runWith(['--help']);
++    expect(full.exitCode).toBe(0);
++    expect(full.out).toContain('materialize');
++    expect(full.out).toContain('sync, materialize)'); // 全局 --json 行同步
++    const one = await runWith(['materialize', '--help']);
++    expect(one.exitCode).toBe(0);
++    expect(one.out).toContain('neo materialize --role');
++    expect(one.out).toContain('--out');
++    expect(one.out).toContain('--json: available');
++  });
++
++  it('--json 矩阵放行:完整导出成功,stdout 为合法 JSON 清单', async () => {
++    const out = path.join(outRoot, 'employee-1');
++    const r = await runWith(['materialize', '--role', 'work', '--agent', 'fake', '--out', out, '--json']);
++    expect(r.exitCode).toBe(0);
++    const manifest = JSON.parse(r.out) as {
++      ok: boolean; role: string; agent: string; outDir: string;
++      skills: { name: string }[]; mcp: unknown; model: unknown; hash: string;
++    };
++    expect(Object.keys(manifest).sort()).toEqual([
++      'agent', 'hash', 'mcp', 'model', 'ok', 'outDir', 'role', 'skills',
++    ]);
++    expect(manifest.ok).toBe(true);
++    expect(manifest.role).toBe('work');
++    expect(manifest.agent).toBe('fake');
++    expect(manifest.outDir).toBe(out);
++    expect(manifest.skills.map((s) => s.name)).toEqual(['docx', 'slides']);
++    expect(manifest.mcp).toEqual({ file: null, servers: 0 }); // fixture 无 mcp.yaml
++    expect(manifest.model).toMatchObject({ file: 'models.json', providers: 1, default: 'litellm/flash' });
++    expect(manifest.hash).toMatch(/^[0-9a-f]{64}$/);
++    // 渲染确实落盘(接缝处看真实目录)。
++    expect((await fs.lstat(path.join(out, 'skills', 'docx'))).isSymbolicLink()).toBe(true);
++    expect(await fs.readFile(path.join(out, 'models.json'), 'utf8')).toContain('litellm');
++  });
++
++  it('缺 flag → exit 2;--out 缺失 → exit 2;位置参数多余 → exit 2', async () => {
++    const r1 = await runWith(['materialize', '--agent', 'fake', '--out', path.join(outRoot, 'a')]);
++    expect(r1.exitCode).toBe(2);
++    expect(r1.err).toContain('--role');
++    const r2 = await runWith(['materialize', '--role', 'work', '--out', path.join(outRoot, 'a')]);
++    expect(r2.exitCode).toBe(2);
++    expect(r2.err).toContain('--agent');
++    const r3 = await runWith(['materialize', '--role', 'work', '--agent', 'fake']);
++    expect(r3.exitCode).toBe(2);
++    expect(r3.err).toContain('--out');
++    const r4 = await runWith(['materialize', 'extra', '--role', 'work', '--agent', 'fake', '--out', path.join(outRoot, 'a')]);
++    expect(r4.exitCode).toBe(2);
++    expect(r4.err).toContain('positional');
++  });
++
++  it('非法角色名 → exit 2(usage)', async () => {
++    const r = await runWith(['materialize', '--role', 'Bad Name', '--agent', 'fake', '--out', path.join(outRoot, 'a')]);
++    expect(r.exitCode).toBe(2);
++  });
++
++  it('角色不存在 / agent 非 launchable → exit 1 且原因可读;未知 agent id → exit 2', async () => {
++    const r1 = await runWith(['materialize', '--role', 'ghost', '--agent', 'fake', '--out', path.join(outRoot, 'a')]);
++    expect(r1.exitCode).toBe(1);
++    expect(r1.err).toContain('not found');
++    const r2 = await runWith(['materialize', '--role', 'work', '--agent', 'zcode', '--out', path.join(outRoot, 'b')]);
++    expect(r2.exitCode).toBe(1);
++    expect(r2.err).toContain('cannot be launched');
++    const r3 = await runWith(['materialize', '--role', 'work', '--agent', 'bogus-agent', '--out', path.join(outRoot, 'c')]);
++    expect(r3.exitCode).toBe(2);
++    expect(r3.err).toContain('unknown agent');
++    await expect(fs.stat(path.join(outRoot, 'a'))).rejects.toMatchObject({ code: 'ENOENT' });
++  });
++
++  it('--out 含他人产物 → exit 1,原内容不动,无暂存残骸', async () => {
++    const out = path.join(outRoot, 'taken');
++    await fs.mkdir(out);
++    await fs.writeFile(path.join(out, 'keep.txt'), 'yours\n', 'utf8');
++    const r = await runWith(['materialize', '--role', 'work', '--agent', 'fake', '--out', out]);
++    expect(r.exitCode).toBe(1);
++    expect(await fs.readFile(path.join(out, 'keep.txt'), 'utf8')).toBe('yours\n');
++    expect(await fs.readdir(outRoot)).toEqual(['taken']);
++  });
++
++  it('成功路径不写 home:无 state/、无 roots/,锁已清', async () => {
++    const out = path.join(outRoot, 'employee-4');
++    const r = await runWith(['materialize', '--role', 'work', '--agent', 'fake', '--out', out]);
++    expect(r.exitCode).toBe(0);
++    await expect(fs.lstat(path.join(home, 'state'))).rejects.toMatchObject({ code: 'ENOENT' });
++    await expect(fs.lstat(path.join(home, 'roots'))).rejects.toMatchObject({ code: 'ENOENT' });
++    await expect(fs.lstat(path.join(home, '.neo.lock'))).rejects.toMatchObject({ code: 'ENOENT' });
++  });
++
++  it('幂等:同参数重复调用,清单两次一致;人读模式有摘要行', async () => {
++    const out = path.join(outRoot, 'employee-2');
++    const first = await runWith(['materialize', '--role', 'work', '--agent', 'fake', '--out', out, '--json']);
++    const second = await runWith(['materialize', '--role', 'work', '--agent', 'fake', '--out', out, '--json']);
++    expect(second.exitCode).toBe(0);
++    expect(second.out).toBe(first.out);
++    const human = await runWith(['materialize', '--role', 'work', '--agent', 'fake', '--out', out]);
++    expect(human.exitCode).toBe(0);
++    expect(human.out).toContain(out);
++    expect(human.err).toBe('');
++  });
++
++  it('auth 副本与 shareDirs junction 一并导出(fake-agent 全资源)', async () => {
++    const out = path.join(outRoot, 'employee-5');
++    const r = await runWith(['materialize', '--role', 'work', '--agent', 'fake', '--out', out]);
++    expect(r.exitCode, r.err).toBe(0);
++    expect(await fs.readFile(path.join(out, 'auth.json'), 'utf8')).toBe('{}');
++    expect((await fs.lstat(path.join(out, 'plugins'))).isSymbolicLink()).toBe(true);
++  });
++
++  it('不启动进程:spawnAgent/ExecPort 零调用;内置 pi 也端到端可用', async () => {
++    const out = path.join(outRoot, 'employee-3');
++    const r = await runWith(['materialize', '--role', 'work', '--agent', 'fake', '--out', out]);
++    expect(r.exitCode).toBe(0);
++    expect(r.out).toContain('work');
++    expect(r.err).toBe('');
++    expect(r.runs).toEqual([]); // ExecPort 全程零调用(add/update 才用它)
++    // 内置 launchable agent(pi;Cubicle 的 e2e 场景)端到端:技能链接可读 + 胜者语义。
++    const outPi = path.join(outRoot, 'pi-employee');
++    const pi = await runWith(['materialize', '--role', 'work', '--agent', 'pi', '--out', outPi, '--json']);
++    expect(pi.exitCode, pi.err).toBe(0);
++    expect((await fs.lstat(path.join(outPi, 'skills', 'docx'))).isSymbolicLink()).toBe(true);
++    expect(await fs.readFile(path.join(outPi, 'skills', 'slides', 'SKILL.md'), 'utf8')).toBe('# slides\n');
++  });
++});
+diff --git a/packages/core/src/index.ts b/packages/core/src/index.ts
+index 975aca5..4f6605e 100644
+--- a/packages/core/src/index.ts
++++ b/packages/core/src/index.ts
+@@ -157,6 +157,15 @@ export {
+   type RootReport,
+   type RootSummary,
+ } from './roots.js';
++// —— academy 票 01:启动根导出(追加式导出)——
++export {
++  materializeRoot,
++  type MaterializeManifest,
++  type MaterializeOptions,
++  type MaterializePorts,
++  type MaterializeResult,
++  type MaterializeSkillEntry,
++} from './materialize.js';
+ export {
+   mergeMcpServers,
+   readRoleMcp,
+diff --git a/packages/core/src/materialize.test.ts b/packages/core/src/materialize.test.ts
+new file mode 100644
+index 0000000..dde9bd3
+--- /dev/null
++++ b/packages/core/src/materialize.test.ts
+@@ -0,0 +1,357 @@
++import fs from 'node:fs/promises';
++import os from 'node:os';
++import path from 'node:path';
++import { stringify } from 'yaml';
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import { computeSkillFolderHash } from './migrate.js';
++import { ensureConfigSkeleton } from './config.js';
++import { nodeLinkPort } from './link-node.js';
++import * as childProcess from 'node:child_process';
++import { materializeRoot } from './materialize.js';
++import { agentsYamlPath, rootDir } from './paths.js';
++import { convergeRoot } from './roots.js';
++
++/**
++ * 票 01(academy):`neo materialize` 的领域接缝 = materializeRoot()。
++ * 判据:与 convergeRoot 同一路径渲染(产物 diff 相等)、幂等、JSON 清单、
++ * 拒绝条件、home 只读、绝不落半写(暂存 + rename)、无子进程。
++ */
++
++// —— 无子进程断言:整个文件把 child_process 换成会炸的 spy(实现复用 spawn 路径即红)——
++vi.mock('node:child_process', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('node:child_process')>();
++  const boom = (): never => {
++    throw new Error('materialize must not spawn subprocesses');
++  };
++  return {
++    ...actual,
++    spawn: vi.fn(boom),
++    exec: vi.fn(boom),
++    execFile: vi.fn(boom),
++    spawnSync: vi.fn(boom),
++    execFileSync: vi.fn(boom),
++    fork: vi.fn(boom),
++  };
++});
++
++let home: string;
++let realRoot: string;
++let outRoot: string;
++
++const ports = () => ({ link: nodeLinkPort(), now: () => new Date('2026-11-11T08:00:00.000Z') });
++
++beforeEach(async () => {
++  home = await fs.mkdtemp(path.join(os.tmpdir(), 'neo-mat-home-'));
++  realRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'neo-mat-real-'));
++  outRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'neo-mat-out-'));
++  // 假 agent 真实配置根(auth 副本源 + shareDirs 源)。
++  await fs.mkdir(path.join(realRoot, 'plugins'), { recursive: true });
++  await fs.writeFile(path.join(realRoot, 'plugins', 'note.md'), 'shared plugin\n', 'utf8');
++  await fs.writeFile(path.join(realRoot, 'auth.json'), '{"token":"x"}', 'utf8');
++  await fs.writeFile(
++    agentsYamlPath(home),
++    stringify({
++      version: 1,
++      agents: {
++        fake: {
++          skillsDir: path.join(realRoot, 'skills'),
++          isolate: {
++            homeEnv: 'FAKE_HOME',
++            homeDir: realRoot,
++            skillsDir: 'skills',
++            instructionFile: 'AGENTS.md',
++            authFiles: ['auth.json'],
++            shareDirs: ['plugins'],
++            mcp: { format: 'pi-json', file: 'mcp.json' },
++            models: { format: 'pi-models-json', file: 'models.json', settingsFile: 'settings.json' },
++            supports: ['launch'],
++            supportLevel: 'full',
++          },
++        },
++      },
++    }),
++    'utf8',
++  );
++  // default ∪ work 技能(同名 role 胜)+ 两级提示词。
++  await fs.mkdir(path.join(home, 'roles', 'default', 'skills', 'slides'), { recursive: true });
++  await fs.writeFile(path.join(home, 'roles', 'default', 'skills', 'slides', 'SKILL.md'), '# slides default\n', 'utf8');
++  await fs.mkdir(path.join(home, 'roles', 'default', 'skills', 'pdf'), { recursive: true });
++  await fs.writeFile(path.join(home, 'roles', 'default', 'skills', 'pdf', 'SKILL.md'), '# pdf default\n', 'utf8');
++  await fs.writeFile(path.join(home, 'roles', 'default', 'AGENTS.md'), 'base prompt\n', 'utf8');
++  await fs.writeFile(
++    path.join(home, 'roles', 'default', 'mcp.yaml'),
++    stringify({
++      version: 1,
++      servers: { fetch: { transport: 'stdio', command: 'npx', args: ['-y', 'fetch-server'] } },
++    }),
++    'utf8',
++  );
++  await fs.mkdir(path.join(home, 'roles', 'work', 'skills', 'docx'), { recursive: true });
++  await fs.writeFile(path.join(home, 'roles', 'work', 'skills', 'docx', 'SKILL.md'), '# docx work\n', 'utf8');
++  await fs.mkdir(path.join(home, 'roles', 'work', 'skills', 'pdf'), { recursive: true });
++  await fs.writeFile(path.join(home, 'roles', 'work', 'skills', 'pdf', 'SKILL.md'), '# pdf work\n', 'utf8');
++  await fs.writeFile(path.join(home, 'roles', 'work', 'AGENTS.md'), 'work prompt\n', 'utf8');
++  await fs.writeFile(
++    path.join(home, 'roles', 'work', 'mcp.yaml'),
++    stringify({
++      version: 1,
++      servers: { search: { transport: 'http', url: 'https://mcp.example.com/search' } },
++    }),
++    'utf8',
++  );
++  await ensureConfigSkeleton(home);
++  await fs.writeFile(
++    path.join(home, 'config.yaml'),
++    [
++      'version: 1',
++      'providers:',
++      '  litellm:',
++      '    baseUrl: https://litellm.example/v1',
++      '    api: openai-completions',
++      '    apiKey: env:LITELLM_API_KEY',
++      '    models:',
++      '      - id: deepseek-flash',
++      'defaultModel: litellm/deepseek-flash',
++      '',
++    ].join('\n'),
++    'utf8',
++  );
++});
++
++afterEach(async () => {
++  await fs.rm(home, { recursive: true, force: true });
++  await fs.rm(realRoot, { recursive: true, force: true });
++  await fs.rm(outRoot, { recursive: true, force: true });
++});
++
++// —— 树快照(diff 判据;root.json 的 createdAt 是唯一允许的时间戳差异)——
++
++interface TreeEntry {
++  rel: string;
++  kind: 'dir' | 'file' | 'link';
++  /** file:内容 sha256;link:readlink 原文;root.json:剥掉 createdAt 后的规范化 JSON。 */
++  digest: string;
++}
++
++const sha256 = async (bytes: Uint8Array | string): Promise<string> => {
++  const { createHash } = await import('node:crypto');
++  return createHash('sha256').update(bytes).digest('hex');
++};
++
++async function snapshotTree(root: string, prefix = ''): Promise<TreeEntry[]> {
++  const entries: TreeEntry[] = [];
++  for (const entry of await fs.readdir(root, { withFileTypes: true })) {
++    const abs = path.join(root, entry.name);
++    const rel = prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`;
++    const info = await fs.lstat(abs);
++    if (info.isSymbolicLink()) {
++      entries.push({ rel, kind: 'link', digest: await fs.readlink(abs) });
++    } else if (info.isDirectory()) {
++      entries.push({ rel, kind: 'dir', digest: '' });
++      entries.push(...(await snapshotTree(abs, rel)));
++    } else {
++      const bytes = await fs.readFile(abs);
++      let digest: string;
++      if (rel === 'root.json') {
++        const meta = JSON.parse(bytes.toString('utf8')) as Record<string, unknown>;
++        digest = JSON.stringify({ ...meta, createdAt: '<any>' });
++      } else {
++        digest = await sha256(bytes);
++      }
++      entries.push({ rel, kind: 'file', digest });
++    }
++  }
++  return entries.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
++}
++
++/** 整家目录快照:每路径 = 类型 + 内容摘要 + mtime;只读断言用(内容与 mtime 双双不变)。 */
++interface HomeEntry {
++  rel: string;
++  kind: 'dir' | 'file' | 'link';
++  digest: string;
++  mtimeNs: string;
++}
++
++async function snapshotHome(root: string, prefix = ''): Promise<HomeEntry[]> {
++  const entries: HomeEntry[] = [];
++  for (const entry of await fs.readdir(root, { withFileTypes: true })) {
++    const abs = path.join(root, entry.name);
++    const rel = prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`;
++    // bigint:true 才带 mtimeNs(纳秒级 mtime,只读断言的精度判据)。
++    const info = await fs.lstat(abs, { bigint: true });
++    if (info.isSymbolicLink()) {
++      entries.push({ rel, kind: 'link', digest: await fs.readlink(abs), mtimeNs: info.mtimeNs.toString() });
++    } else if (info.isDirectory()) {
++      entries.push({ rel, kind: 'dir', digest: '', mtimeNs: info.mtimeNs.toString() });
++      entries.push(...(await snapshotHome(abs, rel)));
++    } else {
++      entries.push({
++        rel,
++        kind: 'file',
++        digest: await sha256(await fs.readFile(abs)),
++        mtimeNs: info.mtimeNs.toString(),
++      });
++    }
++  }
++  return entries.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
++}
++
++describe('materializeRoot(票 01:启动根导出)', () => {
++  it('产物与 roots/<role>/<agent>/ 的资源部分 diff 相等(同一路径渲染;除 root.json 时间戳)', async () => {
++    const launch = await convergeRoot(ports(), home, os.homedir(), {
++      role: 'work',
++      agent: 'fake',
++      env: { LITELLM_API_KEY: 'k' },
++    });
++    const out = path.join(outRoot, 'exported');
++    const report = await materializeRoot(ports(), home, os.homedir(), {
++      role: 'work',
++      agent: 'fake',
++      out,
++      env: { LITELLM_API_KEY: 'k' },
++    });
++    expect(report.outDir).toBe(out);
++    expect(await snapshotTree(out)).toEqual(await snapshotTree(rootDir(home, 'work', 'fake')));
++    // 渲染确实有内容(防 diff 相等沦为两个空目录)。
++    expect(launch.desiredSkills).toEqual(['docx', 'pdf', 'slides']);
++    expect((await fs.lstat(path.join(out, 'skills', 'pdf'))).isSymbolicLink()).toBe(true);
++    expect(await fs.readFile(path.join(out, 'skills', 'pdf', 'SKILL.md'), 'utf8')).toBe('# pdf work\n');
++    expect(await fs.readFile(path.join(out, 'AGENTS.md'), 'utf8')).toContain('work prompt');
++    expect(await fs.readFile(path.join(out, 'mcp.json'), 'utf8')).toContain('fetch-server');
++    expect(await fs.readFile(path.join(out, 'models.json'), 'utf8')).toContain('litellm');
++    expect(await fs.readFile(path.join(out, 'auth.json'), 'utf8')).toBe('{"token":"x"}');
++  });
++
++  it('--json 清单:role/agent/outDir/skills[{name,hash,source}]/mcp/model/hash;同名胜者 = role', async () => {
++    const out = path.join(outRoot, 'exported');
++    const { manifest } = await materializeRoot(ports(), home, os.homedir(), {
++      role: 'work',
++      agent: 'fake',
++      out,
++      env: { LITELLM_API_KEY: 'k' },
++    });
++    expect(manifest.ok).toBe(true);
++    expect(manifest.role).toBe('work');
++    expect(manifest.agent).toBe('fake');
++    expect(manifest.outDir).toBe(out);
++    expect(manifest.skills.map((s) => [s.name, s.source])).toEqual([
++      ['docx', 'work'],
++      ['pdf', 'work'], // 同名:role 胜 default
++      ['slides', 'default'],
++    ]);
++    expect(manifest.skills.every((s) => /^[0-9a-f]{64}$/.test(s.hash))).toBe(true);
++    // pdf 的 hash 必须来自胜者(work)的内容,而不是 default。
++    const workPdf = await computeSkillFolderHash(path.join(home, 'roles', 'work', 'skills', 'pdf'));
++    const defaultPdf = await computeSkillFolderHash(path.join(home, 'roles', 'default', 'skills', 'pdf'));
++    expect(manifest.skills.find((s) => s.name === 'pdf')?.hash).toBe(workPdf);
++    expect(manifest.skills.find((s) => s.name === 'pdf')?.hash).not.toBe(defaultPdf);
++    expect(manifest.mcp).toMatchObject({ file: 'mcp.json', servers: 2 });
++    expect(manifest.model).toMatchObject({
++      file: 'models.json',
++      providers: 1,
++      default: 'litellm/deepseek-flash',
++    });
++    expect(manifest.hash).toMatch(/^[0-9a-f]{64}$/);
++  });
++
++  it('幂等:重复导出同 out 后产物与清单不变(第二次 = 换出旧根)', async () => {
++    const out = path.join(outRoot, 'exported');
++    const opts = { role: 'work', agent: 'fake', out, env: { LITELLM_API_KEY: 'k' } } as const;
++    const first = await materializeRoot(ports(), home, os.homedir(), opts);
++    const firstTree = await snapshotTree(out);
++    const second = await materializeRoot(ports(), home, os.homedir(), opts);
++    expect(second.manifest).toEqual(first.manifest);
++    expect(await snapshotTree(out)).toEqual(firstTree);
++    // 清单 hash 随内容变(幂等 ≠ 常量)。
++    await fs.writeFile(path.join(home, 'roles', 'work', 'skills', 'docx', 'SKILL.md'), '# docx v2\n', 'utf8');
++    const third = await materializeRoot(ports(), home, os.homedir(), opts);
++    expect(third.manifest.hash).not.toBe(first.manifest.hash);
++  });
++
++  it('角色不存在 → state 错;非法角色名 → usage 错(不建任何目录)', async () => {
++    const out = path.join(outRoot, 'exported');
++    await expect(
++      materializeRoot(ports(), home, os.homedir(), { role: 'ghost', agent: 'fake', out }),
++    ).rejects.toThrow(/role "ghost" not found/);
++    await expect(
++      materializeRoot(ports(), home, os.homedir(), { role: 'Bad Name', agent: 'fake', out }),
++    ).rejects.toMatchObject({ kind: 'usage' });
++    expect(await fs.readdir(outRoot)).toEqual([]);
++  });
++
++  it('agent 非 launchable → state 错且原因可读', async () => {
++    await expect(
++      materializeRoot(ports(), home, os.homedir(), { role: 'work', agent: 'zcode', out: path.join(outRoot, 'e') }),
++    ).rejects.toThrow(/cannot be launched with neo run/);
++  });
++
++  it('--out 已存在且含非本命令产物 → state 错,原产物不动、不留暂存残骸', async () => {
++    const out = path.join(outRoot, 'exported');
++    await fs.mkdir(out);
++    await fs.writeFile(path.join(out, 'keep.txt'), 'not mine\n', 'utf8');
++    await expect(
++      materializeRoot(ports(), home, os.homedir(), { role: 'work', agent: 'fake', out }),
++    ).rejects.toThrow(/already exists/);
++    expect(await fs.readFile(path.join(out, 'keep.txt'), 'utf8')).toBe('not mine\n');
++    expect(await fs.readdir(outRoot)).toEqual(['exported']);
++  });
++
++  it('--out 已有 root.json 但 role/agent 不符 → state 错(非本命令产物)', async () => {
++    const out = path.join(outRoot, 'exported');
++    await fs.mkdir(out);
++    await fs.writeFile(
++      path.join(out, 'root.json'),
++      JSON.stringify({ version: 1, role: 'other', agent: 'fake', createdAt: '2026-11-01T00:00:00.000Z' }),
++      'utf8',
++    );
++    await expect(
++      materializeRoot(ports(), home, os.homedir(), { role: 'work', agent: 'fake', out }),
++    ).rejects.toThrow(/role="work" agent="fake"/);
++    expect(await fs.readdir(path.join(out))).toEqual(['root.json']);
++  });
++
++  it('--out 是文件 → state 错', async () => {
++    const out = path.join(outRoot, 'exported');
++    await fs.writeFile(out, 'file, not dir\n', 'utf8');
++    await expect(
++      materializeRoot(ports(), home, os.homedir(), { role: 'work', agent: 'fake', out }),
++    ).rejects.toThrow(/not a directory/);
++  });
++
++  it('渲染中途失败 → 清掉暂存,out 不出现半写', async () => {
++    await fs.writeFile(
++      path.join(home, 'config.yaml'),
++      'version: 1\nproviders:\n  litellm:\n    baseUrl: https://x/v1\n    apiKey: env:MISSING_KEY\n',
++      'utf8',
++    );
++    const out = path.join(outRoot, 'exported');
++    await expect(
++      materializeRoot(ports(), home, os.homedir(), { role: 'work', agent: 'fake', out, env: {} }),
++    ).rejects.toThrow(/MISSING_KEY/);
++    expect(await fs.readdir(outRoot)).toEqual([]);
++  });
++
++  it('只读:materialize 不写 NEO_HOME(前后整树内容与 mtime 不变)', async () => {
++    // 预置一个既有启动根与 state/locks,证明两者都不动。
++    await convergeRoot(ports(), home, os.homedir(), { role: 'work', agent: 'fake', env: { LITELLM_API_KEY: 'k' } });
++    await fs.mkdir(path.join(home, 'state', 'locks'), { recursive: true });
++    await fs.writeFile(path.join(home, 'state', 'locks', 'work.yaml'), 'version: 1\nskills: {}\n', 'utf8');
++    const before = await snapshotHome(home);
++    const out = path.join(outRoot, 'exported');
++    await materializeRoot(ports(), home, os.homedir(), { role: 'work', agent: 'fake', out, env: { LITELLM_API_KEY: 'k' } });
++    const after = await snapshotHome(home);
++    expect(after).toEqual(before);
++  });
++});
++
++describe('无子进程(materialize 绝不复用 launch 的 spawn 路径)', () => {
++  it('完整导出一次:child_process 的 spawn/exec/execFile 全被替换成炸点仍未触发', async () => {
++    const out = path.join(outRoot, 'exported');
++    await materializeRoot(ports(), home, os.homedir(), { role: 'work', agent: 'fake', out, env: { LITELLM_API_KEY: 'k' } });
++    for (const fn of [childProcess.spawn, childProcess.exec, childProcess.execFile, childProcess.execFileSync]) {
++      expect(vi.isMockFunction(fn)).toBe(true);
++      expect(vi.mocked(fn).mock.calls).toEqual([]);
++    }
++    expect((await fs.lstat(path.join(out, 'skills', 'pdf'))).isSymbolicLink()).toBe(true);
++  });
++});
+diff --git a/packages/core/src/materialize.ts b/packages/core/src/materialize.ts
+new file mode 100644
+index 0000000..459813a
+--- /dev/null
++++ b/packages/core/src/materialize.ts
+@@ -0,0 +1,252 @@
++import { createHash, randomUUID } from 'node:crypto';
++import fs from 'node:fs/promises';
++import path from 'node:path';
++import { NeoError } from './error.js';
++import type { LinkPort } from './link-port.js';
++import { computeSkillFolderHash } from './migrate.js';
++import { validateRoleName } from './names.js';
++import { convergeRoot, type RootPorts, type RootReport } from './roots.js';
++
++/**
++ * academy 票 01:`neo materialize` 的 core 接缝 —— 把 `role × agent` 启动根的
++ * 「资源部分」(技能链接、渲染后的指令文件、MCP 配置、模型文件、root.json)
++ * 物化到外部目录,**不启动任何进程**。
++ * 产物由 `convergeRoot`(与 `roots/<role>/<agent>/` 同一条渲染路径)产出,
++ * 同形、不允许第二份实现;落盘走「暂存 + rename」,禁止半写。
++ * 只读保证:除 root 目标外,不写 NEO_HOME 的任何路径(含 state/locks 与 roles)。
++ */
++
++export interface MaterializeOptions {
++  role: string;
++  agent: string;
++  /** 外部目标目录(调用方保证绝对路径;`~` 展开在 CLI 层)。 */
++  out: string;
++  env?: Readonly<Record<string, string | undefined>>;
++}
++
++/** 与 `convergeRoot` 同款端口;`now` 只影响 root.json 的 createdAt(清单不含)。 */
++export type MaterializePorts = RootPorts;
++
++export interface MaterializeSkillEntry {
++  name: string;
++  /** 内容哈希(与 update/migrate 同一 `computeSkillFolderHash` 约定)。 */
++  hash: string;
++  /** 胜出的装配层:角色名或 default(同名胜者可读)。 */
++  source: string;
++}
++
++export interface MaterializeManifest {
++  ok: true;
++  role: string;
++  agent: string;
++  outDir: string;
++  skills: MaterializeSkillEntry[];
++  /** out 内相对文件名(未渲染 → null);servers = default ∪ role 合并后的 server 数。 */
++  mcp: { file: string | null; servers: number };
++  /** out 内相对文件名(未渲染 → null);不含 env 引用值(密钥不落清单)。 */
++  model: { file: string | null; providers: number; default: string | null };
++  /** 资源集合指纹:sha256(role/agent/skills/mcp/model 的规范化 JSON;与时间戳、outDir 无关)。 */
++  hash: string;
++}
++
++export interface MaterializeResult {
++  outDir: string;
++  manifest: MaterializeManifest;
++}
++
++/** root.json 标记(与 convergeRoot 写出的形状一致)。 */
++interface RootMarker {
++  version: number;
++  role: string;
++  agent: string;
++}
++
++async function readMarker(dir: string): Promise<RootMarker | null> {
++  try {
++    const raw: unknown = JSON.parse(await fs.readFile(path.join(dir, 'root.json'), 'utf8'));
++    if (
++      typeof raw === 'object' &&
++      raw !== null &&
++      (raw as { version?: unknown }).version === 1 &&
++      typeof (raw as { role?: unknown }).role === 'string' &&
++      typeof (raw as { agent?: unknown }).agent === 'string'
++    ) {
++      return raw as unknown as RootMarker;
++    }
++    return null;
++  } catch {
++    return null;
++  }
++}
++
++/** 与目标同目录的暂存名:同文件系统,rename 才可靠;`.` 前缀避免被当成正式产物。 */
++function stagingFor(out: string): string {
++  return path.join(
++    path.dirname(out),
++    `.${path.basename(out)}.materialize-${randomUUID()}.tmp`,
++  );
++}
++
++/**
++ * 链接安全删除:目录链接(win junction / POSIX symlink)先经 link 端口解链,
++ * 绝不把删除操作穿透到角色技能或用户全局目录的真实内容。
++ */
++async function removeMaterializedTree(link: LinkPort, dir: string): Promise<void> {
++  for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
++    const abs = path.join(dir, entry.name);
++    const info = await fs.lstat(abs);
++    if (info.isSymbolicLink()) {
++      await link.unlink(abs);
++    } else if (info.isDirectory()) {
++      await removeMaterializedTree(link, abs);
++      await fs.rmdir(abs);
++    } else {
++      await fs.unlink(abs);
++    }
++  }
++}
++
++type OutState = { kind: 'new' } | { kind: 'empty' } | { kind: 'owned' };
++
++/** 拒绝条件先于任何写入:`--out` 是文件/链接,或目录里有非本命令产物 → state 错。 */
++async function assertOutUsable(out: string, role: string, agent: string): Promise<OutState> {
++  let info: Awaited<ReturnType<typeof fs.lstat>>;
++  try {
++    info = await fs.lstat(out);
++  } catch (error) {
++    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'new' };
++    throw error;
++  }
++  if (!info.isDirectory()) {
++    throw new NeoError('state', `--out is not a directory: ${out}`);
++  }
++  const contents = await fs.readdir(out);
++  if (contents.length === 0) return { kind: 'empty' };
++  const marker = await readMarker(out);
++  if (marker === null) {
++    throw new NeoError(
++      'state',
++      `--out already exists and is not a neo materialize product (missing root.json marker): ${out}`,
++    );
++  }
++  if (marker.role !== role || marker.agent !== agent) {
++    throw new NeoError(
++      'state',
++      `--out is a neo materialize product for a different target ` +
++        `(has role="${marker.role}" agent="${marker.agent}", requested role="${role}" agent="${agent}"); ` +
++        `choose another --out or remove the directory`,
++    );
++  }
++  return { kind: 'owned' };
++}
++
++function manifestHash(manifest: Omit<MaterializeManifest, 'hash' | 'outDir' | 'ok'>): string {
++  const canonical = JSON.stringify({
++    role: manifest.role,
++    agent: manifest.agent,
++    skills: manifest.skills,
++    mcp: manifest.mcp,
++    model: manifest.model,
++  });
++  return createHash('sha256').update(canonical, 'utf8').digest('hex');
++}
++
++/**
++ * 替换既有产物的「换出再换入」:旧根先原子改名成暂存兄弟(`.out.old-<uuid>.tmp`),
++ * 再把新根 rename 进来,最后才删旧根。任一 rename 失败都把旧根改回 —— out 要么旧要么新,绝不半写。
++ */
++async function swapOutOwned(link: LinkPort, out: string, staging: string): Promise<void> {
++  const backup = path.join(
++    path.dirname(out),
++    `.${path.basename(out)}.old-${randomUUID()}.tmp`,
++  );
++  await fs.rename(out, backup);
++  try {
++    await fs.rename(staging, out);
++  } catch (error) {
++    // 换入失败:旧根原地改回,out 保持旧态;暂存由调用方清理,绝不留两个真相。
++    await fs.rename(backup, out).catch(() => undefined);
++    throw new NeoError(
++      'failure',
++      `materialize: swap into ${out} failed (${(error as Error).message}); ` +
++        `old root restored (or preserved at ${backup}), nothing half-written`,
++    );
++  }
++  await removeMaterializedTree(link, backup).catch(() => undefined);
++  await fs.rm(backup, { recursive: true, force: true }).catch(() => undefined);
++}
++
++export async function materializeRoot(
++  ports: MaterializePorts,
++  home: string,
++  homedir: string,
++  opts: MaterializeOptions,
++): Promise<MaterializeResult> {
++  validateRoleName(opts.role);
++  const outState = await assertOutUsable(opts.out, opts.role, opts.agent);
++
++  const staging = stagingFor(opts.out);
++  let report: RootReport;
++  try {
++    report = await convergeRoot(ports, home, homedir, {
++      role: opts.role,
++      agent: opts.agent,
++      root: staging,
++      ...(opts.env !== undefined ? { env: opts.env } : {}),
++    });
++  } catch (error) {
++    // 中途失败:清掉半套暂存(链接只解链不穿透),绝不 rename 到 out。
++    await removeMaterializedTree(ports.link, staging).catch(() => undefined);
++    await fs.rm(staging, { recursive: true, force: true }).catch(() => undefined);
++    throw error;
++  }
++
++  try {
++    if (outState.kind === 'owned') {
++      // 只替换「本命令产物」(marker 已核验):换出旧根 → 换入新根 → 删旧根。
++      await swapOutOwned(ports.link, opts.out, staging);
++    } else {
++      // Windows 的 rename 不允许落到已存在目录(哪怕是空壳);先摘掉。
++      if (outState.kind === 'empty') await fs.rmdir(opts.out);
++      await fs.rename(staging, opts.out);
++    }
++  } catch (error) {
++    if (error instanceof NeoError) throw error; // swap 路径自带完整交代
++    // new/empty 换入失败:out 未受损 → 清掉暂存,只报失败。
++    await removeMaterializedTree(ports.link, staging).catch(() => undefined);
++    await fs.rm(staging, { recursive: true, force: true }).catch(() => undefined);
++    throw new NeoError(
++      'failure',
++      `materialize: rename into ${opts.out} failed (${(error as Error).message}); staging cleaned, out unchanged`,
++    );
++  }
++
++  // 清单:与渲染同一来源(convergeRoot 报告的 skillSources = default ∪ role 胜者),
++  // hash 复用技能内容哈希约定;source = 胜出的装配层(角色名或 default)。
++  const skills: MaterializeSkillEntry[] = [];
++  for (const skill of report.skillSources) {
++    skills.push({
++      name: skill.name,
++      hash: await computeSkillFolderHash(skill.dir),
++      source: skill.role,
++    });
++  }
++  const body: Omit<MaterializeManifest, 'hash' | 'outDir' | 'ok'> = {
++    role: opts.role,
++    agent: opts.agent,
++    skills,
++    mcp: {
++      file: report.mcp.file === null ? null : path.relative(staging, report.mcp.file),
++      servers: report.mcp.servers,
++    },
++    model: {
++      file: report.models.file === null ? null : path.relative(staging, report.models.file),
++      providers: report.models.providers,
++      default: report.models.default,
++    },
++  };
++  return {
++    outDir: opts.out,
++    manifest: { ok: true, outDir: opts.out, ...body, hash: manifestHash(body) },
++  };
++}
+diff --git a/packages/core/src/roots.ts b/packages/core/src/roots.ts
+index b02d3ac..29aa910 100644
+--- a/packages/core/src/roots.ts
++++ b/packages/core/src/roots.ts
+@@ -48,6 +48,8 @@ export interface RootReport {
+   supportLevel: AgentIsolation['supportLevel'];
+   skills: { added: number; kept: number; removed: number; replaced: number };
+   desiredSkills: readonly string[];
++  /** 每个 desired 技能的装配胜者(materialize 清单的 source 角色;dir = 内容所在)。 */
++  skillSources: { name: string; role: string; dir: string }[];
+   instruction: { file: string; written: boolean };
+   auth: readonly string[];
+   shared: readonly string[];
+@@ -96,16 +98,21 @@ async function listDirOrEmpty(dir: string): Promise<import('node:fs').Dirent[]>
+   }
+ }
+ 
+-/** default ∪ role 的技能名(default 先、role 后位覆盖同名来源)。 */
+-async function desiredSkillSources(home: string, role: string): Promise<Map<string, string>> {
+-  const sources = new Map<string, string>();
+-  const roles = role === 'default' ? ['default'] : ['default', role];
+-  for (const sourceRole of roles) {
++/** default ∪ role 的技能名(default 先、role 后位覆盖同名来源);目录与胜者角色一并给。 */
++async function desiredSkillSources(
++  home: string,
++  role: string,
++): Promise<{ dirs: Map<string, string>; roles: Map<string, string> }> {
++  const dirs = new Map<string, string>();
++  const roles = new Map<string, string>();
++  const sourceRoles = role === 'default' ? ['default'] : ['default', role];
++  for (const sourceRole of sourceRoles) {
+     for (const entry of await listDirOrEmpty(roleSkillsDir(home, sourceRole))) {
+-      sources.set(entry.name, path.join(roleSkillsDir(home, sourceRole), entry.name));
++      dirs.set(entry.name, path.join(roleSkillsDir(home, sourceRole), entry.name));
++      roles.set(entry.name, sourceRole);
+     }
+   }
+-  return sources;
++  return { dirs, roles };
+ }
+ 
+ async function convergeSkillLinks(
+@@ -236,7 +243,7 @@ export async function convergeRoot(
+   const root = opts.root ?? rootDir(home, role, opts.agent);
+   await fs.mkdir(root, { recursive: true });
+ 
+-  const desired = await desiredSkillSources(home, role);
++  const { dirs: desired, roles: sourceRoles } = await desiredSkillSources(home, role);
+   const skillResult = await convergeSkillLinks(
+     ports.link,
+     path.join(root, isolate.skillsDir),
+@@ -468,6 +475,12 @@ export async function convergeRoot(
+       replaced: skillResult.replaced,
+     },
+     desiredSkills: [...desired.keys()].sort(),
++    skillSources: [...desired.keys()].sort().flatMap((name) => {
++      const dir = desired.get(name);
++      const sourceRole = sourceRoles.get(name);
++      if (dir === undefined || sourceRole === undefined) return [];
++      return [{ name, role: sourceRole, dir }];
++    }),
+     instruction: { file: instructionFile, written: instructionText.length > 0 },
+     auth,
+     shared,
+-- 
+2.56.0.windows.4.niugit
+
