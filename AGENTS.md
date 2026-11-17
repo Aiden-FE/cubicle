@@ -69,6 +69,7 @@ Windows 优先的桌面应用（Electron + React + Three.js），不绑定任何
 - **多公司并行**：切公司不阻塞，程序退出才中断
 - **定时上下班**：90s 宽限 + 落盘 + 可恢复；override 必备
 - v1 自用：**不做账号 / 跨设备同步 / 计费**
+- **跨仓库边界**：`neo/`（同级目录）与 `~/.neo` 对 Cubicle 侧 agent 一律**只读**；需要 Neo 改动只能在 `.scratch/academy/neo-tickets/` 开「只含现象与期望」的交接票，由 lead 转交。详见 `.scratch/academy/impl/SCOPE.md`。
 - 多员工协作 = wayfinder 决策 16 号票已关闭，**超出本次范围**（要做请开新的 wayfinder effort）
 
 ## 代码约定（M1 起生效）
