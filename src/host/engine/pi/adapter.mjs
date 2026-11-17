@@ -8,9 +8,11 @@
  *   engines/pi/auth.json        optional BYOK auth store
  *   engines/pi/employee-<id>/   agent dir + session dir + workspace
  *
- * Capability injection in this ticket: the employee's frozen role persona
- * goes into the system prompt, and the role's tool list becomes the session
- * allowlist (skills/MCP land in ticket 05's capability wiring).
+ * Capability injection: the employee's role persona goes into the system
+ * prompt, the role's tool list becomes the session allowlist, and 票 a02's
+ * academy assembly lands the role's skills (links in `<agentDir>/skills`,
+ * noSkills + additionalSkillPaths) and MCP (`<agentDir>/mcp.json` + built-in
+ * MCP extension) — per employee, roles never see each other.
  *
  * Runtime policy (ticket 07): an inline pi extension runs the host policy
  * gate at every tool_call — a denied call never executes, and the verdict
@@ -23,7 +25,7 @@
  * session file) is re-opened after a host restart, so a conversation can
  * continue (票 04: 可续).
  */
-import { existsSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, statSync } from "node:fs";
 import path from "node:path";
 
 import { appError } from "../../../shared/apperror.mjs";
@@ -156,6 +158,22 @@ export function createPiAdapter({ dataDir, moduleImporter }) {
     const persona = String(roleManifest.persona ?? "").trim();
     const roleLabel = String(employee?.roleName ?? employee?.role?.name ?? employee?.name ?? "员工");
     const employeeName = String(employee?.name ?? "员工");
+
+    // 票 a02 角色隔离: pi's SDK otherwise folds in the machine's global skill
+    // roots (~/.agents/skills & friends — 串味). `noSkills: true` turns every
+    // default off; `additionalSkillPaths` re-enables exactly this employee's
+    // skills dir — the junction links the academy assembler put there.
+    const skillsDir = path.join(session.agentDir, "skills");
+    mkdirSync(skillsDir, { recursive: true });
+    // MCP: the assembler renders pi-native <agentDir>/mcp.json when the role
+    // declares servers; the built-in MCP extension is only pulled in then, so
+    // employees without MCP behave exactly as before this ticket.
+    const mcpReady = existsSync(path.join(session.agentDir, "mcp.json"));
+    const extensionFactories = [
+      policyExtension(onEvent, session.workspaceDir),
+      ...(mcpReady && typeof pi.createMcpExtension === "function" ? [pi.createMcpExtension()] : []),
+    ];
+
     const resourceLoader = new pi.DefaultResourceLoader({
       cwd: session.workspaceDir,
       agentDir: session.agentDir,
@@ -163,7 +181,9 @@ export function createPiAdapter({ dataDir, moduleImporter }) {
         ? [`你是员工「${employeeName}」，角色：${roleLabel}。${persona}`]
         : [`你是员工「${employeeName}」，角色：${roleLabel}。`],
       noExtensions: true,
-      extensionFactories: [policyExtension(onEvent, session.workspaceDir)],
+      noSkills: true,
+      additionalSkillPaths: [skillsDir],
+      extensionFactories,
     });
     await resourceLoader.reload();
 
