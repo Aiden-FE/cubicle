@@ -28,7 +28,7 @@ async function main() {
     { existsSync },
     path,
     { parseEnvelope, createEvent, TOPICS },
-    { readModelLibrary, listCompatible, writePiModels, ensureDshProfile },
+    { readModelLibrary, listCompatible, writePiModels },
   ] = await Promise.all([
     import("./store.mjs"),
     import("./service.mjs"),
@@ -50,11 +50,11 @@ async function main() {
 
   const store = openStore({ dataDir });
   // Ticket 14: the model library is the source of truth. Derive pi's config
-  // and the Cubicle-owned DSH profile before any adapter opens.
+  // here; the per-employee DSH profiles (票 a02) are derived by the dsh
+  // adapter when that employee's ACP server starts — no shared home anymore.
   try {
     const library = readModelLibrary(store.dataDir);
     writePiModels(store.dataDir, library);
-    ensureDshProfile(store.dataDir, library);
   } catch {
     // A corrupt library must not keep the office from booting; the settings
     // page reports the load error and adapters fail with 未配置模型.

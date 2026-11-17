@@ -16,7 +16,6 @@ import { existsSync } from "node:fs";
 import {
   deleteModel,
   deleteProvider,
-  ensureDshProfile,
   publicModelLibrary,
   readModelLibrary,
   resolveModelForManifest,
@@ -239,11 +238,9 @@ export function createService({ store, hostInfo, runManager, git, duty, enginePr
     } catch {
       // A bad provider entry must not block saving the rest of the library.
     }
-    try {
-      ensureDshProfile(store.dataDir, library);
-    } catch {
-      // The dsh profile is only consumed by the dsh adapter.
-    }
+    // 票 a02: dsh profiles are per employee now; the adapter re-derives the
+    // employee's patch when its ACP server (re)starts, and the library
+    // fingerprint change restarts that server on the next run.
   }
 
   /** @param {string} engine */

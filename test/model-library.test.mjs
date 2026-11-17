@@ -223,10 +223,11 @@ test("pi derivation carries thinkingLevelMap and the DSH patch references env ke
     assert.ok(patch);
     assert.ok(patch.includes("apiKeyEnv"));
     assert.ok(!patch.includes("sk-test-9f2a"), "DSH patch must not contain the raw key");
-    const profile = ensureDshProfile(dir, library);
+    const profile = ensureDshProfile(dir, library, 7);
     assert.ok(profile);
     assert.ok(profile.env.CUBICLE_DSH_KEY_ACME === "sk-test-9f2a");
     assert.ok(readFileSync(path.join(profile.profile, "cordis.patch.yml"), "utf8").includes("provider: \"acme\""));
+    assert.ok(profile.home.includes("employee-7"), "票 a02: dsh home is per employee, no shared home");
 
     writePiModels(dir, library);
     const piFile = readFileSync(path.join(dir, "engines", "pi", "models.json"), "utf8");

@@ -3,22 +3,30 @@
  *
  * Cubicle launches the *installed* DeepSeek Harness desktop binary in Node
  * mode (`ELECTRON_RUN_AS_NODE=1`) with the dsh launcher inside its app.asar,
- * under a Cubicle-owned `DSH_HOME` (`<dataDir>/engines/dsh/home`). The user's
- * `~/.dsh` is never read or written.
+ * under a Cubicle-owned `DSH_HOME`. The user's `~/.dsh` is never read or
+ * written.
+ *
+ * 票 a02 角色隔离: the shared `engines/dsh/home` is DEAD. Each employee gets
+ * their own ACP server process under their own DSH_HOME
+ * (`engines/dsh/employee-<id>/agent`) — the same folder the academy assembler
+ * links the employee's role skills into (`<DSH_HOME>/skills`), with
+ * `DSH_AGENTS_HOME` redirected to a private empty dir so the machine's global
+ * `~/.agents/skills` never leaks in. Two employees running in parallel cannot
+ * see each other's skills. (Rationale for per-employee home vs customSkillDirs
+ * is in the ticket Answer.)
  *
  * ACP gives us persistent sessions, per-session model/reasoning options and
- * semantic updates. One server process hosts all employees; each employee
- * session is addressed by its ACP session id.
+ * semantic updates. Each employee session is addressed by its ACP session id
+ * inside that employee's server.
  */
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 
 import { appError } from "../../../shared/apperror.mjs";
+import { toAcpMcpServers } from "../../academy/neo-mcp.mjs";
 import { readModelLibrary, ensureDshProfile, resolveModelForManifest } from "../../models/library.mjs";
-
-const PROVIDER_ENV_PREFIX = "CUBICLE_DSH_KEY_";
 
 /**
  * @param {string} dataDir
@@ -38,33 +46,28 @@ function defaultDesktopPaths(dataDir) {
  * @property {(event: import("../events.mjs").NormalizedEvent) => void} onEvent
  * @property {string} ref
  *
+ * @typedef {object} DshServer
+ * @property {number} employeeId
+ * @property {string} home            the employee's DSH_HOME (their engine agent dir)
+ * @property {any} child
+ * @property {Promise<void> | null} starting
+ * @property {number} nextId
+ * @property {Map<number, { resolve: (value: any) => void, reject: (err: Error) => void, timer: any }>} pending
+ * @property {Map<string, AcpSessionState>} sessions
+ * @property {Map<string, any>} configOptions
+ * @property {string} serverFingerprint
+ * @property {readline.Interface | null} lines
+ *
  * @param {{ dataDir: string, dshExe?: string, dshEntry?: string }} options
  */
 export function createDshAdapter({ dataDir, dshExe, dshEntry }) {
   const paths = defaultDesktopPaths(dataDir);
   const exe = dshExe || paths.exe;
   const entry = dshEntry || paths.entry;
-  const engineRoot = path.join(dataDir, "engines", "dsh");
-  const home = path.join(engineRoot, "home");
 
-  /** @type {any} */
-  let child = null;
-  /** @type {Promise<void> | null} */
-  let starting = null;
-  let nextId = 1;
-  /** @type {Map<number, { resolve: (value: any) => void, reject: (err: Error) => void, timer: any }>} */
-  const pending = new Map();
-  /** @type {Map<string, AcpSessionState>} */
-  const sessions = new Map();
-  /** @type {Map<string, any>} */
-  const configOptions = new Map();
-  let serverFingerprint = "";
-  /** @type {readline.Interface | null} */
-  let lines = null;
-
-  function installed() {
-    return existsSync(exe) && existsSync(entry);
-  }
+  /** one ACP server per employee (票 a02: never a shared home/process) */
+  /** @type {Map<number, DshServer>} */
+  const servers = new Map();
 
   function libraryFingerprint() {
     try {
@@ -75,65 +78,71 @@ export function createDshAdapter({ dataDir, dshExe, dshEntry }) {
     }
   }
 
-  function stopServer() {
-    for (const [, entry] of pending) {
+  function installed() {
+    return existsSync(exe) && existsSync(entry);
+  }
+
+  /** @param {DshServer} srv */
+  function stopServer(srv) {
+    for (const [, entry] of srv.pending) {
       clearTimeout(entry.timer);
       entry.reject(new Error("dsh ACP server stopped"));
     }
-    pending.clear();
-    sessions.clear();
-    configOptions.clear();
-    if (lines) {
-      lines.close();
-      lines = null;
+    srv.pending.clear();
+    srv.sessions.clear();
+    srv.configOptions.clear();
+    if (srv.lines) {
+      srv.lines.close();
+      srv.lines = null;
     }
-    if (child) {
+    if (srv.child) {
       try {
-        child.stdin?.end();
+        srv.child.stdin?.end();
       } catch {
         // already closed
       }
       try {
-        child.kill();
+        srv.child.kill();
       } catch {
         // already gone
       }
-      child = null;
+      srv.child = null;
     }
-    starting = null;
+    srv.starting = null;
   }
 
-  /** @param {any} message */
-  function send(message) {
-    if (!child?.stdin) throw appError("engine_unavailable", "dsh ACP 进程未启动");
-    child.stdin.write(`${JSON.stringify(message)}\n`);
+  /** @param {DshServer} srv @param {any} message */
+  function send(srv, message) {
+    if (!srv.child?.stdin) throw appError("engine_unavailable", "dsh ACP 进程未启动");
+    srv.child.stdin.write(`${JSON.stringify(message)}\n`);
   }
 
   /**
+   * @param {DshServer} srv
    * @param {string} method
    * @param {any} params
    * @param {number} [timeoutMs]
    */
-  function request(method, params, timeoutMs = 30_000) {
+  function request(srv, method, params, timeoutMs = 30_000) {
     return new Promise((resolve, reject) => {
-      const id = nextId++;
+      const id = srv.nextId++;
       const timer = setTimeout(() => {
-        pending.delete(id);
+        srv.pending.delete(id);
         reject(new Error(`${method} 超时`));
       }, timeoutMs);
-      pending.set(id, { resolve, reject, timer });
+      srv.pending.set(id, { resolve, reject, timer });
       try {
-        send({ jsonrpc: "2.0", id, method, params });
+        send(srv, { jsonrpc: "2.0", id, method, params });
       } catch (err) {
         clearTimeout(timer);
-        pending.delete(id);
+        srv.pending.delete(id);
         reject(err instanceof Error ? err : new Error(String(err)));
       }
     });
   }
 
-  /** Answer server->client requests (permissions + fs shims). */
-  function answerServerRequest(/** @type {any} */ message) {
+  /** Answer server->client requests (permissions + fs shims). @param {DshServer} srv @param {any} message */
+  function answerServerRequest(srv, message) {
     let result = {};
     if (message.method === "session/request_permission") {
       const options = message.params?.options ?? [];
@@ -144,14 +153,14 @@ export function createDshAdapter({ dataDir, dshExe, dshEntry }) {
     } else if (message.method === "fs/write_text_file") {
       result = {};
     }
-    send({ jsonrpc: "2.0", id: message.id, result });
+    send(srv, { jsonrpc: "2.0", id: message.id, result });
   }
 
-  /** @param {any} message */
-  function routeUpdate(message) {
+  /** @param {DshServer} srv @param {any} message */
+  function routeUpdate(srv, message) {
     const params = message.params ?? {};
     const acpSessionId = String(params.sessionId ?? "");
-    const state = sessions.get(acpSessionId);
+    const state = srv.sessions.get(acpSessionId);
     if (!state) return;
     const update = params.update ?? {};
     const type = String(update.sessionUpdate ?? "");
@@ -185,32 +194,33 @@ export function createDshAdapter({ dataDir, dshExe, dshEntry }) {
       return;
     }
     if (type === "config_option_update" && Array.isArray(update.configOptions)) {
-      configOptions.set(acpSessionId, update.configOptions);
+      srv.configOptions.set(acpSessionId, update.configOptions);
     }
   }
 
-  /** @param {any} message */
-  function routeMessage(message) {
+  /** @param {DshServer} srv @param {any} message */
+  function routeMessage(srv, message) {
     if (message.id !== undefined && message.method === undefined) {
-      const waiter = pending.get(message.id);
+      const waiter = srv.pending.get(message.id);
       if (!waiter) return;
-      pending.delete(message.id);
+      srv.pending.delete(message.id);
       clearTimeout(waiter.timer);
       if (message.error) waiter.reject(new Error(`${message.error.message ?? "ACP error"}`));
       else waiter.resolve(message.result);
       return;
     }
     if (message.method && message.id !== undefined) {
-      answerServerRequest(message);
+      answerServerRequest(srv, message);
       return;
     }
-    if (message.method === "session/update") routeUpdate(message);
+    if (message.method === "session/update") routeUpdate(srv, message);
   }
 
-  async function startServer() {
-    if (child && starting === null) return;
-    if (starting) return starting;
-    starting = (async () => {
+  /** Start (or return the in-flight start of) one employee's ACP server. */
+  async function startServer(srv) {
+    if (srv.child && srv.starting === null) return;
+    if (srv.starting) return srv.starting;
+    srv.starting = (async () => {
       if (!installed()) {
         throw appError(
           "engine_not_installed",
@@ -218,15 +228,21 @@ export function createDshAdapter({ dataDir, dshExe, dshEntry }) {
         );
       }
       const library = readModelLibrary(dataDir);
-      const profile = ensureDshProfile(dataDir, library);
+      const profile = ensureDshProfile(dataDir, library, srv.employeeId);
       if (!profile) throw appError("engine_not_configured", "dsh 还没有可用模型：去「设置 → 模型」添加供应商和模型。");
       mkdirSync(profile.profile, { recursive: true });
-      serverFingerprint = libraryFingerprint();
+      // 票 a02: mask the machine's shared agents root (~/.agents/skills —
+      // 串味) behind a per-employee empty dir; the only skills dsh can see are
+      // the academy-linked ones under <DSH_HOME>/skills.
+      const agentsMask = path.join(srv.home, "agents-home");
+      mkdirSync(agentsMask, { recursive: true });
+      srv.serverFingerprint = libraryFingerprint();
       const env = {
         ...process.env,
         ELECTRON_RUN_AS_NODE: "1",
         ELECTRON_NO_ASAR: undefined,
-        DSH_HOME: profile.home,
+        DSH_HOME: srv.home,
+        DSH_AGENTS_HOME: agentsMask,
         ...profile.env,
       };
       delete env.ELECTRON_NO_ASAR;
@@ -236,60 +252,112 @@ export function createDshAdapter({ dataDir, dshExe, dshEntry }) {
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
       });
-      child = proc;
+      srv.child = proc;
       proc.stderr?.setEncoding?.("utf8");
-      proc.stderr?.on("data", (chunk) => process.stderr.write(`dsh: ${String(chunk).slice(-2000)}`));
-      lines = readline.createInterface({ input: proc.stdout });
-      lines.on("line", (line) => {
+      proc.stderr?.on("data", (chunk) => process.stderr.write(`dsh[${srv.employeeId}]: ${String(chunk).slice(-2000)}`));
+      srv.lines = readline.createInterface({ input: proc.stdout });
+      srv.lines.on("line", (line) => {
         let message;
         try {
           message = JSON.parse(line);
         } catch {
           return;
         }
-        routeMessage(message);
+        routeMessage(srv, message);
       });
       proc.on("exit", (code) => {
-        const wasStarting = starting !== null;
-        child = null;
-        starting = null;
+        const wasStarting = srv.starting !== null;
+        srv.child = null;
+        srv.starting = null;
         if (wasStarting) return;
-        for (const [, waiter] of pending) {
+        for (const [, waiter] of srv.pending) {
           clearTimeout(waiter.timer);
           waiter.reject(new Error(`dsh ACP 退出（${code ?? "?"}）`));
         }
-        pending.clear();
-        sessions.clear();
+        srv.pending.clear();
+        srv.sessions.clear();
       });
-      await request("initialize", {
+      await request(srv, "initialize", {
         protocolVersion: 1,
         clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
       });
-      starting = null;
+      srv.starting = null;
     })().catch((err) => {
-      stopServer();
+      stopServer(srv);
       throw err;
     });
-    return starting;
-  }
-
-  function ensureServerCurrent() {
-    const fingerprint = libraryFingerprint();
-    if (child && fingerprint !== serverFingerprint) {
-      // Model-library changed: the running ACP process still holds the old
-      // provider catalog. Restart it; persistent sessions survive on disk.
-      stopServer();
-    }
-    return startServer();
+    return srv.starting;
   }
 
   /**
+   * @param {number} employeeId
+   * @param {string} home the employee's engine agent dir = DSH_HOME
+   * @returns {Promise<DshServer>}
+   */
+  async function ensureServerCurrent(employeeId, home) {
+    let srv = servers.get(employeeId);
+    if (!srv) {
+      srv = {
+        employeeId,
+        home,
+        child: null,
+        starting: null,
+        nextId: 1,
+        pending: new Map(),
+        sessions: new Map(),
+        configOptions: new Map(),
+        serverFingerprint: "",
+        lines: null,
+      };
+      servers.set(employeeId, srv);
+    }
+    if (srv.child && libraryFingerprint() !== srv.serverFingerprint) {
+      // Model-library changed: this employee's ACP process still holds the old
+      // provider catalog. Restart it; persistent sessions survive on disk.
+      stopServer(srv);
+    }
+    await startServer(srv);
+    return srv;
+  }
+
+  /**
+   * 票 a02 MCP: the academy assembler renders the role's servers into the
+   * employee's academy-mcp.json (values already env:VAR-resolved); ACP takes
+   * them per session. No file / empty → [] exactly as today.
+   *
+   * @param {string} agentDir
+   * @returns {unknown[]}
+   */
+  function acpMcpServersFor(agentDir) {
+    const file = path.join(agentDir, "academy-mcp.json");
+    let text;
+    try {
+      text = readFileSync(file, "utf8");
+    } catch {
+      return [];
+    }
+    let doc;
+    try {
+      doc = JSON.parse(text);
+    } catch (err) {
+      throw appError(
+        "academy_mcp_invalid",
+        `${file} 不是合法 JSON（academy 装配的产物）：${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    const serversDoc = doc?.servers;
+    if (typeof serversDoc !== "object" || serversDoc === null || Array.isArray(serversDoc)) return [];
+    return toAcpMcpServers(/** @type {import("../../academy/neo-mcp.mjs").McpServers} */ (serversDoc));
+  }
+
+  /**
+   * @param {DshServer} srv
    * @param {string} acpSessionId
    * @param {any[]} options
    * @param {string} providerKey
    * @param {string} modelId
    */
-  async function setModel(acpSessionId, options, providerKey, modelId) {
+  async function setModel(srv, acpSessionId, options, providerKey, modelId) {
     const modelOption = options.find((/** @type {any} */ option) => option.id === "model");
     const wanted = JSON.stringify([providerKey, modelId]);
     const choice = modelOption?.options
@@ -298,7 +366,7 @@ export function createDshAdapter({ dataDir, dshExe, dshEntry }) {
     if (!choice) {
       throw appError("engine_model_missing", `dsh 的 ACP 模型选项里没有 ${providerKey}/${modelId}：检查设置里的模型库`);
     }
-    const result = await request("session/set_config_option", {
+    const result = await request(srv, "session/set_config_option", {
       sessionId: acpSessionId,
       configId: "model",
       value: wanted,
@@ -307,16 +375,17 @@ export function createDshAdapter({ dataDir, dshExe, dshEntry }) {
   }
 
   /**
+   * @param {DshServer} srv
    * @param {string} acpSessionId
    * @param {any[]} options
    * @param {string | null} effort
    */
-  async function setReasoning(acpSessionId, options, effort) {
+  async function setReasoning(srv, acpSessionId, options, effort) {
     if (!effort) return options;
     const reasoning = options.find((/** @type {any} */ option) => option.id === "reasoning_effort");
     const offered = reasoning?.options?.some((/** @type {any} */ option) => option.value === effort);
     if (!offered) return options;
-    const result = await request("session/set_config_option", {
+    const result = await request(srv, "session/set_config_option", {
       sessionId: acpSessionId,
       configId: "reasoning_effort",
       value: effort,
@@ -333,7 +402,8 @@ export function createDshAdapter({ dataDir, dshExe, dshEntry }) {
     // 票 a01: model choice is pinned on the snapshot itself (v1 kept it under manifest).
     const pins = /** @type {Record<string, unknown>} */ (employee?.roleSnapshot ?? {});
     const resolved = resolveModelForManifest(library, "dsh", pins);
-    await ensureServerCurrent();
+    const srv = await ensureServerCurrent(session.employeeId, session.agentDir);
+    const mcpServers = acpMcpServersFor(session.agentDir);
 
     const previous = typeof session.sessionFile === "string" && session.sessionFile.startsWith("acp:")
       ? session.sessionFile.slice("acp:".length)
@@ -344,10 +414,10 @@ export function createDshAdapter({ dataDir, dshExe, dshEntry }) {
     let resumedId = null;
     if (previous) {
       try {
-        created = await request("session/resume", {
+        created = await request(srv, "session/resume", {
           sessionId: previous,
           cwd: session.workspaceDir,
-          mcpServers: [],
+          mcpServers,
         });
         // ACP's resume reply carries configOptions, not a new sessionId.
         resumedId = previous;
@@ -356,13 +426,13 @@ export function createDshAdapter({ dataDir, dshExe, dshEntry }) {
       }
     }
     if (!created) {
-      created = await request("session/new", { cwd: session.workspaceDir, mcpServers: [] });
+      created = await request(srv, "session/new", { cwd: session.workspaceDir, mcpServers });
     }
     const acpSessionId = String(resumedId ?? created.sessionId);
-    configOptions.set(acpSessionId, created.configOptions ?? []);
-    sessions.set(acpSessionId, { acpSessionId, onEvent, ref: resolved.ref });
-    const options = await setModel(acpSessionId, created.configOptions ?? [], resolved.provider.key, resolved.model.id);
-    await setReasoning(acpSessionId, options, resolved.reasoningEffort);
+    srv.configOptions.set(acpSessionId, created.configOptions ?? []);
+    srv.sessions.set(acpSessionId, { acpSessionId, onEvent, ref: resolved.ref });
+    const options = await setModel(srv, acpSessionId, created.configOptions ?? [], resolved.provider.key, resolved.model.id);
+    await setReasoning(srv, acpSessionId, options, resolved.reasoningEffort);
 
     let settled = false;
     let aborted = false;
@@ -373,6 +443,7 @@ export function createDshAdapter({ dataDir, dshExe, dshEntry }) {
         aborted = false;
         try {
           const result = await request(
+            srv,
             "session/prompt",
             { sessionId: acpSessionId, prompt: [{ type: "text", text }] },
             30 * 60_000,
@@ -401,7 +472,7 @@ export function createDshAdapter({ dataDir, dshExe, dshEntry }) {
         // ACP cancel is a notification (the server answers by settling the
         // in-flight prompt with stopReason=cancelled).
         try {
-          send({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId: acpSessionId } });
+          send(srv, { jsonrpc: "2.0", method: "session/cancel", params: { sessionId: acpSessionId } });
         } catch {
           // process already gone
         }
@@ -422,10 +493,11 @@ export function createDshAdapter({ dataDir, dshExe, dshEntry }) {
     resumes: true,
     installed,
     /**
-     * Synchronous best-effort cleanup for host exit.
+     * Synchronous best-effort cleanup for host exit — every employee's server.
      */
     shutdown() {
-      stopServer();
+      for (const [, srv] of servers) stopServer(srv);
+      servers.clear();
     },
     configFingerprint() {
       return libraryFingerprint();
