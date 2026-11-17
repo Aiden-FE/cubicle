@@ -9,7 +9,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] pi：员工 A 的 run 里只能看到 A 的技能（断言 `~/.agents/skills` 里的技能**不出现**）
 - [ ] codex：`$CODEX_HOME/skills/<name>` 就位，且不写 `CODEX_HOME` 之外的任何用户目录
