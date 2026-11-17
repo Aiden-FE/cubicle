@@ -14,8 +14,9 @@ Windows 优先的桌面应用（Electron + React + Three.js），不绑定任何
 1. `README.md` —— 门面与下一步
 2. `.scratch/v1/README.md` —— **研发票总览**（18 张、依赖表、怎么取票）
 3. `.scratch/cubicle/map.md` —— 决策地图（15 条决策索引 + 雾区 + 范围边界）
-4. `GLOSSARY.md` —— 领域术语（公司/项目组/工位/员工/角色/任务/会话/产出）
-5. 与任务相关的那张票的 `## Answer`（在 `.scratch/cubicle/issues/`）
+4. `GLOSSARY.md` —— 领域术语（公司/项目组/工位/员工/角色/学院/领域/技能/MCP/任务/会话/产出）
+5. `.scratch/academy/map.md` —— **员工学院 effort**（Neo 集成、技能/MCP 下发、角色隔离）
+6. 与任务相关的那张票的 `## Answer`（在 `.scratch/cubicle/issues/` 或 `.scratch/academy/issues/`）
 
 ## 票据约定（local-markdown wayfinder）
 
