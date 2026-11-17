@@ -10,7 +10,7 @@ import { appError } from "../src/shared/apperror.mjs";
 
 /**
  * @param {string} name
- * @param {{ adapter?: any, dataDirPrefix?: string, drainTimeoutMs?: number, runTimeoutMs?: number }} [options]
+ * @param {{ adapter?: any, assemble?: (ctx: { employee: unknown, engine: string }) => Promise<{ fingerprint: string } | null>, dataDirPrefix?: string, drainTimeoutMs?: number, runTimeoutMs?: number }} [options]
  */
 async function withManager(name, options = {}) {
   const { adapter, assemble, dataDirPrefix = `cubicle-runs-${name}-`, drainTimeoutMs, runTimeoutMs } = options;
@@ -1018,6 +1018,7 @@ test("academy assemble runs before the engine opens; a new fingerprint retires t
   const stub = makeStub();
   const wrapped = {
     ...stub,
+    /** @param {{ employee: any, session: any, onEvent: (event: any) => void }} input */
     async open(input) {
       order.push("open");
       return stub.open(input);

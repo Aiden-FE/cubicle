@@ -216,7 +216,10 @@ export function createDshAdapter({ dataDir, dshExe, dshEntry }) {
     if (message.method === "session/update") routeUpdate(srv, message);
   }
 
-  /** Start (or return the in-flight start of) one employee's ACP server. */
+  /**
+   * Start (or return the in-flight start of) one employee's ACP server.
+   * @param {DshServer} srv
+   */
   async function startServer(srv) {
     if (srv.child && srv.starting === null) return;
     if (srv.starting) return srv.starting;
@@ -256,7 +259,7 @@ export function createDshAdapter({ dataDir, dshExe, dshEntry }) {
       proc.stderr?.setEncoding?.("utf8");
       proc.stderr?.on("data", (chunk) => process.stderr.write(`dsh[${srv.employeeId}]: ${String(chunk).slice(-2000)}`));
       srv.lines = readline.createInterface({ input: proc.stdout });
-      srv.lines.on("line", (line) => {
+      srv.lines.on("line", (/** @type {string} */ line) => {
         let message;
         try {
           message = JSON.parse(line);

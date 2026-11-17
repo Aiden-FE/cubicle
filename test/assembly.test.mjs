@@ -18,7 +18,7 @@ import { enginePaths } from "../src/host/engine/paths.mjs";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const VENDOR_CLI = path.join(here, "..", "vendor", "neo", "bin", "neo.js");
 
-/** @returns {Promise<{ dir: string, dispose: () => Promise<void> }>} */
+/** @param {string} name @returns {Promise<{ dir: string, dispose: () => Promise<void> }>} */
 async function withTempDir(name) {
   const dir = await mkdtemp(path.join(tmpdir(), `cubicle-a02-${name}-`));
   return { dir, dispose: () => rm(dir, { recursive: true, force: true }) };
@@ -35,7 +35,7 @@ async function seedSkill(neoHome, role, skill, body) {
   return dir;
 }
 
-/** A store-shaped employee hired from a Neo role projection (source: neo). */
+/** @param {number} id @param {string} name @param {string} roleKey @param {string} engine */
 function neoEmployee(id, name, roleKey, engine) {
   return {
     id,
@@ -96,6 +96,7 @@ test("role deletes a skill: the employee slot goes dangling then removed — nev
     const employee = neoEmployee(1, "小 Pi", "dev", "pi");
 
     const first = await assembler.assemble({ employee, engine: "pi" });
+    assert.ok(first);
     assert.equal(first.skills.length, 1);
     const slot = path.join(enginePaths(dataDir, "pi", 1).agentDir, "skills", "alpha");
 
@@ -106,6 +107,7 @@ test("role deletes a skill: the employee slot goes dangling then removed — nev
 
     // The next assembly resyncs: the slot is gone, and nothing copied remains.
     const second = await assembler.assemble({ employee, engine: "pi" });
+    assert.ok(second);
     assert.deepEqual(second.skills, []);
     const after = await lstat(slot).catch(() => null);
     assert.equal(after, null, "dangling employee-side link removed");
@@ -135,6 +137,7 @@ test("two employees on different roles never share skill trees (role isolation)"
 
     const a = await assembler.assemble({ employee: neoEmployee(1, "A", "alpha-role", "pi"), engine: "pi" });
     const b = await assembler.assemble({ employee: neoEmployee(2, "B", "beta-role", "pi"), engine: "pi" });
+    assert.ok(a && b);
     assert.deepEqual(a.skills.map((s) => s.name), ["alpha-skill"]);
     assert.deepEqual(b.skills.map((s) => s.name), ["beta-skill"]);
 
@@ -188,6 +191,7 @@ test("MCP env:VAR: pi employee gets a rendered <agentDir>/mcp.json (resolved val
       env: { ...process.env, NEO_HOME: neoHome, GITHUB_TOKEN: "tok-42" },
     });
     const outcome = await assembler.assemble({ employee: neoEmployee(1, "A", "dev", "pi"), engine: "pi" });
+    assert.ok(outcome);
     assert.deepEqual(outcome.mcp, [{ name: "github", transport: "stdio" }]);
 
     const agentDir = enginePaths(dataDir, "pi", 1).agentDir;
@@ -216,9 +220,9 @@ test("MCP literal secret: assembly refuses the role (readable error), run never 
     });
     await assert.rejects(
       () => assembler.assemble({ employee: neoEmployee(1, "A", "dev", "pi"), engine: "pi" }),
-      (err) => {
+      (/** @type {{ code?: string, message?: string }} */ err) => {
         assert.equal(err.code, "academy_mcp_invalid");
-        assert.match(err.message, /GITHUB_TOKEN/);
+        assert.match(err.message ?? "", /GITHUB_TOKEN/);
         return true;
       },
     );
@@ -241,6 +245,7 @@ test("no MCP configured: no config files written (three engines still pass empty
       env: { ...process.env, NEO_HOME: neoHome },
     });
     const outcome = await assembler.assemble({ employee: neoEmployee(1, "A", "dev", "pi"), engine: "pi" });
+    assert.ok(outcome, "assembly still succeeds with no MCP");
     assert.deepEqual(outcome.mcp, []);
     const agentDir = enginePaths(dataDir, "pi", 1).agentDir;
     assert.equal(await readFile(path.join(agentDir, "mcp.json"), "utf8").catch(() => null), null);
@@ -265,9 +270,11 @@ test("fingerprint: stable per role content, changes when the role's skills chang
     const employee = neoEmployee(1, "A", "dev", "pi");
     const a1 = await assembler.assemble({ employee, engine: "pi" });
     const a2 = await assembler.assemble({ employee, engine: "pi" });
+    assert.ok(a1 && a2);
     assert.equal(a1.fingerprint, a2.fingerprint);
     await writeFile(path.join(neoHome, "roles", "dev", "skills", "alpha", "SKILL.md"), "ALPHA-V2", "utf8");
     const a3 = await assembler.assemble({ employee, engine: "pi" });
+    assert.ok(a3);
     assert.notEqual(a1.fingerprint, a3.fingerprint);
   } finally {
     await dispose();

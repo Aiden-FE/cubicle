@@ -43,7 +43,11 @@ function seedModels(dataDir) {
  * @returns {{ module: any, captured: { loaderOptions?: any, sessionOptions?: any, factories: any[] } }}
  */
 function fakePiModule() {
-  const captured = { factories: [] };
+  const captured = {
+    factories: /** @type {any[]} */ ([]),
+    loaderOptions: /** @type {any} */ (null),
+    sessionOptions: /** @type {any} */ (null),
+  };
   const model = { provider: "acme", id: "acme-max" };
   const module = {
     ModelRuntime: {
@@ -60,12 +64,13 @@ function fakePiModule() {
       // adapter may call this on the returned object
     },
     DefaultResourceLoader: class {
+      /** @param {any} options */
       constructor(options) {
         captured.loaderOptions = options;
       }
       async reload() {}
     },
-    createAgentSession: async (options) => {
+    createAgentSession: async (/** @type {any} */ options) => {
       captured.sessionOptions = options;
       return {
         session: {
@@ -88,7 +93,7 @@ function fakePiModule() {
 
 /** @param {any} loaderOptions @returns {number} how many MCP extension factories the adapter wired in */
 function mcpFactories(loaderOptions) {
-  return (loaderOptions.extensionFactories ?? []).filter((f) => f && f.__mcp === true).length;
+  return (loaderOptions.extensionFactories ?? []).filter((/** @type {any} */ f) => f && f.__mcp === true).length;
 }
 
 /** @param {string} dataDir @param {number} employeeId */

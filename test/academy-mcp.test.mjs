@@ -15,6 +15,7 @@ import path from "node:path";
 
 import { readRoleMcpServers, resolveMcpEnv, renderPiMcpJson, renderCodexMcpToml, toAcpMcpServers } from "../src/host/academy/neo-mcp.mjs";
 
+/** @param {string} name */
 async function withTempDir(name) {
   const dir = await mkdtemp(path.join(tmpdir(), `cubicle-a02mcp-${name}-`));
   return { dir, dispose: () => rm(dir, { recursive: true, force: true }) };
@@ -49,11 +50,12 @@ test("mcp.yaml with env:VAR refs reads clean", async () => {
   try {
     await seedMcpYaml(dir, "dev", VALID);
     const servers = await readRoleMcpServers(dir, "dev");
+    const anyServers = /** @type {Record<string, any>} */ (servers);
     assert.deepEqual(Object.keys(servers).sort(), ["github", "remote"]);
-    assert.equal(servers.github.command, "npx");
-    assert.deepEqual(servers.github.args, ["-y", "@modelcontextprotocol/server-github"]);
-    assert.equal(servers.github.env.GITHUB_TOKEN, "env:GITHUB_TOKEN");
-    assert.equal(servers.remote.headers.Authorization, "env:MCP_TOKEN");
+    assert.equal(anyServers.github.command, "npx");
+    assert.deepEqual(anyServers.github.args, ["-y", "@modelcontextprotocol/server-github"]);
+    assert.equal(anyServers.github.env.GITHUB_TOKEN, "env:GITHUB_TOKEN");
+    assert.equal(anyServers.remote.headers.Authorization, "env:MCP_TOKEN");
   } finally {
     await dispose();
   }
@@ -63,11 +65,11 @@ test("literal secret in env is rejected with a readable error", async () => {
   const { dir, dispose } = await withTempDir("literal-env");
   try {
     await seedMcpYaml(dir, "dev", ["servers:", "  github:", "    transport: stdio", "    command: npx", "    env:", "      GITHUB_TOKEN: ghp_liveSecret123", ""].join("\n"));
-    await assert.rejects(() => readRoleMcpServers(dir, "dev"), (err) => {
+    await assert.rejects(() => readRoleMcpServers(dir, "dev"), (/** @type {{ code?: string, message?: string }} */ err) => {
       assert.equal(err.code, "academy_mcp_invalid");
-      assert.match(err.message, /github/);
-      assert.match(err.message, /GITHUB_TOKEN/);
-      assert.match(err.message, /env:/);
+      assert.match(err.message ?? "", /github/);
+      assert.match(err.message ?? "", /GITHUB_TOKEN/);
+      assert.match(err.message ?? "", /env:/);
       return true;
     });
   } finally {
@@ -79,10 +81,10 @@ test("literal token in http headers is rejected", async () => {
   const { dir, dispose } = await withTempDir("literal-header");
   try {
     await seedMcpYaml(dir, "dev", ["servers:", "  remote:", "    transport: http", "    url: https://mcp.example.com/mcp", "    headers:", "      Authorization: Bearer sk-live-token", ""].join("\n"));
-    await assert.rejects(() => readRoleMcpServers(dir, "dev"), (err) => {
+    await assert.rejects(() => readRoleMcpServers(dir, "dev"), (/** @type {{ code?: string, message?: string }} */ err) => {
       assert.equal(err.code, "academy_mcp_invalid");
-      assert.match(err.message, /remote/);
-      assert.match(err.message, /Authorization/);
+      assert.match(err.message ?? "", /remote/);
+      assert.match(err.message ?? "", /Authorization/);
       return true;
     });
   } finally {
@@ -106,27 +108,30 @@ test("role servers merge over the default role's, same name wins role-side", asy
     await seedMcpYaml(dir, "default", ["servers:", "  shared:", "    transport: stdio", "    command: default-cmd", ""].join("\n"));
     await seedMcpYaml(dir, "dev", ["servers:", "  shared:", "    transport: stdio", "    command: role-cmd", "  own:", "    transport: stdio", "    command: own-cmd", ""].join("\n"));
     const servers = await readRoleMcpServers(dir, "dev");
-    assert.equal(servers.shared.command, "role-cmd");
-    assert.equal(servers.own.command, "own-cmd");
+    const anyServers = /** @type {Record<string, any>} */ (servers);
+    assert.equal(anyServers.shared.command, "role-cmd");
+    assert.equal(anyServers.own.command, "own-cmd");
   } finally {
     await dispose();
   }
 });
 
 test("env:VAR resolution reads the launch env; a missing var fails readably", () => {
+  /** @type {import("../src/host/academy/neo-mcp.mjs").McpServers} */
   const servers = {
     github: { transport: "stdio", command: "npx", args: [], env: { GITHUB_TOKEN: "env:GITHUB_TOKEN" } },
   };
   const resolved = resolveMcpEnv(servers, { GITHUB_TOKEN: "tok-42" });
-  assert.equal(resolved.github.env.GITHUB_TOKEN, "tok-42");
-  assert.throws(() => resolveMcpEnv(servers, {}), (err) => {
+  assert.equal(/** @type {Record<string, any>} */ (resolved).github.env.GITHUB_TOKEN, "tok-42");
+  assert.throws(() => resolveMcpEnv(servers, {}), (/** @type {{ code?: string, message?: string }} */ err) => {
     assert.equal(err.code, "academy_mcp_env_missing");
-    assert.match(err.message, /GITHUB_TOKEN/);
+    assert.match(err.message ?? "", /GITHUB_TOKEN/);
     return true;
   });
 });
 
 test("pi render: agent-dir mcp.json shape with resolved values", () => {
+  /** @type {import("../src/host/academy/neo-mcp.mjs").McpServers} */
   const servers = {
     github: { transport: "stdio", command: "npx", args: ["-y", "srv"], env: { GITHUB_TOKEN: "env:GITHUB_TOKEN" } },
     remote: { transport: "http", url: "https://x/mcp", headers: { Authorization: "env:MCP_TOKEN" } },
@@ -138,6 +143,7 @@ test("pi render: agent-dir mcp.json shape with resolved values", () => {
 });
 
 test("codex render: config.toml [mcp_servers.*] blocks", () => {
+  /** @type {import("../src/host/academy/neo-mcp.mjs").McpServers} */
   const servers = {
     github: { transport: "stdio", command: "npx", args: ["-y", "srv"], env: { GITHUB_TOKEN: "env:GITHUB_TOKEN" } },
   };
@@ -150,6 +156,7 @@ test("codex render: config.toml [mcp_servers.*] blocks", () => {
 });
 
 test("dsh render: ACP session mcpServers entries (ordered name/value pairs)", () => {
+  /** @type {import("../src/host/academy/neo-mcp.mjs").McpServers} */
   const servers = {
     github: { transport: "stdio", command: "npx", args: ["-y", "srv"], env: { GITHUB_TOKEN: "env:GITHUB_TOKEN" } },
     remote: { transport: "http", url: "https://x/mcp", headers: { Authorization: "env:MCP_TOKEN" } },
