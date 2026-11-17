@@ -37,10 +37,12 @@ async function withTempDir(name) {
 
 /**
  * @param {string} dir
- * @returns {{ store: ReturnType<typeof openStore>, neoHome: string, door: ReturnType<typeof createAcademyPanel>, env: Record<string, string | undefined> }}
  */
 function makeDoor(dir) {
   const neoHome = path.join(dir, "neo-home");
+  // openStore 的返回类型推断很大；和 createAcademyPanel 的 deps 注解放在一起会
+  // 触发 TS 的自引用推断（TS2502），测试里按 any 用即可（运行时行为照常断言）。
+  /** @type {any} */
   const store = openStore({ dataDir: path.join(dir, "data") });
   const env = { ...process.env, NEO_HOME: neoHome };
   const door = createAcademyPanel({ store, nodeBinary: process.execPath, cliEntry: VENDOR_CLI, env });
@@ -50,7 +52,8 @@ function makeDoor(dir) {
 /**
  * Seed a Neo role (dir + optional role.yaml domains + optional skills), then
  * run a01's projection refresh so the store cache has the source='neo' row.
- * @param {string} neoHome @param {ReturnType<typeof openStore>} store
+ * （store 用鸭子类型：`ReturnType<typeof openStore>` 写在这会触发 TS 自引用推断。）
+ * @param {string} neoHome @param {{ syncRoleProjection: (projections: unknown) => unknown }} store
  * @param {{ key: string, domains?: string[], skills?: Record<string,string> }} spec
  */
 async function seedRole(neoHome, store, spec) {
@@ -68,6 +71,7 @@ async function seedRole(neoHome, store, spec) {
 }
 
 /** Seed a library/<domain>/<skill> dir (fixture files, not app behavior). */
+/** @param {string} neoHome @param {string} domain @param {string} skill @param {string} [body] */
 async function seedLibrarySkill(neoHome, domain, skill, body = "BODY") {
   const dir = path.join(neoHome, "library", domain, skill);
   await mkdir(dir, { recursive: true });
@@ -156,8 +160,9 @@ test("list rows: role-layer + domain-layer from ~/.neo, 来源/hash/被引用角
     assert.deepEqual(domainRow.referencedBy, ["editor"]); // 被哪些角色引用 ← role domains
 
     // lock sourceType surfaces as 来源 when Cubicle never installed it.
-    const gitRole = { key: "ops", skills: [{ name: "tool", hash: "h", via: "lock", sourceType: "git" }] };
-    store.syncRoleProjection([{ key: "ops", name: "ops", tagline: "", domains: [], skills: gitRole.skills, mcp: [], persona: "" }]);
+    store.syncRoleProjection(/** @type {import("../src/host/academy/neo-roles.mjs").NeoRoleProjection[]} */ ([
+      { key: "ops", name: "ops", tagline: "", domains: [], skills: [{ name: "tool", hash: "h", via: "lock", sourceType: "git" }], mcp: [], persona: "" },
+    ]));
     const snap2 = await door.snapshot();
     const remoteRow = snap2.rows.find((r) => r.resourceKey === "r:ops/tool");
     assert.equal(remoteRow?.kind, "remote");
@@ -183,7 +188,7 @@ test("dispatch (下发): role set --domains + converge clears lock-dirty + proje
     assert.doesNotMatch(lock, /dirty:\s*true/);
 
     // a01 projection cache refreshed: 列表上的「引用角色」跟着变 (store row + row).
-    const roleRow = store.listRoles().find((r) => r.key === "editor");
+    const roleRow = store.listRoles().find((/** @type {any} */ r) => r.key === "editor");
     assert.deepEqual(roleRow?.domains, ["demo"]);
     const domainRow = out.snapshot.rows.find((r) => r.resourceKey === "d:demo/hello");
     assert.deepEqual(domainRow?.referencedBy, ["editor"]);
@@ -213,7 +218,7 @@ test("remote 来源: first dispatch asks once (error code), confirmed retry pers
 
     await door.dispatch({ domain: "demo", roles: ["editor"], confirmed: true });
     const marks = store.listAcademyMarks();
-    const mark = marks.find((m) => m.resourceKey === "d:demo");
+    const mark = marks.find((/** @type {any} */ m) => m.resourceKey === "d:demo");
     assert.equal(mark?.remoteAck, true);
     assert.equal(mark?.kind, "remote", "kind/source survive the ack");
 
@@ -264,7 +269,7 @@ test("装 (install) via the vendored CLI from a LOCAL source: echo readable, mar
 
     const out = await door.install({ source: src, target: "domain", targetName: "demo" });
     assert.match(out.echo, /installed hello-panel/);
-    const mark = store.listAcademyMarks().find((m) => m.resourceKey === "d:demo");
+    const mark = store.listAcademyMarks().find((/** @type {any} */ m) => m.resourceKey === "d:demo");
     assert.equal(mark?.kind, "local");
     assert.equal(mark?.source, src);
     const row = out.snapshot.rows.find((r) => r.resourceKey === "d:demo/hello-panel");

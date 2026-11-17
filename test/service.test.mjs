@@ -1888,11 +1888,11 @@ test("academy.* envelopes: snapshot no events, install/dispatch emit domain.chan
     async snapshot() {
       return { readOnly: false, rows: [{ resourceKey: "d:demo/hello" }] };
     },
-    async install(payload) {
+    async install(/** @type {unknown} */ payload) {
       const record = /** @type {{ targetName?: string }} */ (payload ?? {});
       return { ok: /** @type {const} */ (true), echo: `installed into ${record.targetName}`, snapshot: { rows: [] } };
     },
-    async dispatch(payload) {
+    async dispatch(/** @type {unknown} */ payload) {
       const record = /** @type {{ confirmed?: boolean }} */ (payload ?? {});
       if (record.confirmed !== true) throw appError("academy_remote_unconfirmed", "远端来源：第一次下发要确认一次");
       return { ok: /** @type {const} */ (true), echo: "demo → editor", snapshot: { rows: [] } };
