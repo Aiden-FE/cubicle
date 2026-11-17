@@ -449,16 +449,23 @@ function saveViewPrefs(prefs) {
  * @property {RoleManifestData} manifest
  *
  * @typedef {object} RoleSnapshotData
- * @property {string} key
- * @property {string} name
- * @property {string} tagline
- * @property {RoleManifestData} manifest
+ *   票 a01 v2: hiring pins versions, copies nothing — roleKey + skill hashes +
+ *   the hire-time model choice. Display names / persona ride the role row.
+ * @property {string} roleKey
+ * @property {string[]} domains
+ * @property {Record<string, string>} locks
+ * @property {string} engine
+ * @property {string} model
+ * @property {string} [provider]
+ * @property {string} [reasoningEffort]
+ * @property {{ tokenBudgetPerTask: number }} cost
  *
  * @typedef {object} DeskOccupantData
  * @property {number} id
  * @property {string} name
  * @property {number} roleId
  * @property {string} hiredAt
+ * @property {string} roleName 票 a01: live role-row name
  * @property {RoleSnapshotData} roleSnapshot
  *
  * @typedef {object} DeskData

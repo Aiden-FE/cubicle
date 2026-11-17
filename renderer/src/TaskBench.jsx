@@ -396,7 +396,7 @@ export function TaskBench({ snapshot, onClose, initialTaskId = null }) {
           <option value="">（选一名在岗员工）</option>
           {employees.map((occupant) => (
             <option key={occupant.id} value={String(occupant.id)}>
-              {occupant.name}（{occupant.roleSnapshot.name}）
+              {occupant.name}（{occupant.roleName ?? occupant.roleSnapshot.roleKey}）
             </option>
           ))}
         </select>

@@ -176,7 +176,7 @@ export function ChatOverlay({ employee, onClose }) {
         <div>
           <div className="chat-title" data-testid="chat-title">{employee.name}</div>
           <div className="chat-subtitle">
-            {employee.roleSnapshot.name} · 引擎 {employee.roleSnapshot.manifest.engine}
+            {employee.roleName ?? employee.roleSnapshot.roleKey} · 引擎 {employee.roleSnapshot.engine}
             <span className={`chat-state ${running ? "running" : ""}`} data-testid="chat-running" data-running={running ? "true" : "false"}>
               {running ? "工作中…" : "空闲"}
             </span>

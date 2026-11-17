@@ -150,13 +150,14 @@ export function lookById(id) {
  * The look an employee renders with. Rows hired before ticket 18 have no
  * stored look: fall back to the role's default face, never to a blank one.
  *
- * @param {{ appearance?: string | null, roleSnapshot?: { key?: string } } | null} occupant
+ * @param {{ appearance?: string | null, roleSnapshot?: { roleKey?: string, key?: string } } | null} occupant
  * @returns {EmployeeLook}
  */
 export function lookFor(occupant) {
   const stored = lookById(String(occupant?.appearance ?? ""));
   if (stored) return stored;
-  const roleKey = String(occupant?.roleSnapshot?.key ?? "programmer");
+  // 票 a01: v2 snapshots carry roleKey; old rows / role picks still carry key.
+  const roleKey = String(occupant?.roleSnapshot?.roleKey ?? occupant?.roleSnapshot?.key ?? "programmer");
   return lookById(ROLE_DEFAULT_LOOK[roleKey] ?? "lin") ?? EMPLOYEE_LOOKS[0];
 }
 

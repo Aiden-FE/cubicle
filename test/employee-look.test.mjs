@@ -31,8 +31,9 @@ test("every look is a complete palette plus a build", () => {
 
 test("a stored id wins, an unknown id falls back to the role's face", () => {
   assert.equal(lookFor({ appearance: "zhao" }).id, "zhao");
+  // 票 a01: v2 snapshots key the role by roleKey; old rows / role picks still work.
   assert.equal(lookFor({ appearance: "does-not-exist", roleSnapshot: { key: "tester" } }).id, "wu");
-  assert.equal(lookFor({ appearance: null, roleSnapshot: { key: "pm" } }).id, "qin");
+  assert.equal(lookFor({ appearance: null, roleSnapshot: { roleKey: "pm" } }).id, "qin");
   // an employee hired before the look existed still renders as somebody
   assert.ok(lookFor({}).id.length > 0);
   assert.equal(lookFor(null).id, EMPLOYEE_LOOKS[0].id);

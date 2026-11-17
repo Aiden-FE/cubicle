@@ -226,19 +226,16 @@ export function createProbeRunner({
       const employee = store.ensureProbeEmployee({
         name: `准入探针·${engine}`,
         engine,
+        // 票 a01: the marker persona rides the dedicated probe role row; the
+        // snapshot pins only probe engine / model / a small cost gate.
+        persona: `${PROBE_MARKER_PREFIX}${marker}\n你是引擎准入探针：按指令报告标记行、执行指定命令，不要做多余的探索。`,
         roleSnapshot: {
-          key: "probe",
-          name: "探针",
-          tagline: "引擎准入探针",
-          manifest: {
-            persona: `${PROBE_MARKER_PREFIX}${marker}\n你是引擎准入探针：按指令报告标记行、执行指定命令，不要做多余的探索。`,
-            skills: [],
-            tools: ["read", "powershell"],
-            mcpServers: [],
-            engine,
-            model: "default",
-            cost: { tokenBudgetPerTask: 50000 },
-          },
+          roleKey: "cubicle-probe",
+          domains: [],
+          locks: {},
+          engine,
+          model: "default",
+          cost: { tokenBudgetPerTask: 50000 },
         },
       });
 

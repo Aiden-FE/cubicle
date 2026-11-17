@@ -87,11 +87,12 @@ test("employee.hire stores the explicit provider/model/reasoning in the frozen s
       ).reply
     );
     assert.equal(reply.ok, true);
-    const manifest = /** @type {any} */ (reply.payload).employee.roleSnapshot.manifest;
-    assert.equal(manifest.engine, "pi");
-    assert.equal(manifest.provider, "acme");
-    assert.equal(manifest.model, "m1");
-    assert.equal(manifest.reasoningEffort, "low");
+    // 票 a01 v2: model choice is pinned at the snapshot's top level.
+    const pins = /** @type {any} */ (reply.payload).employee.roleSnapshot;
+    assert.equal(pins.engine, "pi");
+    assert.equal(pins.provider, "acme");
+    assert.equal(pins.model, "m1");
+    assert.equal(pins.reasoningEffort, "low");
   } finally {
     dispose();
   }
@@ -129,10 +130,10 @@ test("employee.update changes model + reasoning; a name-only edit survives a rem
       ).reply
     );
     assert.equal(updated.ok, true);
-    const manifest = /** @type {any} */ (updatePayload(updated)).employee.roleSnapshot.manifest;
+    const pins = /** @type {any} */ (updatePayload(updated)).employee.roleSnapshot;
     assert.equal(/** @type {any} */ (updatePayload(updated)).employee.name, "小改二");
-    assert.equal(manifest.model, "m2");
-    assert.equal(manifest.reasoningEffort, undefined);
+    assert.equal(pins.model, "m2");
+    assert.equal(pins.reasoningEffort, undefined);
   } finally {
     dispose();
   }
@@ -167,8 +168,8 @@ test("deleting a model used by an employee auto-reassigns to the next default", 
     assert.equal(deleted.ok, true);
     assert.equal(deleted.payload.reassigned.length, 1);
     const employee = store.employeeById(hired.id);
-    assert.equal(employee?.roleSnapshot.manifest?.model, "m2");
-    assert.equal(employee?.roleSnapshot.manifest?.provider, "acme");
+    assert.equal(employee?.roleSnapshot.model, "m2");
+    assert.equal(employee?.roleSnapshot.provider, "acme");
     const library = JSON.parse(readFileSync(path.join(store.dataDir, "settings", "models.json"), "utf8"));
     assert.deepEqual(library.providers[0].models.map((/** @type {any} */ model) => model.id), ["m2"]);
     assert.equal(library.defaultModel, "m2");
@@ -202,7 +203,7 @@ test("deleting the last compatible model for a busy engine is blocked until a fa
     );
     assert.equal(blocked.ok, false);
     assert.equal(blocked.error?.code, "model_in_use");
-    assert.equal(store.employeeById(hired.id)?.roleSnapshot.manifest?.model, "m1");
+    assert.equal(store.employeeById(hired.id)?.roleSnapshot.model, "m1");
     assert.ok(readFileSync(path.join(store.dataDir, "settings", "models.json"), "utf8").includes("m1"));
   } finally {
     dispose();

@@ -3,8 +3,8 @@ import { test } from "node:test";
 
 import { screenForDesk } from "../renderer/src/scene/deskScreen.js";
 
-const programmer = { roleSnapshot: { key: "programmer" } };
-const pm = { roleSnapshot: { key: "pm" } };
+const programmer = { roleSnapshot: { roleKey: "programmer" } };
+const pm = { roleSnapshot: { roleKey: "pm" } };
 
 /** @param {string | null} activity @param {string | null} tone */
 const running = (activity, tone = null) => /** @type {any} */ ({ working: true, activity, screenTone: tone });

@@ -112,7 +112,7 @@ async function phaseHire(ctx) {
   const snapshotsMatch =
     occupants.length === 2 &&
     occupants[0].roleId === occupants[1].roleId &&
-    occupants[0].roleSnapshot.key === "programmer" &&
+    occupants[0].roleSnapshot.roleKey === "programmer" &&
     JSON.stringify(occupants[0].roleSnapshot) === JSON.stringify(occupants[1].roleSnapshot);
   add("两名员工快照同一角色、同一份冻结清单", snapshotsMatch, JSON.stringify(occupants.map((/** @type {any} */ o) => o?.name)));
 

@@ -68,6 +68,21 @@ async function main() {
     file: engineLedgerFile(store.dataDir, "codex"),
     log: (message) => process.stderr.write(`host boot sweep: ${message}\n`),
   }).catch(() => {});
+  // 票 a01: 启动时刷新学院投影 — read the Neo home (NEO_HOME override > ~/.neo)
+  // and project it into the role cache. Deliberately fire-and-forget: a
+  // missing / empty / half-written ~/.neo must never block the office; the
+  // academy shows its empty state and the preset roster stays put.
+  void refreshAcademyProjection();
+  async function refreshAcademyProjection() {
+    try {
+      const { resolveNeoHome, readNeoRoleProjections } = await import("./academy/neo-roles.mjs");
+      const projections = await readNeoRoleProjections(resolveNeoHome({ env: process.env }));
+      store.syncRoleProjection(projections);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`academy projection refresh failed: ${reason}\n`);
+    }
+  }
   const hostInfo = {
     pid: process.pid,
     startedAt: new Date().toISOString(),

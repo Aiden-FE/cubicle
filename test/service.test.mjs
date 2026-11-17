@@ -200,7 +200,7 @@ test("employee.hire occupies the desk, answers with employee + desk, and emits d
     );
     assert.equal(reply.ok, true);
     assert.equal(/** @type {any} */ (reply.payload).employee.name, "E2E 程序员");
-    assert.equal(/** @type {any} */ (reply.payload).employee.roleSnapshot.manifest.engine, "pi");
+    assert.equal(/** @type {any} */ (reply.payload).employee.roleSnapshot.engine, "pi");
     assert.equal(/** @type {any} */ (reply.payload).desk.occupant.name, "E2E 程序员");
     assert.equal(events.length, 1);
     assert.equal(events[0].topic, "domain.changed");
@@ -210,7 +210,7 @@ test("employee.hire occupies the desk, answers with employee + desk, and emits d
     const snapshot = /** @type {any} */ (service.handle(createInvoke("h5", "office.get", {})).reply.payload);
     const occupied = snapshot.desks.filter((/** @type {any} */ d) => d.occupant !== null);
     assert.equal(occupied.length, 1);
-    assert.equal(occupied[0].occupant.roleSnapshot.key, "programmer");
+    assert.equal(occupied[0].occupant.roleSnapshot.roleKey, "programmer");
   } finally {
     await dispose();
   }
@@ -1377,7 +1377,7 @@ test("employee.setEngine requires admission and rewrites the frozen snapshot", a
     store.setEngineEnabled({ engine: "codex", enabled: true, manualOverride: true });
     const ok = service.handle(createInvoke("e10", "employee.setEngine", { employeeId: employee.id, engine: "codex" }));
     assert.equal(ok.reply.ok, true);
-    assert.equal(/** @type {any} */ (store.employeeById(employee.id)).roleSnapshot.manifest.engine, "codex");
+    assert.equal(/** @type {any} */ (store.employeeById(employee.id)).roleSnapshot.engine, "codex");
   } finally {
     await dispose();
   }

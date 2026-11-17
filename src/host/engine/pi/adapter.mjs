@@ -116,13 +116,16 @@ export function createPiAdapter({ dataDir, moduleImporter }) {
    * @returns {Promise<{ prompt(text: string): Promise<void>, abort(): Promise<void>, sessionFile(): string | null }>}
    */
   async function open({ employee, session, onEvent }) {
-    /** One hop into the frozen role snapshot, shared by model/tools/persona. */
-    const manifest = /** @type {Record<string, any>} */ (employee?.roleSnapshot?.manifest ?? {});
+    // 票 a01: the frozen snapshot pins the model choice (engine / provider /
+    // model / reasoning effort); persona and tools are role content and ride
+    // the live projection-cache row (employee.role) the store attaches.
+    const pins = /** @type {Record<string, any>} */ (employee?.roleSnapshot ?? {});
+    const roleManifest = /** @type {Record<string, any>} */ (employee?.role?.manifest ?? {});
 
     const engineRoot = path.join(dataDir, "engines", "pi");
     const modelsPath = path.join(engineRoot, "models.json");
     const library = readModelLibrary(dataDir);
-    const resolved = resolveModelForManifest(library, "pi", manifest);
+    const resolved = resolveModelForManifest(library, "pi", pins);
     if (!existsSync(modelsPath)) {
       throw appError(
         "engine_not_configured",
@@ -150,8 +153,8 @@ export function createPiAdapter({ dataDir, moduleImporter }) {
         ? pi.SessionManager.open(session.sessionFile, session.sessionsDir, session.workspaceDir)
         : pi.SessionManager.continueRecent(session.workspaceDir, session.sessionsDir);
 
-    const persona = String(manifest.persona ?? "").trim();
-    const roleLabel = String(employee?.roleSnapshot?.name ?? employee?.name ?? "员工");
+    const persona = String(roleManifest.persona ?? "").trim();
+    const roleLabel = String(employee?.roleName ?? employee?.role?.name ?? employee?.name ?? "员工");
     const employeeName = String(employee?.name ?? "员工");
     const resourceLoader = new pi.DefaultResourceLoader({
       cwd: session.workspaceDir,
@@ -164,7 +167,7 @@ export function createPiAdapter({ dataDir, moduleImporter }) {
     });
     await resourceLoader.reload();
 
-    const tools = Array.isArray(manifest.tools) ? /** @type {string[]} */ (manifest.tools) : undefined;
+    const tools = Array.isArray(roleManifest.tools) ? /** @type {string[]} */ (roleManifest.tools) : undefined;
 
     const created = await pi.createAgentSession({
       cwd: session.workspaceDir,

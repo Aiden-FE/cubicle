@@ -48,7 +48,7 @@ export function EngineCard({ employee }) {
     return unsubscribe;
   }, [load]);
 
-  const currentEngine = employee.roleSnapshot.manifest.engine;
+  const currentEngine = employee.roleSnapshot.engine;
   const current = engines?.find((e) => e.engine === currentEngine) ?? null;
   const others = (engines ?? []).filter((e) => e.engine !== currentEngine);
 

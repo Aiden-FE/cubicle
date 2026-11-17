@@ -42,12 +42,32 @@ import { DEFAULT_TASK_TOKEN_BUDGET } from "./cost/budget.mjs";
  * @property {string | null} appearance 票 18: chosen look id (null = role default face)
  * @property {string} hiredAt
  * @property {RoleSnapshot} roleSnapshot
+ * @property {string} roleName 票 a01: live role-row name (the snapshot no longer copies it)
+ * @property {RoleRow | null} [role] 票 a01: the projection-cache row behind this employee (attached on the employee readers the engine uses — persona / tools / MCP ride it now)
  *
  * @typedef {object} RoleSnapshot
- * @property {string} key
+ *   票 a01 v2: hiring pins the version, it copies nothing. Everything the
+ *   academy model says an employee owns is here: which role key, which
+ *   skill hashes, which engine/model choice. Persona / tagline / display
+ *   names live on the role row (the projection cache), not in the snapshot.
+ * @property {string} roleKey
+ * @property {string[]} domains
+ * @property {Record<string, string>} locks    技能名 → hash（Neo 锁钉的版本；旧库快照没有可钉的就是 {}）
+ * @property {string} engine
+ * @property {string} model
+ * @property {string} [provider] ticket 14: model-library provider key
+ * @property {string} [reasoningEffort] ticket 14: selected reasoning level
+ * @property {{ tokenBudgetPerTask: number }} cost
+ *
+ * @typedef {object} RoleSkillEntry
  * @property {string} name
- * @property {string} tagline
- * @property {RoleManifest} manifest
+ * @property {string} hash
+ * @property {"lock" | "dir"} [via]     hash provenance (Neo ledger vs computed from dir content)
+ * @property {string} [sourceType]      from the Neo lock entry (git | local | wellknown)
+ *
+ * @typedef {object} RoleMcpEntry
+ * @property {string} name
+ * @property {string} transport
  *
  * @typedef {object} RoleManifest
  * @property {string} persona
@@ -66,6 +86,11 @@ import { DEFAULT_TASK_TOKEN_BUDGET } from "./cost/budget.mjs";
  * @property {string} name
  * @property {string} tagline
  * @property {RoleManifest} manifest
+ * @property {string[]} domains      票 a01: Neo 角色声明的领域（预设角色 = []）
+ * @property {RoleSkillEntry[]} skills 票 a01: 技能 + 钉住版本（hash）
+ * @property {RoleMcpEntry[]} mcp      票 a01: mcp.yaml 摘要（名称 + 传输），不含密钥
+ * @property {"preset" | "neo" | "probe"} source 票 a01: 行的来源（探针行不进 listRoles）
+ * @property {string | null} syncedAt 票 a01: 投影同步时间（preset = null）
  *
  * @typedef {object} EmployeeSessionRow
  * @property {number} id
@@ -212,6 +237,11 @@ CREATE TABLE IF NOT EXISTS role (
   name TEXT NOT NULL,
   tagline TEXT NOT NULL,
   manifest TEXT NOT NULL,
+  domains TEXT NOT NULL DEFAULT '[]',
+  skills TEXT NOT NULL DEFAULT '[]',
+  mcp TEXT NOT NULL DEFAULT '[]',
+  source TEXT NOT NULL DEFAULT 'preset' CHECK (source IN ('preset', 'neo', 'probe')),
+  synced_at TEXT,
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS employee (
@@ -478,18 +508,12 @@ function parseJsonOr(value, fallback) {
 /** The snapshot a corrupt employee row degrades to: a readable unknown role. */
 /** @type {RoleSnapshot} */
 const UNKNOWN_ROLE_SNAPSHOT = {
-  key: "unknown",
-  name: "未知角色",
-  tagline: "",
-  manifest: {
-    persona: "",
-    skills: [],
-    tools: [],
-    mcpServers: [],
-    engine: "pi",
-    model: "default",
-    cost: { tokenBudgetPerTask: DEFAULT_TASK_TOKEN_BUDGET },
-  },
+  roleKey: "unknown",
+  domains: [],
+  locks: {},
+  engine: "pi",
+  model: "default",
+  cost: { tokenBudgetPerTask: DEFAULT_TASK_TOKEN_BUDGET },
 };
 
 /**
@@ -508,7 +532,8 @@ function toGroup(row) {
 /** Shared columns for reading a desk row joined with its occupant's employee row. */
 const DESK_JOIN = `d.*,
   e.id AS e_id, e.name AS e_name, e.role_id AS e_role_id,
-  e.role_snapshot AS e_role_snapshot, e.appearance AS e_appearance, e.hired_at AS e_hired_at`;
+  e.role_snapshot AS e_role_snapshot, e.appearance AS e_appearance, e.hired_at AS e_hired_at,
+  r.name AS e_role_name`;
 
 /**
  * @param {Record<string, unknown>} row desk row joined with its occupant
@@ -532,6 +557,7 @@ function toDesk(row) {
             appearance: row.e_appearance === null || row.e_appearance === undefined ? null : String(row.e_appearance),
             hiredAt: String(row.e_hired_at),
             roleSnapshot: /** @type {RoleSnapshot} */ (parseJsonOr(row.e_role_snapshot, UNKNOWN_ROLE_SNAPSHOT)),
+            roleName: row.e_role_name === null || row.e_role_name === undefined ? "未知角色" : String(row.e_role_name),
           },
   };
 }
@@ -547,6 +573,12 @@ function toRole(row) {
     name: String(row.name),
     tagline: String(row.tagline),
     manifest: /** @type {RoleManifest} */ (parseJsonOr(row.manifest, {})),
+    // 票 a01: 投影缓存字段。旧库缺列时（SELECT * 读不到）落到安全默认。
+    domains: /** @type {string[]} */ (parseJsonOr(row.domains, [])),
+    skills: /** @type {RoleSkillEntry[]} */ (parseJsonOr(row.skills, [])),
+    mcp: /** @type {RoleMcpEntry[]} */ (parseJsonOr(row.mcp, [])),
+    source: row.source === "neo" || row.source === "probe" ? row.source : "preset",
+    syncedAt: row.synced_at === null || row.synced_at === undefined ? null : String(row.synced_at),
   };
 }
 
@@ -821,14 +853,42 @@ CREATE TABLE employee_session (
 `;
 
 /**
- * Freeze a role row into the snapshot shape stored on every employee:
- * identity + manifest, as it is right now.
+ * Freeze a role row into the snapshot shape stored on every employee.
+ * 票 a01 v2: the snapshot pins identity + versions only — roleKey, the role's
+ * domains, the skill hashes as they are right now (locks: 技能名 → sha) — plus
+ * the hire-time engine/model choice and cost. Persona / skills / tools / 标语
+ * are content: they live on the role row (the projection cache), never in the
+ * snapshot ("只钉版本，不复制内容").
  *
  * @param {RoleRow} role
  * @returns {RoleSnapshot}
  */
 function toRoleSnapshot(role) {
-  return { key: role.key, name: role.name, tagline: role.tagline, manifest: role.manifest };
+  const manifest = /** @type {Record<string, any>} */ (role.manifest ?? {});
+  /** @type {Record<string, string>} */
+  const locks = {};
+  for (const skill of role.skills ?? []) {
+    if (skill && typeof skill.name === "string" && typeof skill.hash === "string") {
+      locks[skill.name] = skill.hash;
+    }
+  }
+  /** @type {RoleSnapshot} */
+  const snapshot = {
+    roleKey: role.key,
+    domains: role.domains ?? [],
+    locks,
+    engine: typeof manifest.engine === "string" ? manifest.engine : "pi",
+    model: typeof manifest.model === "string" ? manifest.model : "default",
+    cost:
+      manifest.cost && typeof manifest.cost === "object"
+        ? /** @type {{ tokenBudgetPerTask: number }} */ (manifest.cost)
+        : { tokenBudgetPerTask: DEFAULT_TASK_TOKEN_BUDGET },
+  };
+  if (typeof manifest.provider === "string" && manifest.provider.length > 0) snapshot.provider = manifest.provider;
+  if (typeof manifest.reasoningEffort === "string" && manifest.reasoningEffort.length > 0) {
+    snapshot.reasoningEffort = manifest.reasoningEffort;
+  }
+  return snapshot;
 }
 
 /**
@@ -872,6 +932,10 @@ export function openStore({ dataDir }) {
     // id chosen at hire time. Older rows stay NULL and fall back to the role's
     // default face in the renderer.
     migrateEmployeeAppearance(db);
+    // 票 a01: the role table widens into the Neo projection cache, and old
+    // employees' whole-manifest snapshots upgrade to the version-pin shape.
+    migrateRoleProjectionColumns(db);
+    migrateRoleSnapshotsToV2(db);
   } finally {
     db.exec("PRAGMA foreign_keys = ON;");
   }
@@ -902,6 +966,30 @@ export function openStore({ dataDir }) {
   // Ticket 14 widened the office from 4 to 8 bays. Older databases keep
   // their existing desks and gain the missing back/front-row bays in place.
   ensureDeskCapacity(db);
+
+  /**
+   * Shared employee-row → occupant mapping (票 a01). The live role row travels
+   * with the employee: persona / tools / MCP are role-row content now — the
+   * frozen snapshot only pins versions — and the engine adapters read the role
+   * through it. (Desk rows use the cheaper join in DESK_JOIN.)
+   *
+   * @param {Record<string, unknown>} row employee row (id … hired_at; appearance optional)
+   */
+  const employeeRecord = (row) => {
+    const roleId = Number(row.role_id);
+    const roleRow = db.prepare("SELECT * FROM role WHERE id = ?").get(roleId);
+    return {
+      id: Number(row.id),
+      companyId: Number(row.company_id),
+      name: String(row.name),
+      roleId,
+      appearance: row.appearance === null || row.appearance === undefined ? null : String(row.appearance),
+      roleSnapshot: /** @type {RoleSnapshot} */ (parseJsonOr(row.role_snapshot, UNKNOWN_ROLE_SNAPSHOT)),
+      hiredAt: String(row.hired_at),
+      roleName: roleRow ? String(/** @type {Record<string, unknown>} */ (roleRow).name) : "未知角色",
+      role: roleRow ? toRole(/** @type {Record<string, unknown>} */ (roleRow)) : null,
+    };
+  };
 
   return {
     dataDir,
@@ -966,7 +1054,12 @@ export function openStore({ dataDir }) {
     /** @param {{ groupId: number }} input @returns {DeskRow[]} */
     listDesks({ groupId }) {
       const rows = db
-        .prepare(`SELECT ${DESK_JOIN} FROM desk d LEFT JOIN employee e ON e.id = d.employee_id WHERE d.group_id = ? ORDER BY d.id`)
+        .prepare(
+          `SELECT ${DESK_JOIN} FROM desk d
+           LEFT JOIN employee e ON e.id = d.employee_id
+           LEFT JOIN role r ON r.id = e.role_id
+           WHERE d.group_id = ? ORDER BY d.id`,
+        )
         .all(groupId);
       return rows.map((row) => toDesk(/** @type {Record<string, unknown>} */ (row)));
     },
@@ -978,8 +1071,115 @@ export function openStore({ dataDir }) {
      * @returns {RoleRow[]}
      */
     listRoles() {
-      const rows = db.prepare("SELECT * FROM role ORDER BY id").all();
+      // 票 a01: probe rows are hidden plumbing (the admission probe's persona
+      // carrier), never part of the hireable library.
+      const rows = db.prepare("SELECT * FROM role WHERE source <> 'probe' ORDER BY id").all();
       return rows.map((row) => toRole(/** @type {Record<string, unknown>} */ (row)));
+    },
+
+    /**
+     * 票 a01: the projection "刷新" — write the Neo roles just read from
+     * `~/.neo` (see academy/neo-roles.mjs) into the `role` cache. Neo-published
+     * rows gain skills+hash / domains / mcp 摘要 / source='neo' / synced_at.
+     * Rows Neo no longer publishes: preset keys fall back to their seed row,
+     * unreferenced Neo rows are removed, and rows still referenced by an
+     * employee stay so frozen snapshots keep explaining themselves.
+     *
+     * TODO(materialize): the projection input is the interim direct-read shape;
+     * after Neo's materialize lands it comes from `neo materialize --json`.
+     *
+     * @param {import("./academy/neo-roles.mjs").NeoRoleProjection[]} projections
+     * @returns {{ inserted: number, updated: number, removed: number }}
+     */
+    syncRoleProjection(projections) {
+      const now = new Date().toISOString();
+      let inserted = 0;
+      let updated = 0;
+      let removed = 0;
+      db.exec("BEGIN");
+      try {
+        const roleByKey = db.prepare("SELECT * FROM role WHERE key = ?");
+        const upsert = db.prepare(
+          `INSERT INTO role (key, name, tagline, manifest, domains, skills, mcp, source, synced_at, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'neo', ?, ?)
+           ON CONFLICT(key) DO UPDATE SET
+             name = excluded.name,
+             tagline = excluded.tagline,
+             manifest = excluded.manifest,
+             domains = excluded.domains,
+             skills = excluded.skills,
+             mcp = excluded.mcp,
+             source = 'neo',
+             synced_at = excluded.synced_at`,
+        );
+        for (const projection of projections) {
+          if (typeof projection?.key !== "string" || projection.key.length === 0) continue;
+          const skills = Array.isArray(projection.skills) ? projection.skills : [];
+          const mcp = Array.isArray(projection.mcp) ? projection.mcp : [];
+          const domains = Array.isArray(projection.domains)
+            ? projection.domains.filter((domain) => typeof domain === "string")
+            : [];
+          const priorRow = roleByKey.get(projection.key);
+          const prior = priorRow ? toRole(/** @type {Record<string, unknown>} */ (priorRow)) : null;
+          // The manifest keeps assembly fallback (engine / model / cost) across
+          // refreshes — a Neo role says WHAT it assembles, not which of the
+          // app's engines or models the hire will use. persona = AGENTS.md.
+          const manifest = {
+            persona: typeof projection.persona === "string" ? projection.persona : "",
+            skills: skills.map((skill) => String(skill.name)),
+            tools: prior?.manifest?.tools ?? [],
+            mcpServers: mcp.map((server) => String(server.name)),
+            engine: prior?.manifest?.engine ?? "pi",
+            model: prior?.manifest?.model ?? "default",
+            cost: prior?.manifest?.cost ?? { tokenBudgetPerTask: DEFAULT_TASK_TOKEN_BUDGET },
+          };
+          upsert.run(
+            projection.key,
+            projection.name ?? projection.key,
+            projection.tagline ?? "",
+            JSON.stringify(manifest),
+            JSON.stringify(domains),
+            JSON.stringify(skills),
+            JSON.stringify(mcp),
+            now,
+            now,
+          );
+          if (prior) updated += 1;
+          else inserted += 1;
+        }
+        // Rows the new projection no longer publishes.
+        const published = projections.map((projection) => projection?.key ?? "");
+        const missing =
+          published.length === 0
+            ? db.prepare("SELECT id, key, source FROM role WHERE source <> 'probe'").all()
+            : db
+                .prepare(
+                  `SELECT id, key, source FROM role
+                   WHERE source <> 'probe' AND key NOT IN (${published.map(() => "?").join(", ")})`,
+                )
+                .all(...published);
+        const restorePreset = db.prepare(
+          `UPDATE role SET name = ?, tagline = ?, manifest = ?, domains = '[]', skills = '[]', mcp = '[]',
+             source = 'preset', synced_at = NULL
+           WHERE id = ?`,
+        );
+        const deleteUnreferenced = db.prepare(
+          "DELETE FROM role WHERE id = ? AND id NOT IN (SELECT DISTINCT role_id FROM employee)",
+        );
+        for (const row of missing) {
+          const preset = PRESET_ROLES.find((entry) => entry.key === row.key);
+          if (preset) {
+            restorePreset.run(preset.name, preset.tagline, JSON.stringify(preset.manifest), Number(row.id));
+          } else if (row.source === "neo") {
+            removed += Number(deleteUnreferenced.run(Number(row.id)).changes);
+          }
+        }
+        db.exec("COMMIT");
+      } catch (err) {
+        db.exec("ROLLBACK");
+        throw err;
+      }
+      return { inserted, updated, removed };
     },
 
     /**
@@ -998,6 +1198,7 @@ export function openStore({ dataDir }) {
            FROM desk d
            JOIN project_group g ON g.id = d.group_id
            LEFT JOIN employee e ON e.id = d.employee_id
+           LEFT JOIN role r ON r.id = e.role_id
            WHERE d.id = ?`,
         )
         .get(deskId);
@@ -1009,14 +1210,16 @@ export function openStore({ dataDir }) {
       if (!roleRow) throw appError("unknown_role", `no role with id ${roleId}`);
 
       const role = toRole(/** @type {Record<string, unknown>} */ (roleRow));
-      const roleSnapshot = toRoleSnapshot(role);
-      const manifest = /** @type {Record<string, any>} */ (roleSnapshot.manifest);
-      if (engine !== undefined) manifest.engine = engine;
-      if (provider !== undefined) manifest.provider = provider;
-      if (model !== undefined) manifest.model = model;
+      // 票 a01: the snapshot pins the role's version (roleKey + locks) plus the
+      // hire-time model choice; role content stays on the role row, so later
+      // library / Neo changes can never infect people already hired.
+      const roleSnapshot = /** @type {Record<string, any>} */ (toRoleSnapshot(role));
+      if (engine !== undefined) roleSnapshot.engine = engine;
+      if (provider !== undefined) roleSnapshot.provider = provider;
+      if (model !== undefined) roleSnapshot.model = model;
       if (reasoningEffort !== undefined) {
-        if (reasoningEffort === null) delete manifest.reasoningEffort;
-        else manifest.reasoningEffort = reasoningEffort;
+        if (reasoningEffort === null) delete roleSnapshot.reasoningEffort;
+        else roleSnapshot.reasoningEffort = reasoningEffort;
       }
       const employeeName = name !== undefined && name.trim().length > 0 ? name.trim() : role.name;
       const hiredAt = new Date().toISOString();
@@ -1052,7 +1255,7 @@ export function openStore({ dataDir }) {
           companyId: Number(deskRow.g_company_id),
           name: employeeName,
           roleId: role.id,
-          roleSnapshot,
+          roleSnapshot: /** @type {RoleSnapshot} */ (roleSnapshot),
           appearance: appearance ?? null,
           hiredAt,
         },
@@ -1071,10 +1274,11 @@ export function openStore({ dataDir }) {
       const rows = db
         .prepare(
           `SELECT e.id AS id, e.name AS name, e.role_snapshot AS role_snapshot, e.appearance AS appearance,
-                  d.label AS desk_label, g.name AS group_name
+                  d.label AS desk_label, g.name AS group_name, r.name AS role_name
            FROM employee e
            JOIN desk d ON d.employee_id = e.id
            JOIN project_group g ON g.id = d.group_id
+           LEFT JOIN role r ON r.id = e.role_id
            WHERE e.company_id = ?
            ORDER BY e.id`,
         )
@@ -1085,7 +1289,8 @@ export function openStore({ dataDir }) {
         return {
           id: Number(row.id),
           name: String(row.name),
-          roleName: String(snapshot.name ?? "未知角色"),
+          // 票 a01: the role label rides the live role row; the snapshot pins versions only.
+          roleName: row.role_name === null || row.role_name === undefined ? "未知角色" : String(row.role_name),
           roleSnapshot: snapshot,
           appearance: row.appearance === null || row.appearance === undefined ? null : String(row.appearance),
           deskLabel: String(row.desk_label),
@@ -1096,22 +1301,14 @@ export function openStore({ dataDir }) {
 
     /**
      * @param {number} employeeId
-     * @returns {(EmployeeOccupant & { companyId: number }) | null}
+     * @returns {(EmployeeOccupant & { companyId: number, role: RoleRow | null }) | null}
      */
     employeeById(employeeId) {
       const row = db
         .prepare("SELECT id, company_id, name, role_id, role_snapshot, appearance, hired_at FROM employee WHERE id = ?")
         .get(employeeId);
       if (!row) return null;
-      return {
-        id: Number(row.id),
-        companyId: Number(row.company_id),
-        name: String(row.name),
-        roleId: Number(row.role_id),
-        appearance: row.appearance === null || row.appearance === undefined ? null : String(row.appearance),
-        roleSnapshot: /** @type {RoleSnapshot} */ (parseJsonOr(row.role_snapshot, UNKNOWN_ROLE_SNAPSHOT)),
-        hiredAt: String(row.hired_at),
-      };
+      return employeeRecord(/** @type {Record<string, unknown>} */ (row));
     },
 
     /**
@@ -1122,15 +1319,7 @@ export function openStore({ dataDir }) {
      */
     listAllEmployees() {
       const rows = db.prepare("SELECT id, company_id, name, role_id, role_snapshot, appearance, hired_at FROM employee ORDER BY id").all();
-      return rows.map((row) => ({
-        id: Number(row.id),
-        companyId: Number(row.company_id),
-        name: String(row.name),
-        roleId: Number(row.role_id),
-        appearance: row.appearance === null || row.appearance === undefined ? null : String(row.appearance),
-        roleSnapshot: /** @type {RoleSnapshot} */ (parseJsonOr(row.role_snapshot, UNKNOWN_ROLE_SNAPSHOT)),
-        hiredAt: String(row.hired_at),
-      }));
+      return rows.map((row) => employeeRecord(/** @type {Record<string, unknown>} */ (row)));
     },
 
     /**
@@ -1812,21 +2001,14 @@ export function openStore({ dataDir }) {
 
     /**
      * @param {string} name
-     * @returns {{ id: number, companyId: number, name: string, roleId: number, roleSnapshot: RoleSnapshot, hiredAt: string } | null}
+     * @returns {(EmployeeOccupant & { role: RoleRow | null }) | null}
      */
     employeeByName(name) {
       const row = db
-        .prepare("SELECT id, company_id, name, role_id, role_snapshot, hired_at FROM employee WHERE name = ?")
+        .prepare("SELECT id, company_id, name, role_id, role_snapshot, appearance, hired_at FROM employee WHERE name = ?")
         .get(name);
       if (!row) return null;
-      return {
-        id: Number(row.id),
-        companyId: Number(row.company_id),
-        name: String(row.name),
-        roleId: Number(row.role_id),
-        roleSnapshot: /** @type {RoleSnapshot} */ (parseJsonOr(row.role_snapshot, UNKNOWN_ROLE_SNAPSHOT)),
-        hiredAt: String(row.hired_at),
-      };
+      return employeeRecord(/** @type {Record<string, unknown>} */ (row));
     },
 
     /**
@@ -1884,48 +2066,69 @@ export function openStore({ dataDir }) {
      * conversation plumbing works for it (run-manager only needs an
      * employee row) while the office view — driven by desks — never sees it.
      *
-     * @param {{ name: string, engine: string, roleSnapshot: RoleSnapshot }} input
-     * @returns {{ id: number, companyId: number, name: string, roleId: number, roleSnapshot: RoleSnapshot, hiredAt: string }}
+     * 票 a01: the marker persona / tools ride the dedicated probe role row
+     * (source='probe', invisible to listRoles); the snapshot pins only the
+     * probe engine / model / a small cost gate.
+     *
+     * @param {{ name: string, engine: string, persona: string, roleSnapshot: RoleSnapshot }} input
+     * @returns {(EmployeeOccupant & { role: RoleRow | null })}
      */
-    ensureProbeEmployee({ name, engine, roleSnapshot }) {
+    ensureProbeEmployee({ name, engine, persona, roleSnapshot }) {
       const existing = this.employeeByName(name);
       if (existing) {
         // Re-runs must not drift onto another engine mid-probe history: keep
         // one probe employee per engine.
-        if (existing.roleSnapshot?.manifest?.engine === engine) return existing;
+        if (existing.roleSnapshot?.engine === engine) return existing;
       }
       const company = db.prepare("SELECT id FROM company ORDER BY id LIMIT 1").get();
-      const role = db.prepare("SELECT id FROM role ORDER BY id LIMIT 1").get();
-      if (!company || !role) throw appError("invalid_state", "probe employee needs a company and a role");
+      if (!company) throw appError("invalid_state", "probe employee needs a company");
+      const now = new Date().toISOString();
+      db.prepare(
+        `INSERT INTO role (key, name, tagline, manifest, domains, skills, mcp, source, synced_at, created_at)
+         VALUES ('cubicle-probe', '探针', '引擎准入探针', ?, '[]', '[]', '[]', 'probe', ?, ?)
+         ON CONFLICT(key) DO UPDATE SET
+           name = excluded.name,
+           tagline = excluded.tagline,
+           manifest = excluded.manifest,
+           synced_at = excluded.synced_at`,
+      ).run(
+        JSON.stringify({
+          persona,
+          skills: [],
+          tools: ["read", "powershell"],
+          mcpServers: [],
+          engine,
+          model: "default",
+          cost: { tokenBudgetPerTask: 50000 },
+        }),
+        now,
+        now,
+      );
+      const role = db.prepare("SELECT id FROM role WHERE key = 'cubicle-probe'").get();
+      if (!role) throw appError("invalid_state", "probe employee needs a role");
       const hiredAt = new Date().toISOString();
       const info = db
         .prepare("INSERT INTO employee (company_id, name, role_id, role_snapshot, hired_at) VALUES (?, ?, ?, ?, ?)")
         .run(Number(company.id), name, Number(role.id), JSON.stringify(roleSnapshot), hiredAt);
-      const id = Number(info.lastInsertRowid);
-      return {
-        id,
-        companyId: Number(company.id),
-        name,
-        roleId: Number(role.id),
-        roleSnapshot,
-        hiredAt,
-      };
+      const hired = db
+        .prepare("SELECT id, company_id, name, role_id, role_snapshot, appearance, hired_at FROM employee WHERE id = ?")
+        .get(Number(info.lastInsertRowid));
+      return employeeRecord(/** @type {Record<string, unknown>} */ (hired));
     },
 
     /**
      * Switch an employee's engine by rewriting the frozen role snapshot's
-     * manifest.engine — the snapshot stays frozen for everything else
+     * engine pin — the snapshot stays frozen for everything else
      * (decision 02: 入职冻结, but the ticket-11 switch is an explicit act).
      *
      * @param {{ employeeId: number, engine: string }} input
-     * @returns {{ id: number, companyId: number, name: string, roleId: number, roleSnapshot: RoleSnapshot, hiredAt: string }}
+     * @returns {(EmployeeOccupant & { role: RoleRow | null })}
      */
     setEmployeeEngine({ employeeId, engine }) {
       const row = db.prepare("SELECT role_snapshot FROM employee WHERE id = ?").get(employeeId);
       if (!row) throw appError("unknown_employee", `no employee with id ${employeeId}`);
-      const snapshot = /** @type {any} */ (parseJsonOr(row.role_snapshot, { manifest: {} }));
-      if (!snapshot.manifest || typeof snapshot.manifest !== "object") snapshot.manifest = {};
-      snapshot.manifest.engine = engine;
+      const snapshot = /** @type {any} */ (parseJsonOr(row.role_snapshot, {}));
+      snapshot.engine = engine;
       db.prepare("UPDATE employee SET role_snapshot = ? WHERE id = ?").run(JSON.stringify(snapshot), employeeId);
       return /** @type {any} */ (this.employeeById(employeeId));
     },
@@ -1943,19 +2146,18 @@ export function openStore({ dataDir }) {
         .get(employeeId);
       if (!row) throw appError("unknown_employee", `no employee with id ${employeeId}`);
       const record = /** @type {Record<string, unknown>} */ (row);
-      const snapshot = /** @type {any} */ (parseJsonOr(record.role_snapshot, { manifest: {} }));
-      if (!snapshot.manifest || typeof snapshot.manifest !== "object") snapshot.manifest = {};
+      const snapshot = /** @type {any} */ (parseJsonOr(record.role_snapshot, {}));
       if (name !== undefined) {
         const trimmed = name.trim();
         if (trimmed.length === 0) throw appError("invalid_payload", "员工名字不能为空");
         if (trimmed.length > 40) throw appError("invalid_payload", "员工名字最多 40 个字符");
       }
-      if (engine !== undefined) snapshot.manifest.engine = engine;
-      if (provider !== undefined) snapshot.manifest.provider = provider;
-      if (model !== undefined) snapshot.manifest.model = model;
+      if (engine !== undefined) snapshot.engine = engine;
+      if (provider !== undefined) snapshot.provider = provider;
+      if (model !== undefined) snapshot.model = model;
       if (reasoningEffort !== undefined) {
-        if (reasoningEffort === null) delete snapshot.manifest.reasoningEffort;
-        else snapshot.manifest.reasoningEffort = reasoningEffort;
+        if (reasoningEffort === null) delete snapshot.reasoningEffort;
+        else snapshot.reasoningEffort = reasoningEffort;
       }
       db.prepare("UPDATE employee SET name = ?, role_snapshot = ?, appearance = COALESCE(?, appearance) WHERE id = ?").run(
         name !== undefined ? name.trim() : String(record.name),
@@ -2066,7 +2268,9 @@ function migrateEmployeeWorkspaces(db, dataDir) {
     if (sessions.every((session) => session.workspaceDir === stable)) continue;
 
     const snapshot = /** @type {any} */ (parseJsonOr(/** @type {Record<string, unknown>} */ (raw).role_snapshot, UNKNOWN_ROLE_SNAPSHOT));
-    const currentEngine = snapshot?.manifest?.engine ?? "pi";
+    // 票 a01: engine is a top-level snapshot pin (v1 kept it under manifest —
+    // this migration runs right after the snapshot upgrade, but stay tolerant).
+    const currentEngine = snapshot?.engine ?? snapshot?.manifest?.engine ?? "pi";
     const preferred =
       sessions.find((session) => session.engine === currentEngine && existsSync(session.workspaceDir)) ??
       sessions.find((session) => existsSync(session.workspaceDir));
@@ -2104,6 +2308,78 @@ function migrateEmployeeAppearance(db) {
 }
 
 /**
+ * 票 a01: the role table becomes a projection cache of Neo. Older databases
+ * gain the cache columns in place (SQLite cannot attach a CHECK via ALTER —
+ * the fresh schema declares it, and every writer here only uses the three
+ * known source states).
+ *
+ * @param {DatabaseSync} db
+ */
+function migrateRoleProjectionColumns(db) {
+  const columns = tableColumns(db, "role");
+  if (!columns.has("domains")) db.exec("ALTER TABLE role ADD COLUMN domains TEXT NOT NULL DEFAULT '[]'");
+  if (!columns.has("skills")) db.exec("ALTER TABLE role ADD COLUMN skills TEXT NOT NULL DEFAULT '[]'");
+  if (!columns.has("mcp")) db.exec("ALTER TABLE role ADD COLUMN mcp TEXT NOT NULL DEFAULT '[]'");
+  if (!columns.has("source")) db.exec("ALTER TABLE role ADD COLUMN source TEXT NOT NULL DEFAULT 'preset'");
+  if (!columns.has("synced_at")) db.exec("ALTER TABLE role ADD COLUMN synced_at TEXT");
+}
+
+/**
+ * 票 a01: rewrite pre-academy employee snapshots (v1: a whole copied manifest)
+ * into the version-pin shape (v2). Same one-shot-in-place style as the old
+ * role-manifest upgrade: v2 rows are left byte-identical (the ticket-03
+ * restart check compares hire-time bytes), and an unreadable row is left for
+ * parseJsonOr to degrade at read time rather than rewritten into a lie.
+ *
+ * @param {DatabaseSync} db
+ */
+function migrateRoleSnapshotsToV2(db) {
+  const rows = db.prepare("SELECT id, role_snapshot FROM employee").all();
+  const update = db.prepare("UPDATE employee SET role_snapshot = ? WHERE id = ?");
+  for (const raw of rows) {
+    const row = /** @type {Record<string, unknown>} */ (raw);
+    const current = parseJsonOr(row.role_snapshot, null);
+    if (current === null || typeof current !== "object" || Array.isArray(current)) continue;
+    const legacy = /** @type {Record<string, unknown>} */ (current);
+    if (typeof legacy.roleKey === "string" && legacy.manifest === undefined) continue; // already v2
+    update.run(JSON.stringify(upgradeRoleSnapshot(legacy)), Number(row.id));
+  }
+}
+
+/**
+ * v1 → v2 snapshot translation. v1 froze the whole manifest (persona, skills,
+ * tools, tagline); v2 pins identity + versions + the model choice only —
+ * persona 与技能正文不再进快照（内容归角色行 / 学院）。v1 没有 hash 可钉，
+ * locks 留空而不是凭空造 hash。
+ *
+ * @param {Record<string, unknown>} legacy
+ * @returns {RoleSnapshot}
+ */
+function upgradeRoleSnapshot(legacy) {
+  const manifest =
+    typeof legacy.manifest === "object" && legacy.manifest !== null && !Array.isArray(legacy.manifest)
+      ? /** @type {Record<string, unknown>} */ (legacy.manifest)
+      : {};
+  /** @type {RoleSnapshot} */
+  const snapshot = {
+    roleKey: String(legacy.roleKey ?? legacy.key ?? "unknown"),
+    domains: [],
+    locks: {},
+    engine: typeof manifest.engine === "string" ? manifest.engine : "pi",
+    model: typeof manifest.model === "string" ? manifest.model : "default",
+    cost:
+      typeof manifest.cost === "object" && manifest.cost !== null && !Array.isArray(manifest.cost)
+        ? /** @type {{ tokenBudgetPerTask: number }} */ (manifest.cost)
+        : { tokenBudgetPerTask: DEFAULT_TASK_TOKEN_BUDGET },
+  };
+  if (typeof manifest.provider === "string" && manifest.provider.length > 0) snapshot.provider = manifest.provider;
+  if (typeof manifest.reasoningEffort === "string" && manifest.reasoningEffort.length > 0) {
+    snapshot.reasoningEffort = manifest.reasoningEffort;
+  }
+  return snapshot;
+}
+
+/**
  * @param {DatabaseSync} db
  * @param {string} table
  * @returns {Set<string>}
@@ -2127,6 +2403,7 @@ function assertRequiredColumns(db) {
     run: ["employee_session_id", "employee_id", "engine", "status", "usage", "task_id", "task_session_id", "fail_reason"],
     employee_session: ["employee_id", "engine", "agent_dir", "sessions_dir", "workspace_dir", "session_file"],
     employee: ["appearance"],
+    role: ["domains", "skills", "mcp", "source", "synced_at"],
     artifact: ["task_id", "run_id", "kind", "content"],
   };
   for (const [table, columns] of Object.entries(required)) {
@@ -2457,7 +2734,8 @@ function seedRoles(db) {
      ON CONFLICT(key) DO UPDATE SET
        name = excluded.name,
        tagline = excluded.tagline,
-       manifest = excluded.manifest`,
+       manifest = excluded.manifest
+     WHERE role.source = 'preset'`,
   );
   for (const preset of PRESET_ROLES) {
     upsert.run(preset.key, preset.name, preset.tagline, JSON.stringify(preset.manifest), createdAt);

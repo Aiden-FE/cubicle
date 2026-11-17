@@ -330,8 +330,9 @@ export function createDshAdapter({ dataDir, dshExe, dshEntry }) {
    */
   async function open({ employee, session, onEvent }) {
     const library = readModelLibrary(dataDir);
-    const manifest = /** @type {Record<string, unknown>} */ (employee?.roleSnapshot?.manifest ?? {});
-    const resolved = resolveModelForManifest(library, "dsh", manifest);
+    // 票 a01: model choice is pinned on the snapshot itself (v1 kept it under manifest).
+    const pins = /** @type {Record<string, unknown>} */ (employee?.roleSnapshot ?? {});
+    const resolved = resolveModelForManifest(library, "dsh", pins);
     await ensureServerCurrent();
 
     const previous = typeof session.sessionFile === "string" && session.sessionFile.startsWith("acp:")
