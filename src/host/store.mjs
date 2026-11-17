@@ -593,6 +593,7 @@ function toRole(row) {
 }
 
 /** 票 a03: academy_mark 行 → 面板视图。 */
+/** @param {Record<string, unknown>} row */
 function toAcademyMark(row) {
   return {
     resourceKey: String(row.resource_key),

@@ -34,6 +34,16 @@ const NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const SKILL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 /**
+ * store.academy_mark 行的镜像形状（单一来源仍是 store.mjs 的 toAcademyMark）。
+ * @typedef {object} AcademyMarkRow
+ * @property {string} resourceKey
+ * @property {"local" | "remote" | "written"} kind
+ * @property {string | null} source
+ * @property {boolean} remoteAck
+ * @property {string} updatedAt
+ */
+
+/**
  * @param {string | null | undefined} version
  * @param {string} minimum
  * @returns {boolean}
@@ -51,6 +61,7 @@ export function isNeoVersionAtLeast(version, minimum) {
 }
 
 /** 与 neo core inferSourceType 同源的推断：路径形态 = 本机，其余 = 远端。 */
+/** @param {string} source @returns {boolean} */
 function looksLocalPath(source) {
   return /^[a-zA-Z]:[\\/]/.test(source) || source.startsWith("/") || source.startsWith("\\\\") || source.startsWith("\\") || source.startsWith(".");
 }
@@ -132,9 +143,9 @@ export function createAcademyPanel({ store, nodeBinary, cliEntry, env = process.
 
   /**
    * 面板标记优先 → 角色锁 sourceType → 手写。
-   * @param {Map<string, ReturnType<ReturnType<typeof openStore>["getAcademyMark"]>>} marks
+   * @param {Map<string, AcademyMarkRow | null>} marks
    * @param {string} rowKey @param {string} containerKey @param {string | undefined} lockSourceType
-   * @returns {{"local" | "remote" | "written", mark: ReturnType<ReturnType<typeof openStore>["getAcademyMark"]>}}
+   * @returns {{ kind: "local" | "remote" | "written", mark: AcademyMarkRow | null }}
    */
   function resolveKind(marks, rowKey, containerKey, lockSourceType) {
     const mark = marks.get(rowKey) ?? marks.get(containerKey) ?? null;

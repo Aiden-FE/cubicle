@@ -7,3 +7,12 @@
 
 ## 提交
 - WIP1: assembly MCP 门默认 OFF + 测试旗标化 + gate-off 新用例（assembly 11/11 绿）。
+- WIP2: store academy_mark 表（本机/远端/手写 + 一次远端确认，跨重启）+ src/host/academy/panel.mjs（probe/snapshot/install/dispatch，锁 dirty 顺序 role set→update→投影刷新）+ service `academy.*` + ipc 白名单 + entry 接线；panel 门 10 例、store 2 例、service 信封 1 例全绿。
+- WIP3: 渲染层「学院」左轨第五入口 + 浮层面板（列表/装/下发/一次确认/只读降级）+ CSS；typecheck×2 + 475 测试全绿；build:renderer OK（TMP 三连 export 到 tmp/esbuild-tmp）。
+
+## 边界裁定（human ruling，2026-11-17 a03 会话中）
+- Cubicle 侧对 neo 仓库**零权限**：不读、不进、不对 `C:\Users\Aiden\dev\aiden\neo` 跑任何命令（含只读）。neo CLI 合同一律以 cubicle 内为准：`vendor/neo/bin/neo.js`（pin 4ee1dcd 仍有效）+ vendor/README.md + .scratch/academy 票 Answers + `node vendor/neo/bin/neo.js <cmd> --help`。
+- 本会话早前从 neo git 抽取的 tmp/a03-ref/*.ts 临时副本已删除（在 cubicle tmp/ 内、gitignored，仅为免混淆）。
+- T1–T4 未来随 vendor re-pin 到货；`CUBICLE_ACADEMY_MCP` 保持默认 OFF + TODO(T1-T4)。
+- lead 会往本分支提交两个文档文件（neo-tickets 补丁 + map 注记）：不审计、不还原，`git add` 显式路径绕开。
+

@@ -2075,6 +2075,7 @@ test("academy marks: upsert/list/get round-trip; ack survives re-install upserts
     store.upsertAcademyMark({ resourceKey: "d:web/skill-x", kind: "local", source: "C:\\dev\\src" });
 
     const got = store.getAcademyMark("d:demo");
+    assert.ok(got);
     assert.equal(got.kind, "remote");
     assert.equal(got.source, "https://github.com/acme/skills");
     assert.equal(got.remoteAck, false);
@@ -2084,16 +2085,20 @@ test("academy marks: upsert/list/get round-trip; ack survives re-install upserts
     store.ackAcademyRemote("d:demo");
     store.upsertAcademyMark({ resourceKey: "d:demo", kind: "remote", source: "https://github.com/acme/skills-v2" });
     const acked = store.getAcademyMark("d:demo");
+    assert.ok(acked);
     assert.equal(acked.remoteAck, true);
     assert.equal(acked.source, "https://github.com/acme/skills-v2", "重装更新 source 字符串");
 
     const listed = store.listAcademyMarks();
     assert.deepEqual(listed.map((m) => m.resourceKey), ["d:demo", "d:web/skill-x"]);
+    assert.ok(listed[0]);
     assert.equal(listed[0].updatedAt.length > 0, true);
 
     store.close();
     const reopened = openStore({ dataDir });
-    assert.equal(reopened.getAcademyMark("d:demo").remoteAck, true, "标记跨重启持久（验收：来源标记持久化）");
+    const persisted = reopened.getAcademyMark("d:demo");
+    assert.ok(persisted);
+    assert.equal(persisted.remoteAck, true, "标记跨重启持久（验收：来源标记持久化）");
     reopened.close();
   } finally {
     await dispose();
@@ -2106,10 +2111,11 @@ test("academy marks: ack on an unknown key creates the row (kind remote), bad ki
     const store = openStore({ dataDir });
     store.ackAcademyRemote("r:dev");
     const row = store.getAcademyMark("r:dev");
+    assert.ok(row);
     assert.equal(row.kind, "remote");
     assert.equal(row.remoteAck, true);
     assert.throws(
-      () => store.upsertAcademyMark({ resourceKey: "x", kind: "weird", source: null }),
+      () => store.upsertAcademyMark({ resourceKey: "x", kind: /** @type {"local" | "remote" | "written"} */ ("weird"), source: null }),
       /invalid_academy_mark|CHECK/,
     );
     store.close();
