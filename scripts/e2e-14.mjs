@@ -77,8 +77,9 @@ try {
   const db = new DatabaseSync(path.join(dataDir, "cubicle.db"), { readOnly: true });
   const session = /** @type {any} */ (db.prepare("SELECT * FROM employee_session WHERE engine = 'dsh' ORDER BY id LIMIT 1").get());
   const runs = /** @type {any[]} */ (db.prepare("SELECT id, engine, status FROM run ORDER BY id").all());
-  const employee = /** @type {any} */ (db.prepare("SELECT name, role_snapshot FROM employee ORDER BY id LIMIT 1").get());
-  const manifest = employee ? JSON.parse(employee.role_snapshot)?.manifest : null;
+  const employee = /** @type {any} */ (db.prepare("SELECT id, name, role_snapshot FROM employee ORDER BY id LIMIT 1").get());
+  // 票 a01 后 role_snapshot v2：engine/provider/model/reasoningEffort 是顶层钉选。
+  const snapshot = employee ? JSON.parse(employee.role_snapshot) : null;
   sessionBefore = String(session?.session_file ?? "");
   runsBefore = runs.length;
   proof.push({
@@ -94,13 +95,15 @@ try {
   proof.push({
     name: "员工快照冻结了 engine/provider/model/reasoningEffort",
     ok:
-      manifest?.engine === "dsh" &&
-      manifest?.provider === "e2e-dsh-gateway" &&
-      manifest?.model === "cubicle-dsh-model" &&
-      manifest?.reasoningEffort === "high",
-    detail: JSON.stringify(manifest),
+      snapshot?.engine === "dsh" &&
+      snapshot?.provider === "e2e-dsh-gateway" &&
+      snapshot?.model === "cubicle-dsh-model" &&
+      snapshot?.reasoningEffort === "high",
+    detail: JSON.stringify(snapshot),
   });
-  const patch = await readFile(path.join(dataDir, "engines", "dsh", "home", "profiles", "acp", "cordis.patch.yml"), "utf8");
+  // 票 a02：共享 engines/dsh/home 已废 —— profile 落在员工自己的 DSH_HOME 下。
+  const empId = Number(session?.employee_id ?? employee?.id ?? 0);
+  const patch = await readFile(path.join(dataDir, "engines", "dsh", `employee-${empId}`, "agent", "profiles", "acp", "cordis.patch.yml"), "utf8");
   proof.push({
     name: "DSH profile 在 Cubicle 数据目录内，用 apiKeyEnv 而不是明文 key",
     ok: patch.includes("apiKeyEnv") && !patch.includes("e2e-dsh-key") && patch.includes("cubicle-dsh-model"),

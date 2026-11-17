@@ -187,12 +187,12 @@ async function phaseSettings(app, ctx, checks) {
   const programmer = (snapshot?.desks ?? []).map((/** @type {any} */ d) => d.occupant).find((/** @type {any} */ o) => o?.name === EMPLOYEE);
   add(
     checks,
-    "员工 manifest = engine dsh / provider e2e-dsh / model / reasoning",
-    programmer?.roleSnapshot?.manifest?.engine === "dsh" &&
-      programmer?.roleSnapshot?.manifest?.provider === "e2e-dsh-gateway" &&
-      programmer?.roleSnapshot?.manifest?.model === MODEL_ID &&
-      programmer?.roleSnapshot?.manifest?.reasoningEffort === "low",
-    JSON.stringify(programmer?.roleSnapshot?.manifest),
+    "员工快照（v2 顶层钉选）= engine dsh / provider e2e-dsh / model / reasoning",
+    programmer?.roleSnapshot?.engine === "dsh" &&
+      programmer?.roleSnapshot?.provider === "e2e-dsh-gateway" &&
+      programmer?.roleSnapshot?.model === MODEL_ID &&
+      programmer?.roleSnapshot?.reasoningEffort === "low",
+    JSON.stringify(programmer?.roleSnapshot),
   );
 
   const employeeId = Number(programmer?.id ?? 0);
@@ -218,8 +218,8 @@ async function phaseSettings(app, ctx, checks) {
   add(
     checks,
     "花名册「编辑员工」改推理档 high（下一轮生效）",
-    editedEmployee?.roleSnapshot?.manifest?.reasoningEffort === "high",
-    JSON.stringify(editedEmployee?.roleSnapshot?.manifest?.reasoningEffort),
+    editedEmployee?.roleSnapshot?.reasoningEffort === "high",
+    JSON.stringify(editedEmployee?.roleSnapshot?.reasoningEffort),
   );
   await click(contents, '[data-testid="roster-close"]');
   await waitFor(async () => (await evalIn(contents, `document.querySelector('[data-testid="roster-panel"]')`)) === null, { timeoutMs: 2000 });
