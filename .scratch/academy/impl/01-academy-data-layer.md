@@ -4,7 +4,7 @@
 
 **Blocked by:** —
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] `~/.neo` 不存在或为空 → 应用照常启动，学院入口显示空态，不阻塞、不报错
 - [ ] 在 `~/.neo/roles/<role>/` 里增删技能后，下次刷新（重启或重读）投影反映新集合
