@@ -697,15 +697,23 @@ export function deriveDshPatch(library) {
 }
 
 /**
- * Create the Cubicle-owned DSH home + profile patch. Never touches ~/.dsh.
+ * Create the Cubicle-owned per-employee DSH home + profile patch. Never
+ * touches ~/.dsh. 票 a02: the shared `engines/dsh/home` is retired — DSH_HOME
+ * is the employee's engine agent dir, the same root the academy assembler
+ * links the role's skills into (`<DSH_HOME>/skills`).
+ *
  * @param {string} dataDir
  * @param {ModelLibrary} library
+ * @param {number} employeeId
  * @returns {{ home: string, profile: string, env: Record<string, string>, defaultRef: string | null } | null}
  */
-export function ensureDshProfile(dataDir, library) {
+export function ensureDshProfile(dataDir, library, employeeId) {
   const patch = deriveDshPatch(library);
   if (!patch) return null;
-  const home = path.join(dataDir, "engines", "dsh", "home");
+  if (!Number.isInteger(employeeId) || employeeId <= 0) {
+    throw appError("invalid_payload", "ensureDshProfile 需要正的 employeeId（不再有共享的 dsh home）");
+  }
+  const home = path.join(dataDir, "engines", "dsh", `employee-${employeeId}`, "agent");
   const profile = path.join(home, "profiles", "acp");
   mkdirSync(profile, { recursive: true });
   const file = path.join(profile, "cordis.patch.yml");
