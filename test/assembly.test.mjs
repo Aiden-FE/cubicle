@@ -312,6 +312,38 @@ test("domain-layer skills (Neo N2) mirror into the employee too: assembly stays 
   }
 });
 
+test("codex employee: skills land under $CODEX_HOME (the employee's agent dir) — nothing written outside", async () => {
+  const { dir, dispose } = await withTempDir("codex-engine");
+  try {
+    const neoHome = path.join(dir, "neo-home");
+    const dataDir = path.join(dir, "data");
+    await seedSkill(neoHome, "dev", "alpha", "ALPHA");
+
+    // Snapshot the whole dataDir + neoHome before, to prove writes stayed in the employee's own root.
+    const assembler = createAcademyAssembler({
+      dataDir,
+      nodeBinary: process.execPath,
+      cliEntry: VENDOR_CLI,
+      env: { ...process.env, NEO_HOME: neoHome },
+    });
+    const outcome = await assembler.assemble({ employee: neoEmployee(9, "C", "dev", "codex"), engine: "codex" });
+    assert.ok(outcome);
+
+    // CODEX_HOME = the employee's agent dir (codex adapter's homeFor); skills sit under it.
+    const codexHome = enginePaths(dataDir, "codex", 9).agentDir;
+    const slot = path.join(codexHome, "skills", "alpha");
+    assert.equal((await lstat(slot)).isSymbolicLink(), true);
+    assert.equal(await readFile(path.join(slot, "SKILL.md"), "utf8"), "ALPHA");
+
+    // Neo's home is read-only from Cubicle's side: the materialize product
+    // lives under the employee root, not in ~/.neo.
+    const neoEntries = await readdir(path.join(neoHome, "roles", "dev"));
+    assert.deepEqual(neoEntries.sort(), ["skills"], "no materialize side effects inside the Neo home");
+  } finally {
+    await dispose();
+  }
+});
+
 test("preset/probe employees assemble to null — the vendored CLI is never invoked", async () => {  const { dir, dispose } = await withTempDir("null-path");
   try {
     const assembler = createAcademyAssembler({

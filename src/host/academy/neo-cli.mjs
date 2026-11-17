@@ -21,7 +21,7 @@ import { appError } from "../../shared/apperror.mjs";
  * @typedef {object} MaterializeSkillEntry
  * @property {string} name
  * @property {string} hash      content hash (Neo's computeSkillFolderHash rule)
- * @property {string} source    winning assembly layer (role name or "default")
+ * @property {string} source    winning assembly layer (role name, "default", or "domain:<领域>")
  *
  * @typedef {object} MaterializeManifest
  * @property {true} ok
@@ -43,14 +43,12 @@ import { appError } from "../../shared/apperror.mjs";
  * @param {string[]} options.args command args, e.g. ["materialize", "--role", …]
  * @param {Record<string, string | undefined>} [options.env] child env — the caller decides it wholesale (PATH, NEO_HOME, ELECTRON_RUN_AS_NODE for the app child); defaults to the host env
  * @param {number} [options.timeoutMs]
- * @param {string} [options.cwd]
  * @returns {Promise<{ stdout: string }>} resolves with stdout; rejects with an appError carrying the exit code + stderr for a readable failure
  */
-export function runNeoCli({ nodeBinary, cliEntry, args, env = process.env, timeoutMs = 30_000, cwd }) {
+export function runNeoCli({ nodeBinary, cliEntry, args, env = process.env, timeoutMs = 30_000 }) {
   return new Promise((resolve, reject) => {
     const child = spawn(nodeBinary, [cliEntry, ...args], {
       env: { ...env },
-      cwd,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
