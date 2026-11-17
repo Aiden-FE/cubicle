@@ -4,7 +4,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] 浮层开合不改变画布尺寸与工位坐标（照 `e2e:08` 的断言方式）
 - [ ] 列表数据全部来自 `~/.neo`（空目录 = 空态），不硬编码任何资源
