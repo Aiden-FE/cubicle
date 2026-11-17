@@ -32,6 +32,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { appError } from "../../../shared/apperror.mjs";
+import { renderCodexMcpToml } from "../../academy/neo-mcp.mjs";
 import { readModelLibrary, resolveModelForManifest } from "../../models/library.mjs";
 import { decideToolAccess } from "../policy.mjs";
 import { startPolicyBridge } from "./bridge.mjs";
@@ -138,6 +139,36 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
     return session.agentDir;
   }
 
+  /**
+   * The academy assembler's engine-agnostic MCP render for this employee
+   * (票 a02). Missing or empty → null (today's behavior). Malformed → a
+   * readable failure, never a silently half-configured engine.
+   *
+   * @param {string} home
+   * @returns {import("../../academy/neo-mcp.mjs").McpServers | null}
+   */
+  function readAcademyMcp(home) {
+    const file = path.join(home, "academy-mcp.json");
+    let text;
+    try {
+      text = readFileSync(file, "utf8");
+    } catch {
+      return null;
+    }
+    let doc;
+    try {
+      doc = JSON.parse(text);
+    } catch (err) {
+      throw appError(
+        "academy_mcp_invalid",
+        `${file} 不是合法 JSON（academy 装配的产物）：${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    const servers = doc?.servers;
+    if (typeof servers !== "object" || servers === null || Array.isArray(servers)) return null;
+    return Object.keys(servers).length > 0 ? /** @type {import("../../academy/neo-mcp.mjs").McpServers} */ (servers) : null;
+  }
+
   /** @param {EmployeeSessionRow} session */
   function ensureHookInstall(session) {
     const hooksDir = path.join(homeFor(session), "hooks");
@@ -200,7 +231,13 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
       "",
     ].join("\n");
     mkdirSync(home, { recursive: true });
-    writeFileSync(path.join(home, "config.toml"), toml, "utf8");
+    // 票 a02 MCP: the academy assembler renders the role's servers into this
+    // employee's academy-mcp.json (values already env:VAR-resolved); codex's
+    // native shape is [mcp_servers.*] in this same config.toml. No file →
+    // exactly today's config (nothing configured, nothing passed).
+    const academy = readAcademyMcp(home);
+    const withMcp = academy === null ? toml : `${toml}\n${renderCodexMcpToml(academy)}\n`;
+    writeFileSync(path.join(home, "config.toml"), withMcp, "utf8");
     writeFileSync(
       path.join(home, "models.json"),
       `${JSON.stringify(

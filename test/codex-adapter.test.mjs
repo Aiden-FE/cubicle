@@ -509,3 +509,57 @@ test("shutdown kills live codex children (host exit reclamation)", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("academy MCP: assembled academy-mcp.json folds [mcp_servers.*] into the employee config.toml", async () => {
+  const dir = tempDir();
+  try {
+    seedModels(dir);
+    const session = sessionFixture(dir);
+    mkdirSync(session.agentDir, { recursive: true });
+    // The academy assembler's engine-agnostic render (values already resolved).
+    writeFileSync(
+      path.join(session.agentDir, "academy-mcp.json"),
+      JSON.stringify({
+        version: 1,
+        roleKey: "dev",
+        servers: {
+          github: { transport: "stdio", command: "npx", args: ["-y", "srv"], env: { GITHUB_TOKEN: "tok-42" } },
+        },
+      }),
+      "utf8",
+    );
+    const adapter = createCodexAdapter({ dataDir: dir, spawnProcess: () => fakeChild() });
+    await adapter.open({
+      employee: { name: "甲", roleSnapshot: { roleKey: "dev", domains: [], locks: {}, engine: "codex" } },
+      session,
+      onEvent: () => {},
+    });
+    const config = readFileSync(path.join(session.agentDir, "config.toml"), "utf8");
+    assert.match(config, /\[mcp_servers\.github\]/);
+    assert.match(config, /command = "npx"/);
+    assert.match(config, /args = \["-y", "srv"\]/);
+    assert.match(config, /env = \{ GITHUB_TOKEN = "tok-42" \}/);
+    // The policy hook must survive alongside the MCP blocks.
+    assert.match(config, /\[\[hooks\.PreToolUse\]\]/);
+
+    // No academy MCP → today's config unchanged (no [mcp_servers] section).
+    const dir2 = tempDir();
+    try {
+      seedModels(dir2);
+      const session2 = sessionFixture(dir2);
+      mkdirSync(session2.agentDir, { recursive: true });
+      const adapter2 = createCodexAdapter({ dataDir: dir2, spawnProcess: () => fakeChild() });
+      await adapter2.open({
+        employee: { name: "乙", roleSnapshot: { roleKey: "programmer", domains: [], locks: {}, engine: "codex" } },
+        session: session2,
+        onEvent: () => {},
+      });
+      const config2 = readFileSync(path.join(session2.agentDir, "config.toml"), "utf8");
+      assert.doesNotMatch(config2, /mcp_servers/);
+    } finally {
+      rmSync(dir2, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
