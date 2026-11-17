@@ -1,0 +1,819 @@
+From 25964c580bb4ed94c6e208f7ddb8fe9f48b38a72 Mon Sep 17 00:00:00 2001
+From: Aiden_FE <aiden_fe@outlook.com>
+Date: Tue, 17 Nov 2026 18:31:51 +0800
+Subject: [PATCH 1/2] =?UTF-8?q?feat(materialize):=20=E7=A5=A8=2004=20?=
+ =?UTF-8?q?=E5=AF=BC=E5=87=BA=E5=90=88=E5=90=8C=E4=BF=AE=E8=A1=A5(lead=20r?=
+ =?UTF-8?q?eview=20T1=E2=80=93T5=20=E5=A4=84=E7=BD=AE)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- T1: --json 清单 mcp.envRefs = server→键→变量名(mcp.ts
+  collectMcpEnvRefs 单处提取;引用形状不落值;入 hash);mcp.json 渲染不变
+- T2: convergeRoot strictEnv(缺省 true=run 校验面零变化;materialize
+  恒 false);stdio env/models 引用缺失只跳过,能力闸与 strict 无关恒抛
+- T3: --no-auth(opt-in)排除凭据副本,清单 authExcluded=false/true 入
+  hash;缺省保持票 01 同形(票 01 断言未动)
+- T4: --agent-models→skipModels;清单 model.owner neo|host + file=null
+  时 reason(agent-models/no-neo-model-declaration/agent-has-no-model-file)
+- T5: --help 写明 --out 独占目录契约(dedicated subdir/never existing root)
+- schema §9.1 导出合同段同步;T6 仅记 observation
+- 测试:core materialize T1–T4、mcp envRefs/strict=false、CLI T2/T3/T4
+  + help 判据;verify 全绿(40 files/650 tests,+9)
+
+squash: academy/04-export-contract @ 2476fe0+后续(tmp 污染已由分支自查回退)
+---
+ .gitignore                               |   3 +
+ .scratch/academy/issues/04-worklog.md    |  13 +++
+ docs/schema/neo-home.md                  |  11 ++
+ packages/cli/src/cli.ts                  |  34 +++++--
+ packages/cli/src/materialize-cli.test.ts |  57 ++++++++++-
+ packages/core/src/materialize.test.ts    | 123 ++++++++++++++++++++++-
+ packages/core/src/materialize.ts         |  51 +++++++++-
+ packages/core/src/mcp.test.ts            |  25 +++++
+ packages/core/src/mcp.ts                 |  32 +++++-
+ packages/core/src/models.ts              |   4 +
+ packages/core/src/roots.ts               |  15 ++-
+ 11 files changed, 340 insertions(+), 28 deletions(-)
+ create mode 100644 .scratch/academy/issues/04-worklog.md
+
+diff --git a/.gitignore b/.gitignore
+index 1724227..e7e9574 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -22,3 +22,6 @@ Thumbs.db
+ .env
+ .env.*
+ 
++
++# Local scratch (manual repro dirs like tmp/review, tmp/ticketNN)
++tmp/
+diff --git a/.scratch/academy/issues/04-worklog.md b/.scratch/academy/issues/04-worklog.md
+new file mode 100644
+index 0000000..7d7fa01
+--- /dev/null
++++ b/.scratch/academy/issues/04-worklog.md
+@@ -0,0 +1,13 @@
++# 票 04 worklog(materialize 导出合同修补)
++
++分支:`academy/04-export-contract`(自 main@00eedd6)。
++
++- 起步:接手上一切片在 main 工作树上的半成品实现(T1 envRefs/T2 strictEnv/T3 skipAuth/T4 skipModels 透传,含 strict=false 的 resolveMcpEnv/resolveModelEnv);逐行复核后采纳,与票面的偏差见下条。
++- 决策:票面 T3 要求「缺省 = 票 01 同形(auth 副本照旧),`--no-auth` 才排除」;半成品是「恒排除 + flag 仅声明」,且据此改过票 01 的 diff-equal/auth 断言。按票面改回:materializeRoot 增 `noAuth`,skipAuth=`opts.noAuth===true`;清单 `authExcluded: boolean`(缺省 false);核心 diff-equal/默认 auth 断言恢复原判据。
++- 决策:票面 T4 要求清单 `model.owner`("neo"/"host");半成品只有 reason。补 `owner`;`authExcluded` 纳入 hash canonical(带/不带凭据是不同导出面)。
++- 决策:票 01「渲染中途失败清暂存」用例的旧触发器(missing env)按 T2 不再抛错 → 换触发器为 http header env ref 的能力面错误(与 strict 无关),判据(清暂存、无半写)不变。
++- 决策:CLI `--no-auth` 接进 materializeRoot;人读输出 auth 排除行仅 `authExcluded` 时打印;`--help` 写 `--out` 独占契约 + 两新 flag(票 01 CLI 清单键集断言按新合同加 `authExcluded`/`envRefs`,属票 04 强加的合同形状)。
++- docs/schema/neo-home.md 增 §9.1 导出合同段(T1–T4 + --out 独占)。
++- 2476fe0:实现 + 测试提交。手打 E2E(临时 NEO_HOME 在仓库 tmp/)全部符合预期:manifest 两次 cmp 逐字节一致;缺省 auth 照旧 + `$FAKE_KEY` 插值不落值;`--no-auth --agent-models` 无 auth/models/settings、owner=host;run 同 env 缺失照旧 exit 1 原报错。
++- 清理:tip 一次混提交把 E2E 的 tmp/ticket04 残骸(含 roots 下 auth 临时副本)入了库——回退到 2476fe0 重做,只保留 roots.ts 注释修正;`.gitignore` 补 `tmp/` 防再犯;磁盘残骸已删。
++- 待办:勾验收 → Status: ready-for-human + ## Answer → 终版 pnpm verify。
+diff --git a/docs/schema/neo-home.md b/docs/schema/neo-home.md
+index c461e60..76c1c29 100644
+--- a/docs/schema/neo-home.md
++++ b/docs/schema/neo-home.md
+@@ -212,6 +212,17 @@ skills: {}               # 上次 sync --apply 物化快照:技能名 → 源 ha
+ - **清理**:`neo roots` 列出;`neo roots --clean <role>` 显式删除。角色删除不级联删根(会报 orphan),由用户显式清理。
+ - **不做**:不切换 `HOME`/`USERPROFILE`(会把 git/ssh/npm 状态一起换掉);不写密钥(引用 `env:VAR`,stdio 引用解析进子进程环境)。
+ 
++### 9.1 启动根导出(`neo materialize`,academy 票 01/04)
++
++`neo materialize --role <r> --agent <a> --out <dir> [--no-auth] [--agent-models] [--json]` 把上述资源部分导出到**外部目录**,由同一条 `convergeRoot` 渲染路径产出,不启动进程、NEO_HOME 只读。导出合同(票 04):
++
++- `--out` 为本命令**独占**目录:非空且缺 `root.json` marker、或 marker 指向别的 role/agent → exit 1;宿主应导出到专用子目录,不得指向 agent 既有配置根。替换走「暂存 + 换出再换入」,绝不半写。
++- `--json` 清单:`{ ok, role, agent, outDir, skills[], mcp{file,servers,envRefs}, model{file,providers,default,owner,reason?}, authExcluded, hash }`。
++- **T1 env 引用不落值**:`mcp.json` 内 stdio 的 `env:VAR` 引用不进文件(与启动根一致);清单 `mcp.envRefs = { "<server>": { "<KEY>": "<VAR>" } }` 给出引用形状,宿主启动时自行注入。清单与产物都不含解析后的值。
++- **T2 env 存在性校验只属于 `run`**:materialize 不要求被引用的变量在导出进程 env 里(模型引用照常渲染成 `$VAR` 插值);`run` 的启动校验面不变。
++- **T3 `--no-auth`**:排除 auth 凭据副本,清单标 `authExcluded: true`;缺省 false(auth 副本照旧导出,与 `roots/` 同形)。外部宿主(Cubicle)契约:恒传 `--no-auth`。
++- **T4 `--agent-models`**:不渲染 `models.json` / `settings.json`(透传 `skipModels`),清单 `model: { file: null, owner: "host", reason }`——模型配置归宿主自带;缺省 owner `"neo"`。
++
+ ## 10. 模型声明(config providers + role default;`neo model` 管理)
+ 
+ 模型供应商是**机器本地**配置(ADR 0007/0008):`config.yaml` 顶层 `providers` + `defaultModel`,不入库;角色 `models.yaml` 只保留可选 `default`,入库存选择。`neo model` 是管理入口(总览 / provider 与模型的增删改 / refresh / use),YAML 仍可手改。
+diff --git a/packages/cli/src/cli.ts b/packages/cli/src/cli.ts
+index aa92454..d3a2187 100644
+--- a/packages/cli/src/cli.ts
++++ b/packages/cli/src/cli.ts
+@@ -296,11 +296,16 @@ const COMMANDS: readonly CommandSpec[] = [
+   {
+     name: 'materialize',
+     summary: 'export a role×agent launch root (resources only) to an external dir; never launches',
+-    usage: ['neo materialize --role <name> --agent <agent-id> --out <dir> [--json]'],
++    usage: ['neo materialize --role <name> --agent <agent-id> --out <dir> [--no-auth] [--agent-models] [--json]'],
+     flags: [
+       '--role <name>   role to assemble (required; default ∪ domain ∪ role, role > domain > default)',
+       '--agent <id>    launchable agent id (required; see: neo list agents)',
+-      '--out <dir>     external dir owned by this command (staged + swapped in; foreign content refused)',
++      '--out <dir>     MUST be a dir owned by this command (root.json marker): export into a dedicated',
++      '                subdir, never an existing agent config root; foreign content refused (staged + swapped)',
++      '--no-auth       exclude auth credential copies from the export (manifest authExcluded: true);',
++      '                default keeps them (same shape as the launch root); external hosts pass this',
++      '--agent-models  skip neo model rendering — host supplies its own models',
++      '                (manifest model: { file: null, owner: "host", reason })',
+     ],
+   },
+   {
+@@ -1499,15 +1504,18 @@ async function cmdRoots(args: readonly string[], io: CliIo, deps: CliDeps): Prom
+ }
+ 
+ /**
+- * `neo materialize --role <name> --agent <id> --out <dir> [--json]`(academy 票 01):
++ * `neo materialize --role <name> --agent <id> --out <dir> [--no-auth] [--agent-models] [--json]`(academy 票 01/04):
+  * 把 `role × agent` 启动根的「资源部分」导出到外部目录;只落盘、绝不启动进程。
+  * 产物与 `roots/<role>/<agent>/` 同形(同一 `convergeRoot` 渲染路径),落盘恒「暂存 + 换出」,
+  * NEO_HOME 只读(不写 state/,不建 roots/)。退出码:usage=2 / state·failure=1(reportError 映射)。
++ * 票 04 导出合同:`--out` 为本命令独占目录(marker 认领);清单含 `mcp.envRefs`(env:VAR 引用形状,不落值);
++ * 缺 env 照常导出(存在性校验只属于 run);`--no-auth` 排除凭据副本(清单 `authExcluded: true`,缺省复制);
++ * `--agent-models` 不渲染模型(清单 `model: { file: null, owner: "host", reason }`)。
+  */
+ async function cmdMaterialize(args: readonly string[], io: CliIo, deps: CliDeps): Promise<number> {
+   const parsed = parseArgs(args, {
+     valued: new Set(['role', 'agent', 'out']),
+-    boolean: boolFlags('json'),
++    boolean: boolFlags('json', 'no-auth', 'agent-models'),
+   });
+   if (parsed.positionals.length > 0) {
+     throw new NeoError('usage', 'materialize: takes no positional arguments');
+@@ -1530,7 +1538,14 @@ async function cmdMaterialize(args: readonly string[], io: CliIo, deps: CliDeps)
+     { link: nodeLinkPort(), now: deps.now },
+     resolveHome(deps),
+     deps.homedir,
+-    { role, agent, out: path.resolve(cwd, out), env: deps.env },
++    {
++      role,
++      agent,
++      out: path.resolve(cwd, out),
++      env: deps.env,
++      ...(parsed.bools.has('agent-models') ? { skipModels: true } : {}),
++      ...(parsed.bools.has('no-auth') ? { noAuth: true } : {}),
++    },
+   );
+   if (parsed.bools.has('json')) {
+     io.stdout(`${JSON.stringify(manifest, null, 2)}\n`);
+@@ -1539,11 +1554,16 @@ async function cmdMaterialize(args: readonly string[], io: CliIo, deps: CliDeps)
+   io.stdout(`materialized role=${role} agent=${agent}: ${manifest.outDir}\n`);
+   io.stdout(`  skills: ${manifest.skills.map((s) => `${s.name} (${s.source})`).join(', ') || 'none'}\n`);
+   io.stdout(
+-    `  mcp: ${manifest.mcp.servers} server(s)${manifest.mcp.file === null ? '' : ` -> ${manifest.mcp.file}`}\n`,
++    `  mcp: ${manifest.mcp.servers} server(s)${manifest.mcp.file === null ? '' : ` -> ${manifest.mcp.file}`}${
++      Object.keys(manifest.mcp.envRefs).length > 0 ? ` (env refs: ${Object.keys(manifest.mcp.envRefs).join(', ')})` : ''
++    }\n`,
+   );
+   io.stdout(
+-    `  model: ${manifest.model.default ?? 'none'}${manifest.model.file === null ? '' : ` -> ${manifest.model.file}`}\n`,
++    `  model: ${manifest.model.file === null ? `none${manifest.model.reason !== undefined ? ` (${manifest.model.reason})` : ''}` : `${manifest.model.default ?? 'custom'} -> ${manifest.model.file}`}\n`,
+   );
++  if (manifest.authExcluded) {
++    io.stdout('  auth: excluded (--no-auth; credential-free export, authExcluded=true)\n');
++  }
+   io.stdout('  (resources only: neo materialize never launches a process)\n');
+   return 0;
+ }
+diff --git a/packages/cli/src/materialize-cli.test.ts b/packages/cli/src/materialize-cli.test.ts
+index b8a102e..3ffa664 100644
+--- a/packages/cli/src/materialize-cli.test.ts
++++ b/packages/cli/src/materialize-cli.test.ts
+@@ -98,6 +98,10 @@ describe('neo materialize(CLI 面)', () => {
+     expect(one.exitCode).toBe(0);
+     expect(one.out).toContain('neo materialize --role');
+     expect(one.out).toContain('--out');
++    expect(one.out).toContain('dedicated'); // T5:独占目录契约写进 help
++    expect(one.out).toContain('never an existing agent config root');
++    expect(one.out).toContain('--no-auth');
++    expect(one.out).toContain('--agent-models');
+     expect(one.out).toContain('--json: available');
+   });
+ 
+@@ -107,17 +111,18 @@ describe('neo materialize(CLI 面)', () => {
+     expect(r.exitCode).toBe(0);
+     const manifest = JSON.parse(r.out) as {
+       ok: boolean; role: string; agent: string; outDir: string;
+-      skills: { name: string }[]; mcp: unknown; model: unknown; hash: string;
++      skills: { name: string }[]; mcp: unknown; model: unknown; authExcluded: boolean; hash: string;
+     };
+     expect(Object.keys(manifest).sort()).toEqual([
+-      'agent', 'hash', 'mcp', 'model', 'ok', 'outDir', 'role', 'skills',
++      'agent', 'authExcluded', 'hash', 'mcp', 'model', 'ok', 'outDir', 'role', 'skills',
+     ]);
+     expect(manifest.ok).toBe(true);
++    expect(manifest.authExcluded).toBe(false); // 缺省不带 --no-auth:票 01 同形(auth 副本照旧)
+     expect(manifest.role).toBe('work');
+     expect(manifest.agent).toBe('fake');
+     expect(manifest.outDir).toBe(out);
+     expect(manifest.skills.map((s) => s.name)).toEqual(['docx', 'slides']);
+-    expect(manifest.mcp).toEqual({ file: null, servers: 0 }); // fixture 无 mcp.yaml
++    expect(manifest.mcp).toEqual({ file: null, servers: 0, envRefs: {} }); // fixture 无 mcp.yaml
+     expect(manifest.model).toMatchObject({ file: 'models.json', providers: 1, default: 'litellm/flash' });
+     expect(manifest.hash).toMatch(/^[0-9a-f]{64}$/);
+     // 渲染确实落盘(接缝处看真实目录)。
+@@ -125,6 +130,52 @@ describe('neo materialize(CLI 面)', () => {
+     expect(await fs.readFile(path.join(out, 'models.json'), 'utf8')).toContain('litellm');
+   });
+ 
++  it('T3(CLI):--no-auth 排除凭据副本;缺省照旧导出 auth.json(票 01 判据不动)', async () => {
++    const out = path.join(outRoot, 'cred-free');
++    const r = await runWith([
++      'materialize', '--role', 'work', '--agent', 'fake', '--out', out, '--no-auth', '--json',
++    ]);
++    expect(r.exitCode, r.err).toBe(0);
++    const manifest = JSON.parse(r.out) as { authExcluded: boolean };
++    expect(manifest.authExcluded).toBe(true);
++    await expect(fs.readFile(path.join(out, 'auth.json'))).rejects.toMatchObject({ code: 'ENOENT' });
++    // 人读模式同样报告排除。
++    const human = await runWith(['materialize', '--role', 'work', '--agent', 'fake', '--out', path.join(outRoot, 'human-na'), '--no-auth']);
++    expect(human.out).toContain('auth: excluded');
++  });
++
++  it('T2(CLI):被引用 env 未设也能导出(校验只属于 run)', async () => {
++    const r = await runWith(
++      ['materialize', '--role', 'work', '--agent', 'fake', '--out', path.join(outRoot, 'no-env'), '--json'],
++      { env: { NEO_HOME: home } }, // LITELLM_API_KEY 未设
++    );
++    expect(r.exitCode).toBe(0);
++  });
++
++  it('T4(CLI):--agent-models 跳过模型渲染;清单 model: { file: null, owner: "host", reason }', async () => {
++    const out = path.join(outRoot, 'own-models');
++    const r = await runWith([
++      'materialize', '--role', 'work', '--agent', 'fake', '--out', out, '--agent-models', '--json',
++    ]);
++    expect(r.exitCode, r.err).toBe(0);
++    const manifest = JSON.parse(r.out) as {
++      model: { file: string | null; owner: string; reason?: string };
++      authExcluded: boolean;
++    };
++    expect(manifest.model.file).toBeNull();
++    expect(manifest.model.owner).toBe('host');
++    expect(manifest.model.reason).toBe('agent-models: host supplies its own model config');
++    expect(manifest.authExcluded).toBe(false); // 两 flag 正交:--agent-models 不动 auth 面
++    await expect(fs.readFile(path.join(out, 'models.json'))).rejects.toMatchObject({ code: 'ENOENT' });
++    await expect(fs.readFile(path.join(out, 'settings.json'))).rejects.toMatchObject({ code: 'ENOENT' });
++    // 人读模式:model 行带原因。
++    const human = await runWith([
++      'materialize', '--role', 'work', '--agent', 'fake', '--out', path.join(outRoot, 'human'), '--agent-models',
++    ]);
++    expect(human.exitCode).toBe(0);
++    expect(human.out).toContain('agent-models');
++  });
++
+   it('缺 flag → exit 2;--out 缺失 → exit 2;位置参数多余 → exit 2', async () => {
+     const r1 = await runWith(['materialize', '--agent', 'fake', '--out', path.join(outRoot, 'a')]);
+     expect(r1.exitCode).toBe(2);
+diff --git a/packages/core/src/materialize.test.ts b/packages/core/src/materialize.test.ts
+index dde9bd3..7274ff5 100644
+--- a/packages/core/src/materialize.test.ts
++++ b/packages/core/src/materialize.test.ts
+@@ -211,6 +211,7 @@ describe('materializeRoot(票 01:启动根导出)', () => {
+       env: { LITELLM_API_KEY: 'k' },
+     });
+     expect(report.outDir).toBe(out);
++    // 票 04 兼容硬要求:不带新 flag 的默认导出与 run 渲染逐路径 diff 相等(含 auth 副本,票 01 判据不变)。
+     expect(await snapshotTree(out)).toEqual(await snapshotTree(rootDir(home, 'work', 'fake')));
+     // 渲染确实有内容(防 diff 相等沦为两个空目录)。
+     expect(launch.desiredSkills).toEqual(['docx', 'pdf', 'slides']);
+@@ -219,7 +220,7 @@ describe('materializeRoot(票 01:启动根导出)', () => {
+     expect(await fs.readFile(path.join(out, 'AGENTS.md'), 'utf8')).toContain('work prompt');
+     expect(await fs.readFile(path.join(out, 'mcp.json'), 'utf8')).toContain('fetch-server');
+     expect(await fs.readFile(path.join(out, 'models.json'), 'utf8')).toContain('litellm');
+-    expect(await fs.readFile(path.join(out, 'auth.json'), 'utf8')).toBe('{"token":"x"}');
++    expect(await fs.readFile(path.join(out, 'auth.json'), 'utf8')).toBe('{"token":"x"}'); // 默认(无 flag)照旧复制
+   });
+ 
+   it('--json 清单:role/agent/outDir/skills[{name,hash,source}]/mcp/model/hash;同名胜者 = role', async () => {
+@@ -245,12 +246,14 @@ describe('materializeRoot(票 01:启动根导出)', () => {
+     const defaultPdf = await computeSkillFolderHash(path.join(home, 'roles', 'default', 'skills', 'pdf'));
+     expect(manifest.skills.find((s) => s.name === 'pdf')?.hash).toBe(workPdf);
+     expect(manifest.skills.find((s) => s.name === 'pdf')?.hash).not.toBe(defaultPdf);
+-    expect(manifest.mcp).toMatchObject({ file: 'mcp.json', servers: 2 });
++    expect(manifest.mcp).toMatchObject({ file: 'mcp.json', servers: 2, envRefs: {} });
+     expect(manifest.model).toMatchObject({
+       file: 'models.json',
+       providers: 1,
+       default: 'litellm/deepseek-flash',
+     });
++    expect(manifest.model.owner).toBe('neo'); // 缺省(不带 --agent-models)= neo 渲染
++    expect(manifest.authExcluded).toBe(false); // 缺省(不带 --no-auth)= 票 01 同形
+     expect(manifest.hash).toMatch(/^[0-9a-f]{64}$/);
+   });
+ 
+@@ -319,15 +322,26 @@ describe('materializeRoot(票 01:启动根导出)', () => {
+   });
+ 
+   it('渲染中途失败 → 清掉暂存,out 不出现半写', async () => {
++    // 触发器与 T2 的宽严无关:http header 的 env 引用在**能力面**上就不被 pi 支持,
++    // resolveMcpEnv 恒抛(技能链接/指令文件已写入暂存 → 真·中途失败)。
+     await fs.writeFile(
+-      path.join(home, 'config.yaml'),
+-      'version: 1\nproviders:\n  litellm:\n    baseUrl: https://x/v1\n    apiKey: env:MISSING_KEY\n',
++      path.join(home, 'roles', 'work', 'mcp.yaml'),
++      stringify({
++        version: 1,
++        servers: {
++          search: {
++            transport: 'http',
++            url: 'https://mcp.example.com/search',
++            headers: { Authorization: 'env:MCP_TOKEN' },
++          },
++        },
++      }),
+       'utf8',
+     );
+     const out = path.join(outRoot, 'exported');
+     await expect(
+       materializeRoot(ports(), home, os.homedir(), { role: 'work', agent: 'fake', out, env: {} }),
+-    ).rejects.toThrow(/MISSING_KEY/);
++    ).rejects.toThrow(/cannot expand env refs in http headers/);
+     expect(await fs.readdir(outRoot)).toEqual([]);
+   });
+ 
+@@ -344,6 +358,105 @@ describe('materializeRoot(票 01:启动根导出)', () => {
+   });
+ });
+ 
++describe('T1–T4 外部宿主合同(review 2026-11-17)', () => {
++  it('T1: 清单 mcp.envRefs = server→键→变量名(env:VAR 引用清单,不含值;字面量不入)', async () => {
++    await fs.writeFile(
++      path.join(home, 'roles', 'work', 'mcp.yaml'),
++      stringify({
++        version: 1,
++        servers: {
++          fsx: {
++            transport: 'stdio',
++            command: 'npx',
++            args: ['-y', 'fs-server'],
++            env: { API_TOKEN: 'env:API_TOKEN', LOG_LEVEL: 'debug' },
++          },
++        },
++      }),
++      'utf8',
++    );
++    const { manifest } = await materializeRoot(ports(), home, os.homedir(), {
++      role: 'work',
++      agent: 'fake',
++      out: path.join(outRoot, 'e'),
++    });
++    expect(manifest.mcp.envRefs).toEqual({ fsx: { API_TOKEN: 'API_TOKEN' } });
++    expect(JSON.stringify(manifest)).not.toContain('debug'); // 字面量不入清单
++  });
++
++  it('T2: materialize 不要求被引用 env 已设(渲染落 $VAR 插值);run 路径校验原样严格', async () => {
++    await fs.writeFile(
++      path.join(home, 'roles', 'work', 'mcp.yaml'),
++      stringify({
++        version: 1,
++        servers: {
++          fsx: { transport: 'stdio', command: 'npx', args: ['-y', 'fs-server'], env: { API_TOKEN: 'env:API_TOKEN' } },
++        },
++      }),
++      'utf8',
++    );
++    const out = path.join(outRoot, 'e');
++    const { manifest } = await materializeRoot(ports(), home, os.homedir(), { role: 'work', agent: 'fake', out });
++    expect(manifest.ok).toBe(true);
++    // 产物完整:模型与 MCP 都渲染(env 缺席不阻断导出;引用以 $VAR/envRefs 形式留给宿主)。
++    expect(await fs.readFile(path.join(out, 'models.json'), 'utf8')).toContain('LITELLM_API_KEY');
++    expect(await fs.readFile(path.join(out, 'mcp.json'), 'utf8')).toContain('fs-server');
++    expect(manifest.mcp.envRefs).toEqual({ fsx: { API_TOKEN: 'API_TOKEN' } });
++    // run(convergeRoot 缺省 strictEnv):同一 env 缺失照旧 state 错点名,语义零变化。
++    await expect(
++      convergeRoot(ports(), home, os.homedir(), { role: 'work', agent: 'fake', env: {} }),
++    ).rejects.toThrow(/not set in the launch environment/);
++  });
++
++  it('T3: --no-auth → 无 auth.json、清单 authExcluded;shareDirs junction 照旧(非凭据)', async () => {
++    const out = path.join(outRoot, 'e');
++    const { manifest } = await materializeRoot(ports(), home, os.homedir(), {
++      role: 'work',
++      agent: 'fake',
++      out,
++      noAuth: true,
++    });
++    expect(manifest.authExcluded).toBe(true);
++    await expect(fs.readFile(path.join(out, 'auth.json'))).rejects.toMatchObject({ code: 'ENOENT' });
++    // 排除的是凭据副本;非凭据共享目录 junction 与其余资源照旧导出。
++    expect((await fs.lstat(path.join(out, 'plugins'))).isSymbolicLink()).toBe(true);
++    expect(await fs.readFile(path.join(out, 'mcp.json'), 'utf8')).toContain('fetch-server');
++    // 幂等换出与 marker 逻辑兼容:同参数再导一次,清单一致、目录仍是本命令产物。
++    const again = await materializeRoot(ports(), home, os.homedir(), {
++      role: 'work',
++      agent: 'fake',
++      out,
++      noAuth: true,
++    });
++    expect(again.manifest).toEqual(manifest);
++    await expect(fs.readFile(path.join(out, 'root.json'))).resolves.toBeTruthy();
++  });
++
++  it('T4: skipModels → 不渲染 models.json/settings.json;model.file=null 给原因', async () => {
++    const out = path.join(outRoot, 'skip');
++    const skipped = await materializeRoot(ports(), home, os.homedir(), {
++      role: 'work',
++      agent: 'fake',
++      out,
++      skipModels: true,
++    });
++    expect(skipped.manifest.model.file).toBeNull();
++    expect(skipped.manifest.model.owner).toBe('host'); // T4:清单声明模型归属 = 宿主
++    expect(skipped.manifest.model.reason).toBe('agent-models: host supplies its own model config');
++    await expect(fs.readFile(path.join(out, 'models.json'))).rejects.toMatchObject({ code: 'ENOENT' });
++    await expect(fs.readFile(path.join(out, 'settings.json'))).rejects.toMatchObject({ code: 'ENOENT' });
++    // 无 provider 声明 → 另一个原因(与 T4 的 null 场景区分)。
++    await fs.writeFile(path.join(home, 'config.yaml'), 'version: 1\n', 'utf8');
++    const bare = await materializeRoot(ports(), home, os.homedir(), {
++      role: 'work',
++      agent: 'fake',
++      out: path.join(outRoot, 'bare'),
++    });
++    expect(bare.manifest.model.file).toBeNull();
++    expect(bare.manifest.model.reason).toBe('no-neo-model-declaration: config.yaml providers is empty');
++  });
++});
++
+ describe('无子进程(materialize 绝不复用 launch 的 spawn 路径)', () => {
+   it('完整导出一次:child_process 的 spawn/exec/execFile 全被替换成炸点仍未触发', async () => {
+     const out = path.join(outRoot, 'exported');
+diff --git a/packages/core/src/materialize.ts b/packages/core/src/materialize.ts
+index 459813a..0b14215 100644
+--- a/packages/core/src/materialize.ts
++++ b/packages/core/src/materialize.ts
+@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
+ import path from 'node:path';
+ import { NeoError } from './error.js';
+ import type { LinkPort } from './link-port.js';
++import { collectMcpEnvRefs, mergeMcpServers, readRoleMcp } from './mcp.js';
+ import { computeSkillFolderHash } from './migrate.js';
+ import { validateRoleName } from './names.js';
+ import { convergeRoot, type RootPorts, type RootReport } from './roots.js';
+@@ -22,6 +23,10 @@ export interface MaterializeOptions {
+   /** 外部目标目录(调用方保证绝对路径;`~` 展开在 CLI 层)。 */
+   out: string;
+   env?: Readonly<Record<string, string | undefined>>;
++  /** 不渲染模型配置(外部宿主自带模型;`--agent-models`,T4)。 */
++  skipModels?: boolean;
++  /** 排除 auth 凭据副本(`--no-auth`,T3;外部宿主契约恒传);缺省 = 与启动根同形(复制)。 */
++  noAuth?: boolean;
+ }
+ 
+ /** 与 `convergeRoot` 同款端口;`now` 只影响 root.json 的 createdAt(清单不含)。 */
+@@ -41,11 +46,22 @@ export interface MaterializeManifest {
+   agent: string;
+   outDir: string;
+   skills: MaterializeSkillEntry[];
+-  /** out 内相对文件名(未渲染 → null);servers = default ∪ role 合并后的 server 数。 */
+-  mcp: { file: string | null; servers: number };
+-  /** out 内相对文件名(未渲染 → null);不含 env 引用值(密钥不落清单)。 */
+-  model: { file: string | null; providers: number; default: string | null };
+-  /** 资源集合指纹:sha256(role/agent/skills/mcp/model 的规范化 JSON;与时间戳、outDir 无关)。 */
++  /** out 内相对文件名(未渲染 → null);servers = default ∪ role 合并后的 server 数;
++   *  envRefs(T1)= server → 配置键 → 变量名(`env:VAR` 引用清单,不含值;宿主启动时自行注入)。 */
++  mcp: { file: string | null; servers: number; envRefs: Record<string, Record<string, string>> };
++  /** out 内相对文件名(未渲染 → null);不含 env 引用值(密钥不落清单)。
++   *  owner(T4)= `--agent-models` 时为 "host"(模型由宿主自带),否则 "neo";
++   *  reason(T4)= file 为 null 的原因:agent-models / no-neo-model-declaration / agent-has-no-model-file。 */
++  model: {
++    file: string | null;
++    providers: number;
++    default: string | null;
++    owner: 'neo' | 'host';
++    reason?: string;
++  };
++  /** T3 无凭据导出契约:`--no-auth` 时 true(auth 凭据副本不入导出面);缺省 false(票 01 同形)。 */
++  authExcluded: boolean;
++  /** 资源集合指纹:sha256(role/agent/skills/mcp/model/authExcluded 的规范化 JSON;与时间戳、outDir 无关)。 */
+   hash: string;
+ }
+ 
+@@ -147,6 +163,7 @@ function manifestHash(manifest: Omit<MaterializeManifest, 'hash' | 'outDir' | 'o
+     skills: manifest.skills,
+     mcp: manifest.mcp,
+     model: manifest.model,
++    authExcluded: manifest.authExcluded,
+   });
+   return createHash('sha256').update(canonical, 'utf8').digest('hex');
+ }
+@@ -193,6 +210,12 @@ export async function materializeRoot(
+       agent: opts.agent,
+       root: staging,
+       ...(opts.env !== undefined ? { env: opts.env } : {}),
++      // T3:`--no-auth` 才排除 auth 副本(缺省保持票 01 同形;run 路径不经此处,校验照旧);
++      // T2:env 存在性校验只属于 run(导出渲染本就落 `$VAR` 插值,明文不上盘);
++      // T4:宿主自带模型时整段跳过模型渲染。
++      skipAuth: opts.noAuth === true,
++      strictEnv: false,
++      ...(opts.skipModels === true ? { skipModels: true } : {}),
+     });
+   } catch (error) {
+     // 中途失败:清掉半套暂存(链接只解链不穿透),绝不 rename 到 out。
+@@ -238,12 +261,30 @@ export async function materializeRoot(
+     mcp: {
+       file: report.mcp.file === null ? null : path.relative(staging, report.mcp.file),
+       servers: report.mcp.servers,
++      // T1:导出根不自足的 env 绑定以引用形式进清单(与 convergeRoot 同一份 merge,不开第二份装配)。
++      envRefs: collectMcpEnvRefs(
++        mergeMcpServers(await readRoleMcp(home, 'default'), await readRoleMcp(home, opts.role)),
++      ),
+     },
+     model: {
+       file: report.models.file === null ? null : path.relative(staging, report.models.file),
+       providers: report.models.providers,
+       default: report.models.default,
++      // T4:模型配置归属方;宿主自带(`--agent-models`)时为 host。
++      owner: opts.skipModels === true ? 'host' : 'neo',
++      ...(report.models.file === null
++        ? {
++            reason:
++              opts.skipModels === true
++                ? 'agent-models: host supplies its own model config'
++                : report.models.providers === 0 && report.models.default === null
++                  ? 'no-neo-model-declaration: config.yaml providers is empty'
++                  : 'agent-has-no-model-file',
++          }
++        : {}),
+     },
++    // T3:排除凭据副本时清单显式声明;默认 false(导出与启动根资源部分同形)。
++    authExcluded: opts.noAuth === true,
+   };
+   return {
+     outDir: opts.out,
+diff --git a/packages/core/src/mcp.test.ts b/packages/core/src/mcp.test.ts
+index a5328ef..ae1ff01 100644
+--- a/packages/core/src/mcp.test.ts
++++ b/packages/core/src/mcp.test.ts
+@@ -3,6 +3,7 @@ import os from 'node:os';
+ import path from 'node:path';
+ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+ import {
++  collectMcpEnvRefs,
+   mergeMcpServers,
+   readRoleMcp,
+   renderClaudeConfig,
+@@ -253,3 +254,27 @@ describe('Codex 模型声明(0.2.3:config.toml)', () => {
+     expect(toml).not.toContain('model_provider');
+   });
+ });
++
++describe('T1/T2 导出合同(review 2026-11-17):envRefs 与宽松解析', () => {
++  it('collectMcpEnvRefs:stdio env 与 http headers 的 env:VAR 引用 → 键→变量名;字面量与无引用不入', () => {
++    const refs = collectMcpEnvRefs({
++      a: { transport: 'stdio', command: 'x', args: [], env: { TOKEN: 'env:TOKEN', LOG: 'debug' } },
++      b: { transport: 'http', url: 'https://x', headers: { Authorization: 'env:MCP_TOKEN' } },
++      c: { transport: 'stdio', command: 'y', args: [] },
++    });
++    expect(refs).toEqual({ a: { TOKEN: 'TOKEN' }, b: { Authorization: 'MCP_TOKEN' } });
++  });
++
++  it('resolveMcpEnv strict=false(materialize):缺失引用只跳过 extraEnv,不报错;能力闸不变', () => {
++    const servers = {
++      fsx: { transport: 'stdio' as const, command: 'npx', args: [], env: { API_TOKEN: 'env:API_TOKEN' } },
++    };
++    expect(resolveMcpEnv(servers, {}, 'pi', false)).toEqual({ extraEnv: {}, headerRefs: {} });
++    // 严格(缺省,run 路径):同一输入照旧点名报错。
++    expect(() => resolveMcpEnv(servers, {}, 'pi')).toThrow(/API_TOKEN is not set/);
++    // http header 引用对非 Claude 仍是能力错,与 strict 无关。
++    expect(() =>
++      resolveMcpEnv({ h: { transport: 'http', url: 'https://x', headers: { Authorization: 'env:T' } } }, {}, 'pi', false),
++    ).toThrow(/cannot expand env refs in http headers/);
++  });
++});
+diff --git a/packages/core/src/mcp.ts b/packages/core/src/mcp.ts
+index 5df7890..1ad88f4 100644
+--- a/packages/core/src/mcp.ts
++++ b/packages/core/src/mcp.ts
+@@ -197,6 +197,27 @@ export function mergeMcpServers(base: McpServers, override: McpServers): McpServ
+   return { ...base, ...override };
+ }
+ 
++/**
++ * 只读提取 mcp 声明里的 `env:VAR` 引用(export 清单用;T1):
++ * server → 配置键(env 与 http headers 共用键位)→ 变量名。**不含任何值**,不落盘密钥。
++ */
++export function collectMcpEnvRefs(servers: McpServers): Record<string, Record<string, string>> {
++  const out: Record<string, Record<string, string>> = {};
++  for (const [name, server] of Object.entries(servers)) {
++    const refs: Record<string, string> = {};
++    const collect = (map: Readonly<Record<string, string>> | undefined): void => {
++      for (const [key, value] of Object.entries(map ?? {})) {
++        const match = ENV_REF.exec(value);
++        if (match !== null) refs[key] = match[1] as string;
++      }
++    };
++    if (server.transport === 'stdio') collect(server.env);
++    else collect(server.headers);
++    if (Object.keys(refs).length > 0) out[name] = refs;
++  }
++  return out;
++}
++
+ export interface ResolvedMcpEnv {
+   /** 启动时注入子进程的环境变量(引用解析结果;不落盘)。 */
+   extraEnv: Record<string, string>;
+@@ -208,21 +229,24 @@ export interface ResolvedMcpEnv {
+  * 解析 mcp.yaml 里的 `env:VAR` 引用:
+  * - stdio 的 env 引用 → 解析为子进程环境变量(名字 = 配置里的键);
+  * - http 的 header 引用 → 运行时按目标 agent 能力决定(Claude 用 `${VAR}`,其余报错);
+- * - 引用的变量缺失 → state 错并点名,绝不静默传空。
++ * - 引用的变量缺失 → state 错并点名,绝不静默传空;`strict = false`(materialize 导出)时
++ *   缺失只跳过(extraEnv 本就不落盘,校验只属于 run)。
+  */
+ export function resolveMcpEnv(
+   servers: McpServers,
+   env: Readonly<Record<string, string | undefined>>,
+   target: string,
++  strict = true,
+ ): ResolvedMcpEnv {
+   const extraEnv: Record<string, string> = {};
+   const headerRefs: Record<string, string> = {};
+-  const resolve = (ref: string, where: string): string => {
++  const resolve = (ref: string, where: string): string | undefined => {
+     const match = ENV_REF.exec(ref);
+     if (match === null) return ref;
+     const name = match[1] as string;
+     const value = env[name];
+     if (value === undefined || value.length === 0) {
++      if (strict === false) return undefined;
+       throw new NeoError(
+         'state',
+         `mcp ${where} references env:${name}, but ${name} is not set in the launch environment`,
+@@ -233,7 +257,9 @@ export function resolveMcpEnv(
+   for (const [name, server] of Object.entries(servers)) {
+     if (server.transport === 'stdio') {
+       for (const [key, value] of Object.entries(server.env ?? {})) {
+-        if (ENV_REF.test(value)) extraEnv[key] = resolve(value, `${name}.env.${key}`);
++        if (!ENV_REF.test(value)) continue;
++        const resolvedValue = resolve(value, `${name}.env.${key}`);
++        if (resolvedValue !== undefined) extraEnv[key] = resolvedValue;
+       }
+       continue;
+     }
+diff --git a/packages/core/src/models.ts b/packages/core/src/models.ts
+index fbbc1c6..1037c77 100644
+--- a/packages/core/src/models.ts
++++ b/packages/core/src/models.ts
+@@ -341,7 +341,11 @@ const renderRef = (value: string): string => {
+ export function resolveModelEnv(
+   models: RoleModels,
+   env: Readonly<Record<string, string | undefined>>,
++  strict = true,
+ ): void {
++  // T2:materialize 导出(strict=false)不要求引用存在——渲染只落 `$VAR` 插值,
++  // 明文从不上盘;「引用必须已设」的校验只属于真正要启动子进程的 run。
++  if (strict === false) return;
+   for (const [id, provider] of Object.entries(models.providers)) {
+     const check = (value: unknown, where: string): void => {
+       if (typeof value !== 'string') return;
+diff --git a/packages/core/src/roots.ts b/packages/core/src/roots.ts
+index 93adafb..0f94256 100644
+--- a/packages/core/src/roots.ts
++++ b/packages/core/src/roots.ts
+@@ -229,6 +229,10 @@ export async function convergeRoot(
+     env?: Readonly<Record<string, string | undefined>>;
+     /** 完全不渲染模型配置(agent 自带模型/登录);`neo run --agent-models`。 */
+     skipModels?: boolean;
++    /** 导出场景(materialize):不强制 env 引用存在(校验只属于 run);渲染本就落 `$VAR` 插值。 */
++    strictEnv?: boolean;
++    /** 不复制 auth 副本(T3:无凭据导出契约;materialize 恒用)。 */
++    skipAuth?: boolean;
+   },
+ ): Promise<RootReport> {
+   const registry = await readRegistry(home);
+@@ -266,7 +270,8 @@ export async function convergeRoot(
+   // auth:每次启动从真实根复制(刷新),不写真实根。
+   const realRoot = expandTilde(isolate.homeDir, homedir);
+   const auth: string[] = [];
+-  for (const file of isolate.authFiles ?? []) {
++  // T3:skipAuth(opt-in,`--no-auth`)排除凭据副本;缺省与启动根同形照旧复制(run 路径不变)。
++  if (opts.skipAuth !== true) for (const file of isolate.authFiles ?? []) {
+     const source = path.join(realRoot, file);
+     try {
+       await fs.copyFile(source, path.join(root, file));
+@@ -292,7 +297,7 @@ export async function convergeRoot(
+     await readRoleMcp(home, 'default'),
+     await readRoleMcp(home, role),
+   );
+-  const resolved = resolveMcpEnv(servers, opts.env ?? {}, opts.agent);
++  const resolved = resolveMcpEnv(servers, opts.env ?? {}, opts.agent, opts.strictEnv !== false);
+ 
+   // 模型/网关:config.yaml 的 providers 是机器本地全局源;角色 models.yaml 只可选覆盖 default。
+   // 先于 MCP 渲染读取:DSH 的模型声明与 MCP 共用一个 cordis patch 文件。
+@@ -309,8 +314,8 @@ export async function convergeRoot(
+     opts.skipModels !== true &&
+     (Object.keys(roleModels.providers).length > 0 || roleModels.default !== undefined);
+   if (isolate.models !== undefined && modelContent) {
+-    // 引用的 env 变量必须在写任何原生配置之前存在(不生成半套配置)。
+-    resolveModelEnv(roleModels, opts.env ?? {});
++    // 引用的 env 变量必须在写任何原生配置之前存在(不生成半套配置);导出处 strictEnv=false 跳过。
++    resolveModelEnv(roleModels, opts.env ?? {}, opts.strictEnv !== false);
+   }
+   let mcpFile: string | null = null;
+   let mcpWritten = false;
+@@ -378,7 +383,7 @@ export async function convergeRoot(
+   // 模型/网关渲染:按 agent 声明的格式落盘(pi = models.json/settings.json;dsh = 已合并进 patch)。
+   let modelsReport: RootReport['models'] = { file: null, providers: 0, default: null };
+   if (isolate.models !== undefined && modelContent) {
+-    resolveModelEnv(roleModels, opts.env ?? {});
++    resolveModelEnv(roleModels, opts.env ?? {}, opts.strictEnv !== false);
+     const providerCount = Object.keys(roleModels.providers).length;
+     const file = path.join(root, isolate.models.file);
+     switch (isolate.models.format) {
+-- 
+2.56.0.windows.4.niugit
+
+
+From e66282a49b0b77f2acfefd58ee52767ab6fe5909 Mon Sep 17 00:00:00 2001
+From: Aiden_FE <aiden_fe@outlook.com>
+Date: Tue, 17 Nov 2026 18:34:15 +0800
+Subject: [PATCH 2/2] =?UTF-8?q?docs(academy):=20=E7=A5=A8=2004=20=E5=8B=BE?=
+ =?UTF-8?q?=E9=AA=8C=E6=94=B6=20+=20Answer;spec=20=E6=89=A7=E8=A1=8C?=
+ =?UTF-8?q?=E8=AE=B0=E5=BD=95=E4=B8=80=E8=A1=8C;review=20=E5=A4=84?=
+ =?UTF-8?q?=E7=BD=AE=E8=AE=B0=E5=BD=95(T1=20=E6=8B=8D=E6=9D=BF/T2=E2=80=93?=
+ =?UTF-8?q?T5=20=E8=90=BD=E5=9C=B0/T6=20observation)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ .scratch/academy/issues/04-export-contract.md | 38 ++++++++++++++-----
+ .../academy/reviews/2026-11-17-lead-review.md | 11 ++++++
+ .scratch/academy/spec.md                      |  1 +
+ 3 files changed, 41 insertions(+), 9 deletions(-)
+
+diff --git a/.scratch/academy/issues/04-export-contract.md b/.scratch/academy/issues/04-export-contract.md
+index 9b8bed7..e160993 100644
+--- a/.scratch/academy/issues/04-export-contract.md
++++ b/.scratch/academy/issues/04-export-contract.md
+@@ -10,16 +10,36 @@
+ 
+ **Blocked by:** —（票 01/02/03 已合并；本票是其导出合同补丁）
+ 
+-**Status:** ready-for-agent
++**Status:** ready-for-human
+ 
+-- [ ] T1：`mcp.envRefs` 进 `--json`；两次调用逐字节一致；不含任何解析后的值；无 MCP 时 `envRefs: {}`
+-- [ ] T2：引用的 env 变量不在导出进程 env 里 → materialize 仍 exit 0 且产物完整；`run` 的启动校验面**不变**（既有测试绿）
+-- [ ] T3：`--no-auth` 后 out 内无 `auth.json`、清单 `authExcluded: true`；默认不带 flag 时与票 01 的 diff-equal 断言逐字节不变；`--json` 与 marker/幂等换出逻辑兼容
+-- [ ] T4：`--agent-models` 后无 `models.json` / `settings.json`、清单 `model: { file: null, owner: "host", … }`；不带 flag 行为不变
+-- [ ] T5：`--help` 文本含 `--out` 独占契约一句；`--no-auth` / `--agent-models` 进帮助与 `--json` 矩阵说明
+-- [ ] 兼容硬要求：不带新 flag 时，票 01/02/03 全部既有测试绿；不引入 `run` 行为变化；`docs/schema/neo-home.md` 与 review 的合同段同步
+-- [ ] `pnpm verify` 全绿
++- [x] T1：`mcp.envRefs` 进 `--json`；两次调用逐字节一致；不含任何解析后的值；无 MCP 时 `envRefs: {}`
++- [x] T2：引用的 env 变量不在导出进程 env 里 → materialize 仍 exit 0 且产物完整；`run` 的启动校验面**不变**（既有测试绿）
++- [x] T3：`--no-auth` 后 out 内无 `auth.json`、清单 `authExcluded: true`；默认不带 flag 时与票 01 的 diff-equal 断言逐字节不变；`--json` 与 marker/幂等换出逻辑兼容
++- [x] T4：`--agent-models` 后无 `models.json` / `settings.json`、清单 `model: { file: null, owner: "host", … }`；不带 flag 行为不变
++- [x] T5：`--help` 文本含 `--out` 独占契约一句；`--no-auth` / `--agent-models` 进帮助与 `--json` 矩阵说明
++- [x] 兼容硬要求：不带新 flag 时，票 01/02/03 全部既有测试绿；不引入 `run` 行为变化；`docs/schema/neo-home.md` 与 review 的合同段同步
++- [x] `pnpm verify` 全绿
+ 
+ ## Answer
+ 
+-（完工时填：改了什么 / 怎么验证 / 判断点）
++**改了什么**
++
++- `packages/core/src/mcp.ts`:`collectMcpEnvRefs(servers)`(T1,单处提取 stdio env 与 http headers 的 `env:VAR` 引用 → `server→键→变量名`,恒不含值);`resolveMcpEnv` 增 `strict = true` 形参(T2,strict=false 只跳过缺失引用的 extraEnv 注入;http headers 的 agent 能力闸与 strict 无关,恒抛)。
++- `packages/core/src/models.ts`:`resolveModelEnv` 增 `strict = true`(T2;strict=false 早退——渲染本就落 `$VAR` 插值,明文从不上盘,存在性校验只属于要起子进程的 run)。
++- `packages/core/src/roots.ts`:`convergeRoot` opts 增 `strictEnv?/skipAuth?`(缺省 = 现行为,run 路径零变化);两处 `resolveModelEnv` 与 `resolveMcpEnv` 透传 strict。
++- `packages/core/src/materialize.ts`:opts 增 `skipModels?/noAuth?`;调 `convergeRoot` 传 `strictEnv:false` + 条件 `skipAuth/skipModels`;清单 `mcp.envRefs`(T1)、`model.owner:"neo"|"host"` + `file:null` 时 `reason`(T4:agent-models / no-neo-model-declaration / agent-has-no-model-file)、顶层 `authExcluded: boolean`(T3,缺省 false=票 01 同形)——`authExcluded` 纳入 hash canonical(带/不带凭据是不同导出面)。
++- `packages/cli/src/cli.ts`:materialize 命令条目与 `--help` 增 `--no-auth`/`--agent-models` 说明与 **T5 独占目录契约**(“MUST be a dir owned by this command … dedicated subdir … never an existing agent config root”);人读输出 envRefs 摘要 + `authExcluded` 时打印排除行。
++- `docs/schema/neo-home.md` §9.1:导出合同唯一事实源段(`--out` 独占、清单形状、T1–T4 语义、Cubicle 恒传 `--no-auth`)。
++
++**怎么验证的**
++
++- `pnpm verify` 全绿:40 文件 / 650 测试(票 01/02/03 既有断言含 auth 缺省同形、run 启动校验,全部未改动语义)。
++- 新增 9 例:core materialize `T1`(envRefs 形状、字面量不入)/`T2`(缺 env 照导 + convergeRoot 缺省 strict 照旧抛)/`T3`(`--no-auth` 无 auth.json + 幂等换出兼容)/`T4`(owner/reason 两分支);`mcp.test.ts` `collectMcpEnvRefs` 与 `resolveMcpEnv strict=false`(能力闸不变);CLI `T2(CLI)`、`T3(CLI)`、`T4(CLI)`、`--help` 判据(dedicated/never config root/两 flag)。
++- 手打 E2E(记录于 worklog,临时目录在 `tmp/` 已清理并入 gitignore):manifest 两次逐字节一致;缺省 auth 照旧 + `$FAKE_KEY` 插值不落值;`--no-auth --agent-models` 面全空;run 缺 env 照旧 exit 1。
++
++**判断点**
++
++- T1 采「清单带引用」而非「渲染保留 `${VAR}`」:`mcp.json` 维持各 agent 原生渲染现状(Claude 本就 `${VAR}`、Pi stdio 落 env 注入语义),引用形状集中到清单一个可版本化字段,不落任何解析值。
++- T3 缺省行为不动(票 01 判据逐字节不变),`--no-auth` 为外部宿主契约(恒传);`authExcluded` 入 hash。中途失败清暂存用例的旧触发器(missing env)按 T2 不再抛错,换为 http header env ref 的能力面错误,判据不变。
++- T4 `model.owner` 显式声明模型归属("neo"/"host"),宿主无需推断;`reason` 三种枚举可判别 null 的原因。
++- 过程留痕:实施期间工作树出现并行会话的迟到写入(把实现改写为与票面一致的 opt-in 语义并修好测试;另一次混提交把 `tmp/` 复现残骸入库,已在分支内回退重做,`.gitignore` 补 `tmp/`)。lead 按其定稿复核全绿后 squash 合并。
+diff --git a/.scratch/academy/reviews/2026-11-17-lead-review.md b/.scratch/academy/reviews/2026-11-17-lead-review.md
+index 2733fe2..9011e93 100644
+--- a/.scratch/academy/reviews/2026-11-17-lead-review.md
++++ b/.scratch/academy/reviews/2026-11-17-lead-review.md
+@@ -80,3 +80,14 @@ neo: models provider "litellm" apiKey references env:FAKE_KEY, but FAKE_KEY is n
+ 
+ - 技能导出链路（链接 + hash + 只读）**已可用**；`e2e:15` 的技能路径不再需要长期保留「临时直读 `~/.neo/roles`」。
+ - MCP 与模型两条路要等 T1–T4 落地；在它们落地前，Cubicle 的 02 票只接技能，MCP 保持现状（空）。
++
++## 处置记录(2026-11-17,lead 会话;main `25964c5`)
++
++- **T1(设计级,先拍板后动手)**:采纳**方案 1**——`--json` 清单增 `mcp.envRefs = { "<server>": { "<KEY>": "<VAR>" } }`,渲染层不动。理由:① 不落任何解析值,密钥面零变化;② 不改 `mcp.yaml` 既有校验语义(票面红线);③ 方案 2(渲染保留 `${VAR}`)会把引用语义漏进各 agent 的原生产物文件,与 Pi 的 stdio env 注入/能力闸纠缠,渲染面改动面大且不可版本化。实现:`mcp.ts collectMcpEnvRefs` 单处提取(env + headers 的 `env:VAR`),入清单并入 hash;测试 `materialize.test.ts > T1`、`mcp.test.ts > collectMcpEnvRefs`。
++- **T2**:实现为 `convergeRoot` 的 `strictEnv`(缺省 true=`run` 校验面逐字不变;materialize 恒传 false)。stdio env 引用缺失只跳过 extraEnv(本就不落盘);模型引用照常渲染 `$VAR` 插值;非 Claude http header 的能力闸与 strict 无关恒抛。测试:core `T2`、`mcp.test.ts > resolveMcpEnv strict=false`、CLI `T2(CLI)`;既有 run/converge 校验测试未动。
++- **T3**:`--no-auth`(core `noAuth` → `skipAuth`)opt-in;缺省保持票 01 同形(auth 副本照旧,diff-equal 判据未改);清单 `authExcluded: false/true` 入 hash。Cubicle 契约=恒传。测试:core `T3`、CLI `T3(CLI)`。
++- **T4**:`--agent-models` → 透传 `skipModels`;清单 `model.owner: "neo"|"host"` + `file:null` 时 `reason`(agent-models / no-neo-model-declaration / agent-has-no-model-file)。测试:core `T4`、CLI `T4(CLI)`。
++- **T5**:`--help` 写入 `--out` 独占契约(MUST be a dir owned by this command / dedicated subdir / never an existing agent config root);help 判据入 `materialize-cli.test.ts`。
++- **T6**:只记 observation,不实现——`role.yaml` 声明的 domain 在 `library/` 缺失时 `status` 无 finding,与「缺库=空」一致;列为后续信息性对账候选(后续票),本次零代码。
++- **合同形状**:清单键集新增 `authExcluded`,`mcp` 增 `envRefs`,`model` 增 `owner/reason?`;`mcp` 仍为对象(与 Cubicle N1 草稿数组形状的偏差维持 review 结论)。schema §9.1 同步为唯一事实源。
++- **终态**:`pnpm verify` 全绿 40 文件 / 650 测试(+9);票 04 七项验收全勾、`ready-for-human`;票 01/02/03 状态保持 `ready-for-human`。过程留痕见 `issues/04-worklog.md` 与票 04 Answer(并行迟到写入与 tmp/ 残骸回退均已记录)。
+diff --git a/.scratch/academy/spec.md b/.scratch/academy/spec.md
+index acfb9c6..59fefb8 100644
+--- a/.scratch/academy/spec.md
++++ b/.scratch/academy/spec.md
+@@ -38,3 +38,4 @@
+ - **协作树事故总裁定**:施工期间反复出现「错位续写」——已终态/排队会话的迟到写入,包括凭空测试文件、重复声明注入、伪造验收与非法 claim(`e95a014`/`748a836`)、抢 merge(`4ee1dcd`),乃至冒名「lead 真实会话」的审查记录(`61ca718`/`71b83d`)。主会话纪律:按字节存证(reflog、`evidence/`、sha256)、前向修复不重写历史、不与迟到写抢手、不对具体会话做归责或免责结论——**会话内部无法自证迟到写入的发起者,归责由人工终裁**。`evidence/` 对全部会话只读。
+ - 未做(回决策/后续票,不就地发明):library 内容的哈希记账(schema §1.1 已预留);导出面是否排除 auth 凭据副本(待 Cubicle 侧确认);`roots.ts` 既有的单行双 import 风格债(非本 effort 引入)。
+ - **外部验收(lead,2026-11-17)**:票面 3/3 达成(独立复跑 `pnpm verify` 641 绿、临时 `NEO_HOME` 手打三条命令逐条复现)。作为「外部宿主的装配结果来源」,导出合同还有 4 项缺口 —— T1 MCP `env` 绑定不进导出 / T2 导出要求 env 在场 / T3 auth 凭据副本随导出 / T4 模型配置越界渲染,另有 2 项文档与观察项,见 [reviews/2026-11-17-lead-review.md](reviews/2026-11-17-lead-review.md)。
++- 2026-11-17 验收后补票:外部审查 T1–T5 转为票 04「materialize 导出合同修补」并实施合并(`25964c5`,verify 全绿 650);裁定与处置见 `reviews/2026-11-17-lead-review.md` 处置记录;T6 记 observation 不实现。
+-- 
+2.56.0.windows.4.niugit
+
