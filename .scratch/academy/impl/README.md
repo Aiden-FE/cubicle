@@ -13,9 +13,15 @@
 
 ## 跨仓库依赖
 
-Neo 侧三张票在 `neo/.scratch/academy/issues/`（01 materialize → 02 library+domain → 03 role set）。
+Neo 侧三张票在 `neo/.scratch/academy/issues/`（01 materialize → 02 library+domain → 03 role set），**均已交付**（`ready-for-human`；lead 验收记录见 `neo/.scratch/academy/reviews/2026-11-17-lead-review.md`）。
 
-**Neo 01 未落地前**：01/02 票走「临时直读 `~/.neo/roles/<role>/`」的路径，代码里必须留 `TODO(materialize)` 标记；Neo 01 落地后由 02 票的后续迭代删掉这段临时代码 —— **票没过之前，这段临时路径不算完成**。
+**用 `materialize`，不要自己算装配**：技能路径已可用 —— `neo materialize --role R --agent pi --out DIR --json` 产出 `skills/`（链接）+ 每技能 hash。四条使用约束（对应审查 T1–T4）：
+
+- `--out` 必须是**专用子目录**（靠 `root.json` marker 认领；指向已有 agent 根会被拒，exit 1）。
+- 当前会把 `auth.json` 复制进 `--out`；`--no-auth` 落地前，导出目录按**含机器凭据**对待 —— e2e 用临时 `NEO_HOME`，别指真实家目录。
+- MCP 的 `env:VAR` **不进导出产物**，且引用变量不在导出进程的 env 里会直接 exit 1。MCP 装配等 T1/T2 落地，01/02 票只接技能。
+- `models.json` / `settings.json` 会按 Neo 的 `config.yaml` 渲染；Cubicle 的模型库是唯一模型来源，导出的模型文件**忽略**（T4 落地后改 `--agent-models`）。
+- `--json` 的 `mcp` 是对象 `{ file, servers }`，不是数组。
 
 ## 别再想的事
 
