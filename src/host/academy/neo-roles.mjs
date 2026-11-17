@@ -12,10 +12,11 @@
  * shows an empty state and the app boots anyway.
  *
  * TODO(materialize): this direct read of `roles/` + `state/locks` is the
- * interim path while Neo's `materialize` (neo/.scratch/academy 01) is not
- * available. Once it ships, the assembled set + hashes come from
- * `neo materialize --json` and only NEO_HOME resolution stays here. Delete
- * this interim path in the follow-up iteration of the assembly ticket.
+ * interim path for the role-cache/UI only. 票 a02 moved ASSEMBLY to
+ * `neo materialize --json` (src/host/academy/assembly.mjs calls the vendored
+ * CLI); the projection cache still reads these files directly because Neo has
+ * no read API. If Neo ever grows a read-only projection command, retire this
+ * reader too.
  */
 import fs from "node:fs/promises";
 import { createHash } from "node:crypto";

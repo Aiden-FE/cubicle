@@ -109,17 +109,17 @@ var require_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    function visit_(key, node, visitor, path24) {
-      const ctrl = callVisitor(key, node, visitor, path24);
+    function visit_(key, node, visitor, path27) {
+      const ctrl = callVisitor(key, node, visitor, path27);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path24, ctrl);
-        return visit_(key, ctrl, visitor, path24);
+        replaceNode(key, path27, ctrl);
+        return visit_(key, ctrl, visitor, path27);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path24 = Object.freeze(path24.concat(node));
+          path27 = Object.freeze(path27.concat(node));
           for (let i2 = 0; i2 < node.items.length; ++i2) {
-            const ci = visit_(i2, node.items[i2], visitor, path24);
+            const ci = visit_(i2, node.items[i2], visitor, path27);
             if (typeof ci === "number")
               i2 = ci - 1;
             else if (ci === BREAK)
@@ -130,13 +130,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path24 = Object.freeze(path24.concat(node));
-          const ck = visit_("key", node.key, visitor, path24);
+          path27 = Object.freeze(path27.concat(node));
+          const ck = visit_("key", node.key, visitor, path27);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = visit_("value", node.value, visitor, path24);
+          const cv = visit_("value", node.value, visitor, path27);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -157,17 +157,17 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node, visitor, path24) {
-      const ctrl = await callVisitor(key, node, visitor, path24);
+    async function visitAsync_(key, node, visitor, path27) {
+      const ctrl = await callVisitor(key, node, visitor, path27);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path24, ctrl);
-        return visitAsync_(key, ctrl, visitor, path24);
+        replaceNode(key, path27, ctrl);
+        return visitAsync_(key, ctrl, visitor, path27);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path24 = Object.freeze(path24.concat(node));
+          path27 = Object.freeze(path27.concat(node));
           for (let i2 = 0; i2 < node.items.length; ++i2) {
-            const ci = await visitAsync_(i2, node.items[i2], visitor, path24);
+            const ci = await visitAsync_(i2, node.items[i2], visitor, path27);
             if (typeof ci === "number")
               i2 = ci - 1;
             else if (ci === BREAK)
@@ -178,13 +178,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path24 = Object.freeze(path24.concat(node));
-          const ck = await visitAsync_("key", node.key, visitor, path24);
+          path27 = Object.freeze(path27.concat(node));
+          const ck = await visitAsync_("key", node.key, visitor, path27);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = await visitAsync_("value", node.value, visitor, path24);
+          const cv = await visitAsync_("value", node.value, visitor, path27);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -211,23 +211,23 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node, visitor, path24) {
+    function callVisitor(key, node, visitor, path27) {
       if (typeof visitor === "function")
-        return visitor(key, node, path24);
+        return visitor(key, node, path27);
       if (identity.isMap(node))
-        return visitor.Map?.(key, node, path24);
+        return visitor.Map?.(key, node, path27);
       if (identity.isSeq(node))
-        return visitor.Seq?.(key, node, path24);
+        return visitor.Seq?.(key, node, path27);
       if (identity.isPair(node))
-        return visitor.Pair?.(key, node, path24);
+        return visitor.Pair?.(key, node, path27);
       if (identity.isScalar(node))
-        return visitor.Scalar?.(key, node, path24);
+        return visitor.Scalar?.(key, node, path27);
       if (identity.isAlias(node))
-        return visitor.Alias?.(key, node, path24);
+        return visitor.Alias?.(key, node, path27);
       return void 0;
     }
-    function replaceNode(key, path24, node) {
-      const parent = path24[path24.length - 1];
+    function replaceNode(key, path27, node) {
+      const parent = path27[path27.length - 1];
       if (identity.isCollection(parent)) {
         parent.items[key] = node;
       } else if (identity.isPair(parent)) {
@@ -839,10 +839,10 @@ var require_Collection = __commonJS({
     var createNode = require_createNode();
     var identity = require_identity();
     var Node = require_Node();
-    function collectionFromPath(schema, path24, value) {
+    function collectionFromPath(schema, path27, value) {
       let v = value;
-      for (let i2 = path24.length - 1; i2 >= 0; --i2) {
-        const k = path24[i2];
+      for (let i2 = path27.length - 1; i2 >= 0; --i2) {
+        const k = path27[i2];
         if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
           const a2 = [];
           a2[k] = v;
@@ -861,7 +861,7 @@ var require_Collection = __commonJS({
         sourceObjects: /* @__PURE__ */ new Map()
       });
     }
-    var isEmptyPath = (path24) => path24 == null || typeof path24 === "object" && !!path24[Symbol.iterator]().next().done;
+    var isEmptyPath = (path27) => path27 == null || typeof path27 === "object" && !!path27[Symbol.iterator]().next().done;
     var Collection = class extends Node.NodeBase {
       constructor(type, schema) {
         super(type);
@@ -891,11 +891,11 @@ var require_Collection = __commonJS({
        * be a Pair instance or a `{ key, value }` object, which may not have a key
        * that already exists in the map.
        */
-      addIn(path24, value) {
-        if (isEmptyPath(path24))
+      addIn(path27, value) {
+        if (isEmptyPath(path27))
           this.add(value);
         else {
-          const [key, ...rest] = path24;
+          const [key, ...rest] = path27;
           const node = this.get(key, true);
           if (identity.isCollection(node))
             node.addIn(rest, value);
@@ -909,8 +909,8 @@ var require_Collection = __commonJS({
        * Removes a value from the collection.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path24) {
-        const [key, ...rest] = path24;
+      deleteIn(path27) {
+        const [key, ...rest] = path27;
         if (rest.length === 0)
           return this.delete(key);
         const node = this.get(key, true);
@@ -924,8 +924,8 @@ var require_Collection = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path24, keepScalar) {
-        const [key, ...rest] = path24;
+      getIn(path27, keepScalar) {
+        const [key, ...rest] = path27;
         const node = this.get(key, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node) ? node.value : node;
@@ -943,8 +943,8 @@ var require_Collection = __commonJS({
       /**
        * Checks if the collection includes a value with the key `key`.
        */
-      hasIn(path24) {
-        const [key, ...rest] = path24;
+      hasIn(path27) {
+        const [key, ...rest] = path27;
         if (rest.length === 0)
           return this.has(key);
         const node = this.get(key, true);
@@ -954,8 +954,8 @@ var require_Collection = __commonJS({
        * Sets a value in this collection. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path24, value) {
-        const [key, ...rest] = path24;
+      setIn(path27, value) {
+        const [key, ...rest] = path27;
         if (rest.length === 0) {
           this.set(key, value);
         } else {
@@ -1502,7 +1502,7 @@ var require_stringify = __commonJS({
         props.push(doc.directives.tagString(tag));
       return props.join(" ");
     }
-    function stringify5(item, ctx, onComment, onChompKeep) {
+    function stringify6(item, ctx, onComment, onChompKeep) {
       if (identity.isPair(item))
         return item.toString(ctx, onComment, onChompKeep);
       if (identity.isAlias(item)) {
@@ -1531,7 +1531,7 @@ var require_stringify = __commonJS({
 ${ctx.indent}${str}`;
     }
     exports.createStringifyContext = createStringifyContext;
-    exports.stringify = stringify5;
+    exports.stringify = stringify6;
   }
 });
 
@@ -1541,7 +1541,7 @@ var require_stringifyPair = __commonJS({
     "use strict";
     var identity = require_identity();
     var Scalar = require_Scalar();
-    var stringify5 = require_stringify();
+    var stringify6 = require_stringify();
     var stringifyComment = require_stringifyComment();
     function stringifyPair({ key, value }, ctx, onComment, onChompKeep) {
       const { allNullValues, doc, indent, indentStep, options: { commentString, indentSeq, simpleKeys } } = ctx;
@@ -1563,7 +1563,7 @@ var require_stringifyPair = __commonJS({
       });
       let keyCommentDone = false;
       let chompKeep = false;
-      let str = stringify5.stringify(key, ctx, () => keyCommentDone = true, () => chompKeep = true);
+      let str = stringify6.stringify(key, ctx, () => keyCommentDone = true, () => chompKeep = true);
       if (!explicitKey && !ctx.inFlow && str.length > 1024) {
         if (simpleKeys)
           throw new Error("With simple keys, single line scalar must not span more than 1024 characters");
@@ -1615,7 +1615,7 @@ ${indent}:`;
         ctx.indent = ctx.indent.substring(2);
       }
       let valueCommentDone = false;
-      const valueStr = stringify5.stringify(value, ctx, () => valueCommentDone = true, () => chompKeep = true);
+      const valueStr = stringify6.stringify(value, ctx, () => valueCommentDone = true, () => chompKeep = true);
       let ws = " ";
       if (keyComment || vsb || vcb) {
         ws = vsb ? "\n" : "";
@@ -1756,7 +1756,7 @@ var require_addPairToJSMap = __commonJS({
     "use strict";
     var log = require_log();
     var merge = require_merge();
-    var stringify5 = require_stringify();
+    var stringify6 = require_stringify();
     var identity = require_identity();
     var toJS = require_toJS();
     function addPairToJSMap(ctx, map, { key, value }) {
@@ -1792,7 +1792,7 @@ var require_addPairToJSMap = __commonJS({
       if (typeof jsKey !== "object")
         return String(jsKey);
       if (identity.isNode(key) && ctx?.doc) {
-        const strCtx = stringify5.createStringifyContext(ctx.doc, {});
+        const strCtx = stringify6.createStringifyContext(ctx.doc, {});
         strCtx.anchors = /* @__PURE__ */ new Set();
         for (const node of ctx.anchors.keys())
           strCtx.anchors.add(node.anchor);
@@ -1859,12 +1859,12 @@ var require_stringifyCollection = __commonJS({
   "node_modules/yaml/dist/stringify/stringifyCollection.js"(exports) {
     "use strict";
     var identity = require_identity();
-    var stringify5 = require_stringify();
+    var stringify6 = require_stringify();
     var stringifyComment = require_stringifyComment();
     function stringifyCollection(collection, ctx, options) {
       const flow = ctx.inFlow ?? collection.flow;
-      const stringify6 = flow ? stringifyFlowCollection : stringifyBlockCollection;
-      return stringify6(collection, ctx, options);
+      const stringify7 = flow ? stringifyFlowCollection : stringifyBlockCollection;
+      return stringify7(collection, ctx, options);
     }
     function stringifyBlockCollection({ comment, items }, ctx, { blockItemPrefix, flowChars, itemIndent, onChompKeep, onComment }) {
       const { indent, options: { commentString } } = ctx;
@@ -1889,7 +1889,7 @@ var require_stringifyCollection = __commonJS({
           }
         }
         chompKeep = false;
-        let str2 = stringify5.stringify(item, itemCtx, () => comment2 = null, () => chompKeep = true);
+        let str2 = stringify6.stringify(item, itemCtx, () => comment2 = null, () => chompKeep = true);
         if (comment2)
           str2 += stringifyComment.lineComment(str2, itemIndent, commentString(comment2));
         if (chompKeep && comment2)
@@ -1956,7 +1956,7 @@ ${indent}${line}` : "\n";
         }
         if (comment)
           reqNewline = true;
-        let str = stringify5.stringify(item, itemCtx, () => comment = null);
+        let str = stringify6.stringify(item, itemCtx, () => comment = null);
         reqNewline || (reqNewline = lines.length > linesAtValue || str.includes("\n"));
         if (i2 < items.length - 1) {
           str += ",";
@@ -3317,7 +3317,7 @@ var require_stringifyDocument = __commonJS({
   "node_modules/yaml/dist/stringify/stringifyDocument.js"(exports) {
     "use strict";
     var identity = require_identity();
-    var stringify5 = require_stringify();
+    var stringify6 = require_stringify();
     var stringifyComment = require_stringifyComment();
     function stringifyDocument(doc, options) {
       const lines = [];
@@ -3332,7 +3332,7 @@ var require_stringifyDocument = __commonJS({
       }
       if (hasDirectives)
         lines.push("---");
-      const ctx = stringify5.createStringifyContext(doc, options);
+      const ctx = stringify6.createStringifyContext(doc, options);
       const { commentString } = ctx.options;
       if (doc.commentBefore) {
         if (lines.length !== 1)
@@ -3354,7 +3354,7 @@ var require_stringifyDocument = __commonJS({
           contentComment = doc.contents.comment;
         }
         const onChompKeep = contentComment ? void 0 : () => chompKeep = true;
-        let body = stringify5.stringify(doc.contents, ctx, () => contentComment = null, onChompKeep);
+        let body = stringify6.stringify(doc.contents, ctx, () => contentComment = null, onChompKeep);
         if (contentComment)
           body += stringifyComment.lineComment(body, "", commentString(contentComment));
         if ((body[0] === "|" || body[0] === ">") && lines[lines.length - 1] === "---") {
@@ -3362,7 +3362,7 @@ var require_stringifyDocument = __commonJS({
         } else
           lines.push(body);
       } else {
-        lines.push(stringify5.stringify(doc.contents, ctx));
+        lines.push(stringify6.stringify(doc.contents, ctx));
       }
       if (doc.directives?.docEnd) {
         if (doc.comment) {
@@ -3470,9 +3470,9 @@ var require_Document = __commonJS({
           this.contents.add(value);
       }
       /** Adds a value to the document. */
-      addIn(path24, value) {
+      addIn(path27, value) {
         if (assertCollection(this.contents))
-          this.contents.addIn(path24, value);
+          this.contents.addIn(path27, value);
       }
       /**
        * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -3547,14 +3547,14 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path24) {
-        if (Collection.isEmptyPath(path24)) {
+      deleteIn(path27) {
+        if (Collection.isEmptyPath(path27)) {
           if (this.contents == null)
             return false;
           this.contents = null;
           return true;
         }
-        return assertCollection(this.contents) ? this.contents.deleteIn(path24) : false;
+        return assertCollection(this.contents) ? this.contents.deleteIn(path27) : false;
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -3569,10 +3569,10 @@ var require_Document = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path24, keepScalar) {
-        if (Collection.isEmptyPath(path24))
+      getIn(path27, keepScalar) {
+        if (Collection.isEmptyPath(path27))
           return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-        return identity.isCollection(this.contents) ? this.contents.getIn(path24, keepScalar) : void 0;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path27, keepScalar) : void 0;
       }
       /**
        * Checks if the document includes a value with the key `key`.
@@ -3583,10 +3583,10 @@ var require_Document = __commonJS({
       /**
        * Checks if the document includes a value at `path`.
        */
-      hasIn(path24) {
-        if (Collection.isEmptyPath(path24))
+      hasIn(path27) {
+        if (Collection.isEmptyPath(path27))
           return this.contents !== void 0;
-        return identity.isCollection(this.contents) ? this.contents.hasIn(path24) : false;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path27) : false;
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
@@ -3603,13 +3603,13 @@ var require_Document = __commonJS({
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path24, value) {
-        if (Collection.isEmptyPath(path24)) {
+      setIn(path27, value) {
+        if (Collection.isEmptyPath(path27)) {
           this.contents = value;
         } else if (this.contents == null) {
-          this.contents = Collection.collectionFromPath(this.schema, Array.from(path24), value);
+          this.contents = Collection.collectionFromPath(this.schema, Array.from(path27), value);
         } else if (assertCollection(this.contents)) {
-          this.contents.setIn(path24, value);
+          this.contents.setIn(path27, value);
         }
       }
       /**
@@ -5498,7 +5498,7 @@ var require_cst_scalar = __commonJS({
 var require_cst_stringify = __commonJS({
   "node_modules/yaml/dist/parse/cst-stringify.js"(exports) {
     "use strict";
-    var stringify5 = (cst) => "type" in cst ? stringifyToken(cst) : stringifyItem(cst);
+    var stringify6 = (cst) => "type" in cst ? stringifyToken(cst) : stringifyItem(cst);
     function stringifyToken(token) {
       switch (token.type) {
         case "block-scalar": {
@@ -5551,7 +5551,7 @@ var require_cst_stringify = __commonJS({
         res += stringifyToken(value);
       return res;
     }
-    exports.stringify = stringify5;
+    exports.stringify = stringify6;
   }
 });
 
@@ -5570,9 +5570,9 @@ var require_cst_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    visit.itemAtPath = (cst, path24) => {
+    visit.itemAtPath = (cst, path27) => {
       let item = cst;
-      for (const [field, index] of path24) {
+      for (const [field, index] of path27) {
         const tok = item?.[field];
         if (tok && "items" in tok) {
           item = tok.items[index];
@@ -5581,23 +5581,23 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit.parentCollection = (cst, path24) => {
-      const parent = visit.itemAtPath(cst, path24.slice(0, -1));
-      const field = path24[path24.length - 1][0];
+    visit.parentCollection = (cst, path27) => {
+      const parent = visit.itemAtPath(cst, path27.slice(0, -1));
+      const field = path27[path27.length - 1][0];
       const coll = parent?.[field];
       if (coll && "items" in coll)
         return coll;
       throw new Error("Parent collection not found");
     };
-    function _visit(path24, item, visitor) {
-      let ctrl = visitor(item, path24);
+    function _visit(path27, item, visitor) {
+      let ctrl = visitor(item, path27);
       if (typeof ctrl === "symbol")
         return ctrl;
       for (const field of ["key", "value"]) {
         const token = item[field];
         if (token && "items" in token) {
           for (let i2 = 0; i2 < token.items.length; ++i2) {
-            const ci = _visit(Object.freeze(path24.concat([[field, i2]])), token.items[i2], visitor);
+            const ci = _visit(Object.freeze(path27.concat([[field, i2]])), token.items[i2], visitor);
             if (typeof ci === "number")
               i2 = ci - 1;
             else if (ci === BREAK)
@@ -5608,10 +5608,10 @@ var require_cst_visit = __commonJS({
             }
           }
           if (typeof ctrl === "function" && field === "key")
-            ctrl = ctrl(item, path24);
+            ctrl = ctrl(item, path27);
         }
       }
-      return typeof ctrl === "function" ? ctrl(item, path24) : ctrl;
+      return typeof ctrl === "function" ? ctrl(item, path27) : ctrl;
     }
     exports.visit = visit;
   }
@@ -6913,14 +6913,14 @@ var require_parser = __commonJS({
             case "scalar":
             case "single-quoted-scalar":
             case "double-quoted-scalar": {
-              const fs26 = this.flowScalar(this.type);
+              const fs29 = this.flowScalar(this.type);
               if (atNextItem || it.value) {
-                map.items.push({ start, key: fs26, sep: [] });
+                map.items.push({ start, key: fs29, sep: [] });
                 this.onKeyLine = true;
               } else if (it.sep) {
-                this.stack.push(fs26);
+                this.stack.push(fs29);
               } else {
-                Object.assign(it, { key: fs26, sep: [] });
+                Object.assign(it, { key: fs29, sep: [] });
                 this.onKeyLine = true;
               }
               return;
@@ -7048,13 +7048,13 @@ var require_parser = __commonJS({
             case "scalar":
             case "single-quoted-scalar":
             case "double-quoted-scalar": {
-              const fs26 = this.flowScalar(this.type);
+              const fs29 = this.flowScalar(this.type);
               if (!it || it.value)
-                fc.items.push({ start: [], key: fs26, sep: [] });
+                fc.items.push({ start: [], key: fs29, sep: [] });
               else if (it.sep)
-                this.stack.push(fs26);
+                this.stack.push(fs29);
               else
-                Object.assign(it, { key: fs26, sep: [] });
+                Object.assign(it, { key: fs29, sep: [] });
               return;
             }
             case "flow-map-end":
@@ -7262,7 +7262,7 @@ var require_public_api = __commonJS({
       }
       return doc;
     }
-    function parse7(src, reviver, options) {
+    function parse8(src, reviver, options) {
       let _reviver = void 0;
       if (typeof reviver === "function") {
         _reviver = reviver;
@@ -7281,7 +7281,7 @@ var require_public_api = __commonJS({
       }
       return doc.toJS(Object.assign({ reviver: _reviver }, options));
     }
-    function stringify5(value, replacer, options) {
+    function stringify6(value, replacer, options) {
       let _replacer = null;
       if (typeof replacer === "function" || Array.isArray(replacer)) {
         _replacer = replacer;
@@ -7303,10 +7303,10 @@ var require_public_api = __commonJS({
         return value.toString(options);
       return new Document.Document(value, _replacer, options).toString(options);
     }
-    exports.parse = parse7;
+    exports.parse = parse8;
     exports.parseAllDocuments = parseAllDocuments;
     exports.parseDocument = parseDocument;
-    exports.stringify = stringify5;
+    exports.stringify = stringify6;
   }
 });
 
@@ -7364,9 +7364,9 @@ var require_dist = __commonJS({
 
 // packages/cli/src/cli.ts
 import os4 from "node:os";
-import path23 from "node:path";
+import path26 from "node:path";
 import { spawn as spawn2 } from "node:child_process";
-import fs25 from "node:fs/promises";
+import fs28 from "node:fs/promises";
 
 // node_modules/@clack/core/dist/index.mjs
 import { styleText } from "node:util";
@@ -8706,6 +8706,17 @@ function validateSkillName(name) {
     );
   }
 }
+function validateDomainName(name) {
+  if (!ROLE_NAME_PATTERN.test(name)) {
+    throw new NeoError(
+      "usage",
+      `invalid domain name ${JSON.stringify(name)}: must match ${ROLE_NAME_PATTERN.source}`
+    );
+  }
+  if (name === "default") {
+    throw new NeoError("usage", 'domain name "default" is reserved (the default layer is the base role, not a domain)');
+  }
+}
 function validateRoleName(name) {
   if (!ROLE_NAME_PATTERN.test(name)) {
     throw new NeoError(
@@ -8859,6 +8870,9 @@ var stateDir = (home) => path3.join(home, "state");
 var mountsJsonPath = (home) => path3.join(stateDir(home), "mounts.json");
 var locksDir = (home) => path3.join(stateDir(home), "locks");
 var roleMcpPath = (home, role) => path3.join(roleDir(home, role), "mcp.yaml");
+var roleYamlPath = (home, role) => path3.join(roleDir(home, role), "role.yaml");
+var libraryDir = (home) => path3.join(home, "library");
+var domainDir = (home, domain) => path3.join(libraryDir(home), domain);
 var roleModelsPath = (home, role) => path3.join(roleDir(home, role), "models.yaml");
 var rootsDir = (home) => path3.join(home, "roots");
 var rootDir = (home, role, agent) => path3.join(rootsDir(home), role, agent);
@@ -9759,6 +9773,32 @@ async function readRoleLock(home, role) {
   }
   return { ...raw, version: 1, skills };
 }
+async function listLockedRoles(home) {
+  try {
+    const entries = await fs7.readdir(locksDir(home));
+    return entries.filter((name) => name.endsWith(".yaml")).map((name) => name.slice(0, -".yaml".length)).filter((role) => ROLE_NAME_PATTERN.test(role)).sort();
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
+}
+function isLockDirty(lock) {
+  return lock !== null && lock.dirty === true;
+}
+async function clearLockDirty(home, role) {
+  const lock = await readRoleLock(home, role);
+  if (lock === null || !isLockDirty(lock)) return false;
+  delete lock.dirty;
+  await writeRoleLock(home, role, lock);
+  return true;
+}
+async function markRoleLockDirty(home, role, preRead) {
+  const lock = preRead === void 0 ? await readRoleLock(home, role) : preRead;
+  if (lock !== null && isLockDirty(lock)) return;
+  const merged = lock ?? { version: 1, skills: {} };
+  merged.dirty = true;
+  await writeRoleLock(home, role, merged);
+}
 async function writeRoleLock(home, role, lock) {
   const file = roleLockPath(home, role);
   await fs7.mkdir(locksDir(home), { recursive: true });
@@ -9774,1474 +9814,163 @@ async function writeRoleLock(home, role, lock) {
   }
 }
 
-// packages/core/src/install.ts
+// packages/core/src/library.ts
+var import_yaml5 = __toESM(require_dist(), 1);
 import fs8 from "node:fs/promises";
-import os from "node:os";
 import path5 from "node:path";
-function buildUpstreamAddArgs(opts) {
-  const base = ["npx", "-y", `skills@${opts.skillsRef}`, "add", opts.source];
-  if (opts.listOnly) return [...base, "-l"];
-  const selection = opts.skills?.kind === "all" ? ["-s", "*"] : (opts.skills?.names ?? []).flatMap((name) => ["-s", name]);
-  return [...base, "-a", "universal", "-y", "--copy", "--json", ...selection];
+function corrupt2(role, message) {
+  return new NeoError(
+    "state",
+    `role "${role}" role.yaml is corrupt (${message}); refusing to read or write`
+  );
 }
-function parseSourceSkillList(output) {
-  const clean = output.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "").replace(/\r/g, "").replace(/│/g, "|");
-  const lines = clean.split("\n");
-  const parsed = [];
-  let inList = false;
-  let current;
-  let group;
-  for (const line of lines) {
-    if (/Available Skills/i.test(line)) {
-      inList = true;
-      continue;
-    }
-    if (!inList) continue;
-    if (/Use --skill|Installation failed|Found \d+ skills?/i.test(line)) break;
-    const name = /^\|\s{4}([a-zA-Z0-9][a-zA-Z0-9._+-]*)\s*$/.exec(line)?.[1];
-    if (name !== void 0) {
-      if (!parsed.some((item) => item.name === name)) {
-        current = { name, ...group !== void 0 ? { group } : {} };
-        parsed.push(current);
-      }
-      continue;
-    }
-    const description = /^\|\s{6,}(\S.*)$/.exec(line)?.[1]?.trim();
-    if (description !== void 0 && current !== void 0 && current.description === void 0) {
-      current.description = description;
-      continue;
-    }
-    const trimmed = line.trim();
-    if (/^[A-Za-z][A-Za-z0-9 ()-]{0,39}$/.test(trimmed)) group = trimmed;
-  }
-  return parsed.map((item) => {
-    const hint = [item.group, item.description].filter((part) => part !== void 0 && part.length > 0).join(" \xB7 ");
-    return hint.length > 0 ? { name: item.name, description: hint } : { name: item.name };
-  });
-}
-async function listSourceSkills(ports, opts) {
-  const staging = await makeStaging(ports);
-  try {
-    return await ports.exec.run(
-      buildUpstreamAddArgs({ skillsRef: opts.skillsRef, source: opts.source, listOnly: true }),
-      { cwd: staging }
-    );
-  } finally {
-    await fs8.rm(staging, { recursive: true, force: true }).catch(() => void 0);
-  }
-}
-function backupName(name, at) {
-  return `${name}.bak-${at.toISOString().replace(/[-:.]/g, "")}`;
-}
-async function addSource(ports, home, opts) {
-  const now = ports.now ? ports.now() : /* @__PURE__ */ new Date();
-  validateRoleName(opts.role);
-  if (opts.skills.kind === "list") {
-    for (const name of [...new Set(opts.skills.names)]) validateSkillName(name);
-  }
-  const existingLock = await readRoleLock(home, opts.role);
-  const names = opts.skills.kind === "all" ? null : [...new Set(opts.skills.names)];
-  const staging = await makeStaging(ports);
-  try {
-    const result = await ports.exec.run(
-      buildUpstreamAddArgs({ skillsRef: opts.skillsRef, source: opts.source, skills: opts.skills }),
-      { cwd: staging }
-    );
-    const report = {
-      role: opts.role,
-      source: opts.source,
-      installed: [],
-      failed: []
-    };
-    if (result.code !== 0) {
-      report.upstreamError = summarizeUpstreamFailure(result);
-      report.failed = (names ?? []).map((name) => ({ name, error: "upstream install failed" }));
-      return report;
-    }
-    const stagedNames = await enumerateStagedSkills(staging);
-    if (names) {
-      const expected = [...names].sort();
-      const actual = [...stagedNames].sort();
-      if (expected.join("\n") !== actual.join("\n")) {
-        report.upstreamError = `upstream enumeration mismatch: -s requested [${expected.join(", ")}] but staging contains [${actual.join(", ")}]`;
-        report.failed = names.map((name) => ({ name, error: "enumeration mismatch" }));
-        return report;
-      }
-    } else if (stagedNames.length === 0) {
-      report.upstreamError = "no skills found in source (staging .agents/skills is empty)";
-      return report;
-    }
-    const upstreamLock = await readUpstreamLock(staging);
-    await ensureRoleSkillsDir(home, opts.role);
-    const skills = { ...existingLock?.skills ?? {} };
-    for (const name of stagedNames) {
-      if (!isSafeSkillName(name)) {
-        report.failed.push({ name, error: `unsafe staged skill name ${JSON.stringify(name)}` });
-        continue;
-      }
-      const meta = upstreamLock?.skills?.[name];
-      const hash = typeof meta?.computedHash === "string" ? meta.computedHash : "";
-      if (!hash) {
-        report.failed.push({
-          name,
-          error: "upstream lock has no computedHash for this skill (refusing to install untracked content)"
-        });
-        continue;
-      }
-      try {
-        const replaced = await relocateSkill(path5.join(staging, ".agents", "skills", name), home, opts.role, name, now);
-        skills[name] = buildLockEntry(opts.source, meta, hash, now);
-        report.installed.push({ name, hash, replaced });
-      } catch (error) {
-        report.failed.push({ name, error: error.message });
-      }
-    }
-    if (report.installed.length > 0) {
-      const merged = { ...existingLock, version: 1, skills };
-      await writeRoleLock(home, opts.role, merged);
-    }
-    return report;
-  } finally {
-    await fs8.rm(staging, { recursive: true, force: true }).catch(() => void 0);
-  }
-}
-async function readUpstreamLock(staging) {
-  const file = path5.join(staging, "skills-lock.json");
-  let text2;
-  try {
-    text2 = await fs8.readFile(file, "utf8");
-  } catch (error) {
-    const code = error.code;
-    if (code === "ENOENT" || code === "ENOTDIR") return null;
-    throw error;
-  }
-  try {
-    const parsed = JSON.parse(text2);
-    if (typeof parsed === "object" && parsed !== null) return parsed;
-    return null;
-  } catch {
-    return null;
-  }
-}
-async function enumerateStagedSkills(staging) {
-  try {
-    const entries = await fs8.readdir(path5.join(staging, ".agents", "skills"), {
-      withFileTypes: true
-    });
-    return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
-  } catch (error) {
-    if (error.code === "ENOENT") return [];
-    throw error;
-  }
-}
-function buildLockEntry(source, meta, hash, now) {
-  const sourceType = typeof meta?.sourceType === "string" && meta.sourceType.length > 0 ? meta.sourceType : inferSourceType(source);
-  const entry = { sourceType, hash, installedAt: now.toISOString() };
-  if (typeof meta?.sourceUrl === "string" && meta.sourceUrl.length > 0) entry.sourceUrl = meta.sourceUrl;
-  if (typeof meta?.resolvedRef === "string" && meta.resolvedRef.length > 0) entry.resolvedRef = meta.resolvedRef;
-  if (typeof meta?.skillPath === "string" && meta.skillPath.length > 0) entry.skillPath = meta.skillPath;
-  if (sourceType === "local") {
-    entry.path = source;
-  } else {
-    entry.source = source;
-  }
-  if (meta) {
-    const denylist = ["source", "sourceType", "sourceUrl", "resolvedRef", "computedHash", "skillPath", "path", "installedAt"];
-    for (const [key, value] of Object.entries(meta)) {
-      if (!denylist.includes(key)) {
-        entry[key] = value;
-      }
-    }
-  }
-  return entry;
-}
-function inferSourceType(source) {
-  if (/^[a-zA-Z]:[\\/]/.test(source) || source.startsWith("/") || source.startsWith("\\") || source.startsWith(".")) {
-    return "local";
-  }
-  return "git";
-}
-async function relocateSkill(stagedSkill, home, role, name, now) {
-  const dest = path5.join(roleSkillsDir(home, role), name);
-  const existed = await pathExists(dest);
-  let backup;
-  if (existed) {
-    backup = path5.join(roleSkillsDir(home, role), backupName(name, now));
-    await fs8.rename(dest, backup);
-  }
-  try {
-    await relocateDir(stagedSkill, dest);
-  } catch (error) {
-    await fs8.rm(dest, { recursive: true, force: true }).catch(() => void 0);
-    if (backup) {
-      await fs8.rename(backup, dest).catch(() => {
-        throw new NeoError(
-          "failure",
-          `install failed (${error.message}); original kept as backup: ${path5.basename(backup)}`
-        );
-      });
-    }
-    throw error;
-  }
-  if (backup) {
-    await fs8.rm(backup, { recursive: true, force: true }).catch(() => void 0);
-  }
-  return existed;
-}
-async function relocateDir(from, to) {
-  try {
-    await fs8.rename(from, to);
-  } catch (error) {
-    if (error.code !== "EXDEV") throw error;
-    await fs8.cp(from, to, { recursive: true });
-    await fs8.rm(from, { recursive: true, force: true });
-  }
-}
-async function makeStaging(ports) {
-  return fs8.mkdtemp(path5.join(ports.stagingRoot ?? os.tmpdir(), "neo-staging-"));
-}
-var ANSI_ESCAPE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
-var NOISE_LINE = /^(npm (notice|warn|error code|error syscall)|Tip: use the --yes|\|?\s*$|─+$)/i;
-var ERROR_LINE = /failed|failure|error|EPERM|ENOENT|SKILLS_|unable|denied|fatal|cannot|not found|unsupported|missing/i;
-function summarizeUpstreamFailure(result) {
-  const raw = [result.stdout, result.stderr].filter((text2) => text2.trim().length > 0).join("\n");
-  const lines = raw.replace(ANSI_ESCAPE, "").replace(/\r/g, "").split("\n").map((line) => line.trim()).filter((line) => line.length > 0 && !NOISE_LINE.test(line));
-  const interesting = lines.filter((line) => ERROR_LINE.test(line));
-  const picked = (interesting.length > 0 ? interesting : lines.slice(-3)).slice(0, 3).map((line) => line.slice(0, 160));
-  const detail = picked.join(" | ");
-  const gitHint = /SKILLS_GIT_CLONE_FAILED|Failed to clone|spawn EPERM|spawn ENOENT/i.test(raw) ? " (hint: git clone failed to start; make sure `git --version` works from the same shell and git.exe is on PATH)" : "";
-  return `upstream install failed (exit ${result.code})${detail ? `: ${detail}` : ""}${gitHint}`;
-}
-
-// packages/core/src/exec-node.ts
-import { spawn } from "node:child_process";
-import { constants as fsConstants } from "node:fs";
-import { StringDecoder } from "node:string_decoder";
-import fs9 from "node:fs/promises";
-import path6 from "node:path";
-var DEFAULT_TIMEOUT_MS = 10 * 6e4;
-var MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
-async function findWindowsShim(name, env) {
-  const exts = (env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";").filter((ext) => ext.length > 0).map((ext) => ext.toLowerCase());
-  for (const dir of (env.PATH ?? "").split(";")) {
-    if (dir.length === 0) continue;
-    for (const ext of exts) {
-      const candidate = path6.join(dir, `${name}${ext}`);
-      try {
-        const stat = await fs9.stat(candidate);
-        if (stat.isFile()) return candidate;
-      } catch {
-      }
-    }
-  }
-  return null;
-}
-async function resolveWindowsShim(command) {
-  const name = command[0];
-  const shim = /[\\/]/.test(name) || /\.(cmd|bat)$/i.test(name) ? name : await findWindowsShim(name, process.env);
-  if (shim === null || !/\.(cmd|bat)$/i.test(shim)) return null;
-  let text2;
-  try {
-    text2 = await fs9.readFile(shim, "utf8");
-  } catch {
-    return null;
-  }
-  const matches = [
-    ...text2.matchAll(/%~dp0[\\/](node_modules[\\/][^"%\r\n]+?\.(?:js|exe))/gi)
-  ].map((match) => match[1]);
-  const preferred = matches.find((item) => new RegExp(`(^|[\\\\/])${name}-cli\\.js$`, "i").test(item)) ?? matches[matches.length - 1];
-  const relative = preferred;
-  if (relative === void 0) return null;
-  const target = path6.join(path6.dirname(shim), relative);
-  try {
-    const stat = await fs9.stat(target);
-    if (!stat.isFile()) return null;
-  } catch {
-    return null;
-  }
-  if (target.toLowerCase().endsWith(".js")) {
-    const localNode = path6.join(path6.dirname(shim), "node.exe");
-    const nodeExe = (await fs9.stat(localNode).catch(() => null))?.isFile() ? localNode : process.execPath;
-    return { command: nodeExe, args: [target, ...command.slice(1)], shell: false };
-  }
-  return { command: target, args: [...command.slice(1)], shell: false };
-}
-async function windowsInvocation(command) {
-  const resolved = await resolveWindowsShim(command);
-  if (resolved !== null) return resolved;
-  const first = command[0];
-  const looksExecutable = /\.(exe|com)$/i.test(first);
-  if (looksExecutable) {
-    return { command: first, args: command.slice(1), shell: false };
-  }
-  return { command: command.map(quoteForWindowsShell).join(" "), args: [], shell: true };
-}
-var gitDirPromise;
-async function resolveGitDir(isWindows2) {
-  const dirs = (process.env.PATH ?? "").split(path6.delimiter).map((dir) => dir.replace(/^"|"$/g, "")).filter((dir) => dir.length > 0);
-  for (const dir of dirs) {
-    const candidate = path6.join(dir, isWindows2 ? "git.exe" : "git");
-    try {
-      const stat = await fs9.stat(candidate);
-      if (!stat.isFile()) continue;
-      if (!isWindows2) await fs9.access(candidate, fsConstants.X_OK);
-      return dir;
-    } catch {
-    }
-  }
-  return void 0;
-}
-function nodeExecPort() {
-  const isWindows2 = process.platform === "win32";
-  return {
-    async run(command, opts) {
-      if (command.length === 0) throw new Error("nodeExecPort: empty command");
-      const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-      const invocation = isWindows2 ? await windowsInvocation(command) : { command: command[0], args: command.slice(1), shell: false };
-      gitDirPromise ??= resolveGitDir(isWindows2);
-      const gitDir = await gitDirPromise;
-      const childEnv = gitDir === void 0 ? process.env : {
-        ...process.env,
-        PATH: `${gitDir}${path6.delimiter}${process.env.PATH ?? ""}`
-      };
-      return new Promise((resolve, reject) => {
-        const child = invocation.shell ? spawn(invocation.command, {
-          cwd: opts.cwd,
-          env: childEnv,
-          shell: true,
-          stdio: ["ignore", "pipe", "pipe"]
-        }) : spawn(invocation.command, invocation.args, {
-          cwd: opts.cwd,
-          env: childEnv,
-          stdio: ["ignore", "pipe", "pipe"]
-        });
-        const outDec = new StringDecoder("utf8");
-        const errDec = new StringDecoder("utf8");
-        let stdout2 = "";
-        let stderr = "";
-        let totalBytes = 0;
-        let settled = false;
-        const killTree = () => {
-          if (isWindows2 && child.pid !== void 0) {
-            spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" }).on(
-              "error",
-              () => child.kill("SIGKILL")
-            );
-          } else {
-            child.kill("SIGTERM");
-            setTimeout(() => child.kill("SIGKILL"), 2e3).unref();
-          }
-        };
-        const timer = setTimeout(() => {
-          if (settled) return;
-          killTree();
-          finish(
-            () => reject(new Error(`upstream command timed out after ${timeoutMs}ms: ${command.join(" ")}`))
-          );
-        }, timeoutMs);
-        const finish = (fn) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          fn();
-        };
-        child.stdout?.on("data", (chunk) => {
-          totalBytes += chunk.length;
-          if (totalBytes > MAX_OUTPUT_BYTES) {
-            killTree();
-            finish(() => reject(new Error(`upstream output exceeded ${MAX_OUTPUT_BYTES} bytes`)));
-            return;
-          }
-          stdout2 += outDec.write(chunk);
-        });
-        child.stderr?.on("data", (chunk) => {
-          totalBytes += chunk.length;
-          if (totalBytes > MAX_OUTPUT_BYTES) {
-            killTree();
-            finish(() => reject(new Error(`upstream output exceeded ${MAX_OUTPUT_BYTES} bytes`)));
-            return;
-          }
-          stderr += errDec.write(chunk);
-        });
-        child.on("error", (error) => finish(() => reject(error)));
-        child.on("close", (code) => {
-          stdout2 += outDec.end();
-          stderr += errDec.end();
-          finish(() => resolve({ code: code ?? -1, stdout: stdout2, stderr }));
-        });
-      });
-    }
-  };
-}
-function quoteForWindowsShell(arg) {
-  if (arg.includes('"')) {
-    throw new Error(`nodeExecPort: argument contains a double quote, unsupported: ${arg}`);
-  }
-  if (!/[\s&|<>^%]/.test(arg)) return arg;
-  const escaped = arg.replace(/(\\+)$/, "$1$1");
-  return `"${escaped}"`;
-}
-
-// packages/core/src/git-sync.ts
-import fs10 from "node:fs/promises";
-import path7 from "node:path";
-var GITIGNORE = [
-  "/*",
-  "!/.gitignore",
-  "!/.gitattributes",
-  "!/roles/",
-  "!/state/",
-  "/state/*",
-  "!/state/locks/",
-  "/state/locks/.*.tmp",
-  "**/*.bak-*",
-  "**/*.sync-conflict-*",
-  "**/*conflicted copy*",
-  "**/.stversions/",
-  "**/node_modules/",
-  ".DS_Store",
-  "Thumbs.db",
-  "desktop.ini",
-  "**/*.icloud",
-  ".env",
-  ".env.*",
-  "**/*.pem",
-  "**/*.key",
-  ""
-].join("\n");
-var GITATTRIBUTES = [
-  "* text=auto eol=lf",
-  "*.bat text eol=crlf",
-  "*.cmd text eol=crlf",
-  "*.ps1 text eol=crlf",
-  "/roles/** -text",
-  "/state/locks/*.yaml text eol=lf",
-  "*.png binary",
-  "*.jpg binary",
-  "*.jpeg binary",
-  "*.gif binary",
-  "*.webp binary",
-  "*.ico binary",
-  "*.pdf binary",
-  "*.zip binary",
-  "*.gz binary",
-  "*.woff2 binary",
-  "*.ttf binary",
-  "*.node binary",
-  ""
-].join("\n");
-async function pathIsFileOrDir(target) {
-  try {
-    await fs10.stat(target);
-    return true;
-  } catch {
-    return false;
-  }
-}
-async function detectRepoScope(home) {
-  if (await pathIsFileOrDir(path7.join(home, ".git"))) return "home";
-  let dir = path7.dirname(home);
-  while (true) {
-    if (await pathIsFileOrDir(path7.join(dir, ".git"))) return "parent";
-    const parent = path7.dirname(dir);
-    if (parent === dir) return "none";
-    dir = parent;
-  }
-}
-async function ensureSyncFiles(home) {
-  await fs10.mkdir(home, { recursive: true });
-  const written = [];
-  const existing = [];
-  for (const [name, content] of [
-    [".gitignore", GITIGNORE],
-    [".gitattributes", GITATTRIBUTES]
-  ]) {
-    const file = path7.join(home, name);
-    if (await pathIsFileOrDir(file)) {
-      existing.push(name);
-      continue;
-    }
-    await fs10.writeFile(file, content, "utf8");
-    written.push(name);
-  }
-  return { written, existing };
-}
-async function gitAvailable(exec2, cwd) {
-  try {
-    const result = await exec2.run(["git", "--version"], { cwd });
-    return result.code === 0;
-  } catch {
-    return false;
-  }
-}
-function validateRemoteUrl(remote) {
-  if (/^[a-z][a-z0-9+.-]*:\/\/[^/@]+:[^/@]+@/i.test(remote)) {
-    throw new NeoError(
-      "usage",
-      "remote URL must not embed credentials (user:pass@); use SSH or a credential helper"
-    );
-  }
-}
-async function gitSync(home, opts) {
-  const scope = await detectRepoScope(home);
-  if (scope !== "none") {
-    return {
-      scope,
-      files: { written: [], existing: [] },
-      repoCreated: false,
-      remoteAdded: false,
-      warnings: []
-    };
-  }
-  const files = await ensureSyncFiles(home);
-  if (opts.remote.length === 0) {
-    return {
-      scope,
-      files,
-      repoCreated: false,
-      remoteAdded: false,
-      warnings: [],
-      next: 'add a remote and run "git init" when ready (the ignore files are already in place)'
-    };
-  }
-  validateRemoteUrl(opts.remote);
-  const warnings = [];
-  if (!await gitAvailable(opts.exec, home)) {
-    warnings.push("git is not runnable from neo; install Git and ensure git.exe is on PATH");
-    return { scope, files, repoCreated: false, remoteAdded: false, warnings };
-  }
-  const run = async (args) => {
-    try {
-      const result = await opts.exec.run(args, { cwd: home });
-      if (result.code !== 0) {
-        warnings.push(`${args.slice(0, 3).join(" ")} failed (exit ${result.code}): ${(result.stderr || result.stdout).trim().slice(0, 200)}`);
-        return false;
-      }
-      return true;
-    } catch (error) {
-      warnings.push(`${args.slice(0, 3).join(" ")} could not start: ${error.message}`);
-      return false;
-    }
-  };
-  if (!await run(["git", "init"])) {
-    return { scope, files, repoCreated: false, remoteAdded: false, warnings };
-  }
-  await run(["git", "add", "-A"]);
-  if (!await run(["git", "commit", "-m", "neo: initialize home"])) {
-    warnings.push("initial commit failed; configure git user.name/user.email, then commit manually");
-  }
-  const remoteAdded = await run(["git", "remote", "add", "origin", opts.remote]);
-  return {
-    scope,
-    files,
-    repoCreated: true,
-    remoteAdded,
-    warnings,
-    ...remoteAdded ? { next: "git push -u origin HEAD" } : {}
-  };
-}
-
-// packages/core/src/classify.ts
-import path8 from "node:path";
-var MAX_LINK_HOPS = 40;
-function normalizeLinkTarget(raw) {
-  if (process.platform !== "win32") return raw;
-  let value = raw;
-  if (/^\\\\\?\\UNC\\/i.test(value)) value = `\\\\${value.slice(8)}`;
-  value = value.replace(/^\\\\\?\\/i, "").replace(/^\\\?\?\\/, "").replace(/^\\\\.\\/, "");
-  return value;
-}
-function caseFoldPath(value) {
-  return process.platform === "win32" || process.platform === "darwin" ? path8.resolve(value).toLowerCase() : path8.resolve(value);
-}
-var samePath = (a2, b) => caseFoldPath(a2) === caseFoldPath(b);
-function isInsidePath(base, target) {
-  const b = caseFoldPath(base);
-  const t2 = caseFoldPath(target);
-  return t2 === b || t2.startsWith(b + path8.sep);
-}
-async function resolveLinkTarget(port, slot) {
-  let current = slot;
-  for (let hop = 0; hop < MAX_LINK_HOPS; hop++) {
-    const raw = await port.readlink(current);
-    const resolved = path8.resolve(path8.dirname(current), normalizeLinkTarget(raw));
-    const info = await port.lstat(resolved);
-    if (info === null) return { final: resolved, exists: false, broken: "missing" };
-    if (!info.symlink) return { final: resolved, exists: true };
-    current = resolved;
-  }
-  return { final: current, exists: false, broken: "cycle" };
-}
-async function classifySlot(port, input) {
-  const info = await port.lstat(input.slot);
-  if (info === null) return { kind: "empty" };
-  if (!info.symlink) {
-    return { kind: "F", real: info.directory ? "dir" : "file" };
-  }
-  if (input.recorded) return { kind: "A" };
-  const resolution = await resolveLinkTarget(port, input.slot);
-  if (!resolution.exists) {
-    return {
-      kind: "E",
-      resolvedTarget: resolution.final,
-      ...resolution.broken !== void 0 ? { broken: resolution.broken } : {}
-    };
-  }
-  if (isInsidePath(input.home, resolution.final)) {
-    return { kind: "B", resolvedTarget: resolution.final };
-  }
-  if (input.registryDirs.some((dir) => isInsidePath(dir, resolution.final))) {
-    return { kind: "C", resolvedTarget: resolution.final };
-  }
-  return { kind: "D", resolvedTarget: resolution.final };
-}
-
-// packages/core/src/link-node.ts
-import fs11 from "node:fs/promises";
-var isMissing = (error) => {
-  const code = error?.code;
-  return code === "ENOENT" || code === "ENOTDIR";
-};
-function nodeLinkPort() {
-  const isWindows2 = process.platform === "win32";
-  return {
-    async lstat(path24) {
-      try {
-        const stat = await fs11.lstat(path24);
-        return { symlink: stat.isSymbolicLink(), directory: stat.isDirectory(), file: stat.isFile() };
-      } catch (error) {
-        if (isMissing(error)) return null;
-        throw error;
-      }
-    },
-    readlink(path24) {
-      return fs11.readlink(path24);
-    },
-    linkDir(target, linkPath) {
-      return fs11.symlink(target, linkPath, isWindows2 ? "junction" : "dir");
-    },
-    async unlink(path24) {
-      try {
-        await fs11.unlink(path24);
-      } catch (error) {
-        const code = error?.code;
-        if (isWindows2 && (code === "EPERM" || code === "EISDIR")) {
-          const stat = await fs11.lstat(path24).catch(() => null);
-          if (stat?.isSymbolicLink() === true) {
-            await fs11.rmdir(path24);
-            return;
-          }
-        }
-        throw error;
-      }
-    }
-  };
-}
-
-// packages/core/src/mounts.ts
-import { randomUUID as randomUUID3 } from "node:crypto";
-import fs12 from "node:fs/promises";
-import path9 from "node:path";
-function emptyMounts() {
-  return { version: 1, targets: {} };
-}
-function invalid4(message) {
-  return new NeoError("state", `state/mounts.json: ${message}`);
-}
-async function readMounts(home) {
-  let text2;
-  try {
-    text2 = await fs12.readFile(mountsJsonPath(home), "utf8");
-  } catch (error) {
-    if (error.code === "ENOENT") return emptyMounts();
-    throw error;
-  }
+function parseRoleYamlRecord(role, text2) {
   let raw;
   try {
-    raw = JSON.parse(text2);
+    raw = (0, import_yaml5.parse)(text2);
   } catch (error) {
-    throw invalid4(`not valid JSON (${error.message})`);
+    throw corrupt2(role, `not valid YAML: ${error.message}`);
   }
-  if (!isRecord(raw)) throw invalid4("expected a top-level object");
-  if (raw.version === void 0) throw invalid4('missing required field "version"');
+  if (raw === null || raw === void 0) throw corrupt2(role, "file is empty");
+  if (!isRecord(raw)) throw corrupt2(role, "expected a top-level mapping");
+  if (raw.version === void 0) throw corrupt2(role, 'missing required field "version"');
   if (raw.version !== 1) {
-    throw invalid4(
-      `unsupported version ${String(raw.version)} (supported major version: 1; refusing to read or write)`
-    );
+    throw corrupt2(role, `unsupported version ${String(raw.version)} (supported major version: 1)`);
   }
-  if (raw.targets === void 0) throw invalid4('missing required field "targets"');
-  if (!isRecord(raw.targets)) throw invalid4('"targets" must be an object keyed by absolute path');
-  const targets = {};
-  for (const [dir, value] of Object.entries(raw.targets)) {
-    if (!isRecord(value)) throw invalid4(`targets["${dir}"] must be an object`);
-    if (typeof value.agent !== "string" || value.agent.length === 0) {
-      throw invalid4(`targets["${dir}"] is missing required string field "agent"`);
-    }
-    if (!Array.isArray(value.skills)) {
-      throw invalid4(`targets["${dir}"].skills must be an array of skill names`);
-    }
-    if (value.skills.some((name) => typeof name !== "string")) {
-      throw invalid4(`targets["${dir}"].skills must be an array of skill names`);
-    }
-    targets[dir] = value;
-  }
-  return { ...raw, version: 1, targets };
+  return raw;
 }
-async function writeMounts(home, ledger) {
-  const file = mountsJsonPath(home);
-  await fs12.mkdir(stateDir(home), { recursive: true });
-  const tmp = path9.join(stateDir(home), `.${path9.basename(file)}.${randomUUID3()}.tmp`);
+async function readRoleDomains(home, role) {
+  let text2;
   try {
-    await fs12.writeFile(tmp, `${JSON.stringify(ledger, null, 2)}
-`, "utf8");
-    await fs12.rename(tmp, file);
-  } finally {
-    await fs12.rm(tmp, { recursive: true, force: true }).catch(() => void 0);
-  }
-}
-
-// packages/core/src/targets.ts
-import path10 from "node:path";
-async function readRegistry(home) {
-  const extension = await readAgentsExtension(home);
-  return mergeRegistry(BUILTIN_AGENTS, extension?.agents ?? {});
-}
-function resolveDirValue(value, homedir, kind, what) {
-  const expanded = expandTilde(value, homedir);
-  if (!path10.isAbsolute(expanded)) {
-    throw new NeoError(
-      kind,
-      `${what} must resolve to an absolute path after ~ expansion, got: ${JSON.stringify(value)}`
-    );
-  }
-  return path10.resolve(expanded);
-}
-function registrySkillDirs(registry, homedir) {
-  const dirs = [];
-  for (const entry of registry) {
-    const expanded = expandTilde(entry.skillsDir, homedir);
-    if (path10.isAbsolute(expanded)) dirs.push(path10.resolve(expanded));
-  }
-  return dirs;
-}
-function resolveOne(entry, target, homedir) {
-  const raw = target.skillsDir ?? entry.skillsDir;
-  return {
-    agent: target.agent,
-    skillsDir: resolveDirValue(raw, homedir, "state", `target "${target.agent}" skillsDir`),
-    agentsMd: target.agentsMd ?? false
-  };
-}
-async function resolveTargets(home, homedir, targets) {
-  const registry = await readRegistry(home);
-  const resolved = [];
-  const byDir = /* @__PURE__ */ new Map();
-  for (const target of targets) {
-    const entry = registry.find((candidate) => candidate.id === target.agent);
-    if (entry === void 0) {
-      throw new NeoError(
-        "state",
-        `config target "${target.agent}" is not in the merged registry; fix config.yaml or add an agents.yaml entry`
-      );
-    }
-    const one = resolveOne(entry, target, homedir);
-    const key = caseFoldPath(one.skillsDir);
-    const owner = byDir.get(key);
-    if (owner !== void 0) {
-      throw new NeoError(
-        "state",
-        `targets "${owner}" and "${one.agent}" resolve to the same skills directory: ${one.skillsDir}; keep only one`
-      );
-    }
-    byDir.set(key, one.agent);
-    resolved.push(one);
-  }
-  return resolved;
-}
-async function addTarget(home, homedir, id, opts = {}) {
-  const registry = await readRegistry(home);
-  const entry = registry.find((candidate) => candidate.id === id);
-  if (entry === void 0) {
-    const known = registry.map((candidate) => candidate.id).join(", ");
-    throw new NeoError("usage", `unknown agent id "${id}" (known ids: ${known})`);
-  }
-  const loaded = await readConfig(home);
-  if (loaded.config.targets.some((target2) => target2.agent === id)) {
-    throw new NeoError(
-      "state",
-      `target "${id}" is already configured (run: neo target remove ${id} first)`
-    );
-  }
-  const rawDir = opts.skillsDir ?? entry.skillsDir;
-  const kind = opts.skillsDir !== void 0 ? "usage" : "state";
-  const dir = resolveDirValue(rawDir, homedir, kind, `--skills-dir for "${id}"`);
-  const existing = await resolveTargets(home, homedir, loaded.config.targets);
-  const clash = existing.find((target2) => caseFoldPath(target2.skillsDir) === caseFoldPath(dir));
-  if (clash !== void 0) {
-    throw new NeoError(
-      "state",
-      `"${id}" resolves to the same skills directory as target "${clash.agent}": ${dir}; keep only one`
-    );
-  }
-  const target = { agent: id };
-  if (opts.skillsDir !== void 0) target.skillsDir = opts.skillsDir;
-  if (opts.agentsMd) target.agentsMd = true;
-  loaded.config.targets = [...loaded.config.targets, target];
-  await writeConfig(home, loaded);
-  return { agent: id, skillsDir: dir, agentsMd: opts.agentsMd ?? false };
-}
-async function removeTarget(home, homedir, id) {
-  const loaded = await readConfig(home);
-  const target = loaded.config.targets.find((candidate) => candidate.agent === id);
-  if (target === void 0) {
-    throw new NeoError("state", `target "${id}" is not configured`);
-  }
-  let dir = null;
-  try {
-    dir = (await resolveTargets(home, homedir, [target]))[0]?.skillsDir ?? null;
-  } catch {
-    dir = null;
-  }
-  const ledger = await readMounts(home);
-  const stillRecorded = dir !== null && ledger.targets[dir] !== void 0 || Object.values(ledger.targets).some((entry) => entry.agent === id);
-  loaded.config.targets = loaded.config.targets.filter((candidate) => candidate.agent !== id);
-  await writeConfig(home, loaded);
-  return { dir, stillRecorded };
-}
-async function listConfiguredTargets(home, homedir) {
-  const { config } = await readConfig(home);
-  return resolveTargets(home, homedir, config.targets);
-}
-
-// packages/core/src/converge.ts
-import fs14 from "node:fs/promises";
-import path12 from "node:path";
-
-// packages/core/src/agentsmd.ts
-import path11 from "node:path";
-import { randomUUID as randomUUID4 } from "node:crypto";
-import fs13 from "node:fs/promises";
-var BEGIN_LINE = /^<!--\s*neo:begin\s+role=([^\s>]+)\s*-->\r?$/;
-var END_LINE = /^<!--\s*neo:end\s+role=([^\s>]+)\s*-->\r?$/;
-var PROJECT_BEGIN_LINE = /^<!--\s*neo:project:begin\s+role=([^\s>]+)\s*-->\r?$/;
-var PROJECT_END_LINE = /^<!--\s*neo:project:end\s+role=([^\s>]+)\s*-->\r?$/;
-var NEO_MARKER_LINE = /^<!--\s*neo:(?:project:)?(?:begin|end)\b.*-->\r?$/;
-function assertNoNeoMarkerLines(role, content) {
-  const line = content.split(/\r?\n/).find((l) => NEO_MARKER_LINE.test(l));
-  if (line !== void 0) {
-    throw new NeoError(
-      "usage",
-      `role "${role}" prompt contains a reserved neo block marker; remove this line: ${line.trim()}`
-    );
-  }
-}
-function renderNeoBlock(role, content) {
-  return `<!-- neo:begin role=${role} -->
-${content.replace(/\s+$/, "")}
-<!-- neo:end role=${role} -->
-`;
-}
-function renderProjectBlock(role, content) {
-  return `<!-- neo:project:begin role=${role} -->
-${content.replace(/\s+$/, "")}
-<!-- neo:project:end role=${role} -->
-`;
-}
-function containsNeoBlocks(content) {
-  return content.split("\n").some((line) => BEGIN_LINE.test(line));
-}
-function containsProjectBlocks(content) {
-  return content.split("\n").some((line) => PROJECT_BEGIN_LINE.test(line));
-}
-function stripMarkedBlocks(content, beginLine, endLine) {
-  let out = "";
-  let i2 = 0;
-  let removed = 0;
-  while (i2 < content.length) {
-    const lineEnd = content.indexOf("\n", i2);
-    const line = lineEnd === -1 ? content.slice(i2) : content.slice(i2, lineEnd);
-    if (beginLine.test(line)) {
-      let j = lineEnd === -1 ? content.length : lineEnd + 1;
-      let matchedEnd = -1;
-      while (j < content.length) {
-        const innerEnd = content.indexOf("\n", j);
-        const inner = innerEnd === -1 ? content.slice(j) : content.slice(j, innerEnd);
-        if (endLine.test(inner)) {
-          matchedEnd = innerEnd === -1 ? content.length : innerEnd + 1;
-          break;
-        }
-        j = innerEnd === -1 ? content.length : innerEnd + 1;
-      }
-      if (matchedEnd === -1) {
-        out += lineEnd === -1 ? line : `${line}
-`;
-        i2 = lineEnd === -1 ? content.length : lineEnd + 1;
-        continue;
-      }
-      removed++;
-      i2 = matchedEnd;
-      continue;
-    }
-    out += lineEnd === -1 ? line : `${line}
-`;
-    i2 = lineEnd === -1 ? content.length : lineEnd + 1;
-  }
-  return { content: out, removed };
-}
-function stripNeoBlocks(content) {
-  return stripMarkedBlocks(content, BEGIN_LINE, END_LINE);
-}
-function stripProjectBlocks(content) {
-  return stripMarkedBlocks(content, PROJECT_BEGIN_LINE, PROJECT_END_LINE);
-}
-function applyMarkedBlocks(content, blocks, marker) {
-  const { content: stripped, removed } = marker.strip(content);
-  if (blocks.length === 0) {
-    return { content: stripped, changed: removed > 0 };
-  }
-  if (stripped.length > 0 && !stripped.endsWith("\n")) {
-    const withNewline = `${stripped}
-${blocks.map((block2) => marker.render(block2.role, block2.content)).join("")}`;
-    return { content: withNewline, changed: true };
-  }
-  const next = stripped + blocks.map((block2) => marker.render(block2.role, block2.content)).join("");
-  return { content: next, changed: next !== content || removed !== blocks.length };
-}
-function applyNeoBlocks(content, blocks) {
-  return applyMarkedBlocks(content, blocks, { render: renderNeoBlock, strip: stripNeoBlocks });
-}
-function applyProjectBlocks(content, blocks) {
-  return applyMarkedBlocks(content, blocks, { render: renderProjectBlock, strip: stripProjectBlocks });
-}
-function isEmptyPrompt(content, role) {
-  const trimmed = content.trim();
-  if (trimmed.length === 0) return true;
-  return trimmed === roleAgentsMdStub(role).trim();
-}
-function planAgentsMdTargets(targets, registry, homedir) {
-  const byAgent = /* @__PURE__ */ new Map();
-  const errors = /* @__PURE__ */ new Map();
-  const byFile = /* @__PURE__ */ new Map();
-  const drafts = [];
-  for (const target of targets) {
-    if (!target.agentsMd) continue;
-    const entry = registry.find((candidate) => candidate.id === target.agent);
-    if (entry === void 0) continue;
-    const raw = entry.agentsMd;
-    if (raw === void 0) {
-      errors.set(
-        target.agent,
-        `agent "${target.agent}" has no user-level instruction file in the registry; remove its agentsMd opt-in (or remap the agent in agents.yaml)`
-      );
-      continue;
-    }
-    const expanded = expandTilde(raw, homedir);
-    if (!path11.isAbsolute(expanded)) {
-      errors.set(
-        target.agent,
-        `agentsMd path for "${target.agent}" must resolve to an absolute path after ~ expansion, got: ${JSON.stringify(raw)}`
-      );
-      continue;
-    }
-    drafts.push({ agent: target.agent, file: path11.resolve(expanded), rawPath: raw });
-  }
-  for (const draft of drafts) {
-    const key = caseFoldPath(draft.file);
-    const owner = byFile.get(key);
-    if (owner !== void 0) {
-      const message = `agentsMd conflict: targets "${owner}" and "${draft.agent}" resolve to the same instruction file: ${draft.file}; converge to one target`;
-      errors.set(draft.agent, message);
-      errors.set(owner, message);
-      byAgent.delete(owner);
-      continue;
-    }
-    byFile.set(key, draft.agent);
-    byAgent.set(draft.agent, draft);
-  }
-  return { byAgent, errors };
-}
-async function readRolePrompt(home, role) {
-  try {
-    return await fs13.readFile(roleAgentsMd(home, role), "utf8");
-  } catch (error) {
-    if (error.code === "ENOENT") return null;
-    throw error;
-  }
-}
-async function desiredPromptBlocks(home, role) {
-  if (role === null) return [];
-  const blocks = [];
-  for (const sourceRole of role === "default" ? ["default"] : ["default", role]) {
-    const content = await readRolePrompt(home, sourceRole);
-    if (content !== null && !isEmptyPrompt(content, sourceRole)) {
-      assertNoNeoMarkerLines(sourceRole, content);
-      blocks.push({ role: sourceRole, content });
-    }
-  }
-  return blocks;
-}
-function asAgentsMdLedger(previous) {
-  if (!isRecord(previous) || previous.mounted !== true || typeof previous.file !== "string") {
-    return void 0;
-  }
-  const entry = { ...previous, mounted: true, file: previous.file };
-  if (typeof previous.backup === "string") entry.backup = previous.backup;
-  return entry;
-}
-function backupRelPath(agent, file) {
-  const safeAgent = safeBackupAgentName(agent);
-  return path11.join("state", "backups", `${safeAgent}-${path11.basename(file)}.bak`).split(path11.sep).join("/");
-}
-async function pathExists2(target) {
-  return pathExists(target);
-}
-async function writeFileAtomic2(file, content) {
-  await writeFileAtomic(file, content, { defaultMode: 420 });
-}
-async function backupFileAtomic(from, to) {
-  await fs13.mkdir(path11.dirname(to), { recursive: true });
-  const tmp = `${to}.${randomUUID4()}.tmp`;
-  try {
-    await fs13.copyFile(from, tmp);
-    await fs13.rename(tmp, to);
-  } finally {
-    await fs13.rm(tmp, { force: true }).catch(() => void 0);
-  }
-}
-async function pushOverrideWarning(warnings, resolved, role) {
-  if (role === null) return;
-  if (resolved.agent !== "codex" || path11.basename(resolved.file) !== "AGENTS.md") return;
-  const override = path11.join(path11.dirname(resolved.file), "AGENTS.override.md");
-  if (!await pathExists2(override)) return;
-  warnings.push(`AGENTS.override.md exists (${override}); the mounted ${resolved.file} is not read by codex`);
-}
-async function convergeAgentsMdFile(home, resolved, role, previous) {
-  const actions = [];
-  const warnings = [];
-  const prevEntry = asAgentsMdLedger(previous);
-  try {
-    const desired = await desiredPromptBlocks(home, role);
-    let content;
-    try {
-      content = await fs13.readFile(resolved.file, "utf8");
-    } catch (error) {
-      if (error.code === "ENOENT") content = null;
-      else throw error;
-    }
-    const hasBlocks = content !== null && containsNeoBlocks(content);
-    if (desired.length === 0 && !hasBlocks) {
-      return { actions, warnings, accounting: null };
-    }
-    if (desired.length === 0) {
-      const { content: userPart } = stripNeoBlocks(content ?? "");
-      if (userPart.trim() === "" && prevEntry?.backup === void 0) {
-        await fs13.rm(resolved.file, { force: true });
-        actions.push({ kind: "file-removed", file: resolved.file });
-      } else {
-        await writeFileAtomic2(resolved.file, userPart.trim() === "" ? "" : userPart);
-        actions.push({ kind: "stripped", file: resolved.file });
-      }
-      return { actions, warnings, accounting: null };
-    }
-    const next = applyNeoBlocks(content ?? "", desired);
-    if (!next.changed) {
-      await pushOverrideWarning(warnings, resolved, role);
-      return {
-        actions,
-        warnings,
-        accounting: prevEntry ?? { mounted: true, file: resolved.rawPath }
-      };
-    }
-    let backupRel = prevEntry?.backup;
-    let backupNote;
-    if (content !== null && backupRel === void 0) {
-      backupRel = backupRelPath(resolved.agent, resolved.file);
-      const bakAbs = path11.join(home, ...backupRel.split("/"));
-      if (!await pathExists2(bakAbs)) {
-        await backupFileAtomic(resolved.file, bakAbs);
-        backupNote = `first-touch backup -> ${backupRel}`;
-      }
-    }
-    await writeFileAtomic2(resolved.file, next.content);
-    actions.push({
-      kind: hasBlocks ? "updated" : "mounted",
-      file: resolved.file,
-      ...backupNote !== void 0 ? { note: backupNote } : {}
-    });
-    const accounting = {
-      ...prevEntry ?? {},
-      mounted: true,
-      file: resolved.rawPath,
-      ...backupRel !== void 0 ? { backup: backupRel } : {}
-    };
-    await pushOverrideWarning(warnings, resolved, role);
-    return { actions, warnings, accounting };
-  } catch (error) {
-    return { actions, warnings, accounting: null, error: error.message };
-  }
-}
-
-// packages/core/src/converge.ts
-async function skillDirNames(dir) {
-  try {
-    const entries = await fs14.readdir(dir, { withFileTypes: true });
-    return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
+    text2 = await fs8.readFile(roleYamlPath(home, role), "utf8");
   } catch (error) {
     if (error.code === "ENOENT") return [];
     throw error;
   }
+  return readRoleDomainsFromText(role, text2);
 }
-async function desiredSkills(home, role) {
-  const skills = /* @__PURE__ */ new Map();
-  if (role !== null) {
-    for (const sourceRole of role === "default" ? ["default"] : ["default", role]) {
-      for (const name of await skillDirNames(roleSkillsDir(home, sourceRole))) {
-        skills.set(name, { name, sourceRole });
-      }
+function readRoleDomainsFromText(role, text2) {
+  const raw = parseRoleYamlRecord(role, text2);
+  if (raw.domains === void 0) return [];
+  if (!Array.isArray(raw.domains)) throw corrupt2(role, '"domains" must be a list of strings');
+  const seen = /* @__PURE__ */ new Set();
+  const domains = [];
+  for (const item of raw.domains) {
+    if (typeof item !== "string" || !ROLE_NAME_PATTERN.test(item) || item === "default") {
+      throw corrupt2(role, `domains entry ${JSON.stringify(item)} is not a valid domain name`);
     }
+    if (seen.has(item)) continue;
+    seen.add(item);
+    domains.push(item);
   }
-  const groups = /* @__PURE__ */ new Map();
-  for (const name of skills.keys()) {
-    const key = name.toLowerCase();
-    groups.set(key, [...groups.get(key) ?? [], name]);
-  }
-  return {
-    skills,
-    caseCollisions: new Map([...groups].filter(([, names]) => names.length > 1))
-  };
+  return domains;
 }
-async function convergeOneTarget(ports, home, target, desired, ledger, opts) {
-  const report = {
-    agent: target.agent,
-    dir: target.skillsDir,
-    actions: [],
-    conflicts: [],
-    errors: [],
-    agentsMd: [],
-    warnings: []
-  };
-  const port = ports.link;
+function renderRoleYaml(role, existingText, domains) {
+  const raw = existingText === null ? {} : parseRoleYamlRecord(role, existingText);
+  raw.version = 1;
+  raw.domains = [...domains];
+  return (0, import_yaml5.stringify)(raw);
+}
+function normalizeRoleYaml(role, text2) {
+  const record = parseRoleYamlRecord(role, text2);
+  const domains = Array.isArray(record.domains) ? record.domains.filter((item) => typeof item === "string") : [];
+  return renderRoleYaml(role, text2, domains);
+}
+async function listDomains(home) {
+  const out = [];
+  let entries;
   try {
-    await fs14.mkdir(target.skillsDir, { recursive: true });
+    entries = await fs8.readdir(libraryDir(home), { withFileTypes: true });
   } catch (error) {
-    report.errors.push({ skill: "(target)", error: `cannot create skills dir: ${error.message}` });
-    return report;
-  }
-  const previous = ledger.targets[target.skillsDir];
-  const recorded = new Set(previous?.skills ?? []);
-  const finalSkills = /* @__PURE__ */ new Set();
-  const stuckSkills = /* @__PURE__ */ new Set();
-  for (const name of recorded) {
-    if (desired.skills.has(name)) continue;
-    const slot = path12.join(target.skillsDir, name);
-    let info;
-    try {
-      info = await port.lstat(slot);
-    } catch (error) {
-      report.errors.push({ skill: name, error: `lstat failed: ${error.message}` });
-      stuckSkills.add(name);
-      continue;
-    }
-    if (info === null) continue;
-    if (!info.symlink) {
-      report.conflicts.push({
-        skill: name,
-        kind: "F",
-        detail: `recorded slot is now unmanaged real content; left in place and dropped from ledger`
-      });
-      continue;
-    }
-    try {
-      await port.unlink(slot);
-      report.actions.push({ skill: name, kind: "removed" });
-    } catch (error) {
-      report.errors.push({ skill: name, error: `unlink failed: ${error.message}` });
-      stuckSkills.add(name);
-    }
-  }
-  const wanted = [...desired.skills.values()].sort(
-    (a2, b) => a2.name < b.name ? -1 : a2.name > b.name ? 1 : 0
-  );
-  for (const skill of wanted) {
-    const { name, sourceRole } = skill;
-    const collision = desired.caseCollisions.get(name.toLowerCase());
-    if (collision !== void 0) {
-      report.conflicts.push({
-        skill: name,
-        kind: "case",
-        detail: `case-insensitive collision with [${collision.join(", ")}]; rename at role level`
-      });
-      continue;
-    }
-    const slot = path12.join(target.skillsDir, name);
-    const source = path12.join(roleSkillsDir(home, sourceRole), name);
-    const replace = async (note, kind) => {
-      try {
-        await port.unlink(slot);
-        const sourceInfo = await port.lstat(source);
-        if (sourceInfo === null) {
-          report.errors.push({ skill: name, error: `skill source missing: ${source}` });
-          return false;
-        }
-        await port.linkDir(source, slot);
-        report.actions.push({
-          skill: name,
-          kind: kind ?? "repointed",
-          sourceRole,
-          ...note !== void 0 ? { note } : {}
-        });
-        return true;
-      } catch (error) {
-        report.errors.push({ skill: name, error: error.message });
-        return false;
-      }
-    };
-    let classification;
-    try {
-      classification = await classifySlot(port, {
-        slot,
-        recorded: recorded.has(name),
-        home,
-        registryDirs: opts.registryDirs
-      });
-    } catch (error) {
-      report.errors.push({ skill: name, error: error.message });
-      continue;
-    }
-    switch (classification.kind) {
-      case "empty": {
-        try {
-          const sourceInfo = await port.lstat(source);
-          if (sourceInfo === null) {
-            report.errors.push({ skill: name, error: `skill source missing: ${source}` });
-            break;
-          }
-          await port.linkDir(source, slot);
-          report.actions.push({ skill: name, kind: "mounted", sourceRole });
-          finalSkills.add(name);
-        } catch (error) {
-          report.errors.push({ skill: name, error: error.message });
-        }
-        break;
-      }
-      case "A": {
-        let resolved = null;
-        try {
-          const raw = await port.readlink(slot);
-          resolved = path12.resolve(path12.dirname(slot), normalizeLinkTarget(raw));
-        } catch {
-          resolved = null;
-        }
-        if (resolved !== null && samePath(resolved, source)) {
-          finalSkills.add(name);
-          break;
-        }
-        if (await replace()) finalSkills.add(name);
-        break;
-      }
-      case "B": {
-        if (await replace(void 0, "replaced-orphan")) finalSkills.add(name);
-        break;
-      }
-      case "C": {
-        if (await replace(`was -> ${classification.resolvedTarget}`, "replaced-mirror")) {
-          finalSkills.add(name);
-        }
-        break;
-      }
-      case "D": {
-        if (opts.force) {
-          if (await replace(`was -> ${classification.resolvedTarget}`, "replaced-external")) {
-            finalSkills.add(name);
-          }
-        } else {
-          report.conflicts.push({
-            skill: name,
-            kind: "D",
-            detail: `external link -> ${classification.resolvedTarget} (--force to replace)`
-          });
-        }
-        break;
-      }
-      case "E": {
-        if (opts.force) {
-          if (await replace(`was -> ${classification.resolvedTarget}`, "replaced-broken")) {
-            finalSkills.add(name);
-          }
-        } else {
-          report.conflicts.push({
-            skill: name,
-            kind: "E",
-            detail: `broken link (${classification.broken}) -> ${classification.resolvedTarget} (--force to replace)`
-          });
-        }
-        break;
-      }
-      case "F": {
-        report.conflicts.push({
-          skill: name,
-          kind: "F",
-          detail: `unmanaged real ${classification.real}; never replaced (migrate owns absorbing it)`
-        });
-        break;
-      }
-    }
-  }
-  const planned = opts.agentsMdPlan.byAgent.get(target.agent);
-  const planError = opts.agentsMdPlan.errors.get(target.agent);
-  let agentsMdField = previous?.agentsMd;
-  if (planError !== void 0) {
-    report.errors.push({ skill: "(agents-md)", error: planError });
-  } else if (planned !== void 0) {
-    const result = await convergeAgentsMdFile(home, planned, opts.role, previous?.agentsMd);
-    report.agentsMd.push(...result.actions);
-    report.warnings.push(...result.warnings);
-    if (result.error !== void 0) {
-      report.errors.push({ skill: "(agents-md)", error: result.error });
-    } else {
-      agentsMdField = result.accounting === null ? void 0 : result.accounting;
-    }
-  }
-  const skills = [...finalSkills, ...stuckSkills].sort();
-  if (skills.length === 0 && agentsMdField === void 0) {
-    delete ledger.targets[target.skillsDir];
-  } else {
-    const prev = ledger.targets[target.skillsDir];
-    const entry = { ...prev, agent: target.agent, skills };
-    if (agentsMdField === void 0) delete entry.agentsMd;
-    else entry.agentsMd = agentsMdField;
-    ledger.targets[target.skillsDir] = entry;
-  }
-  await writeMounts(home, ledger);
-  if (opts.sweep) {
-    const keep = new Set(skills);
-    let entries;
-    try {
-      entries = await fs14.readdir(target.skillsDir);
-    } catch (error) {
-      report.errors.push({ skill: "(target)", error: `orphan sweep readdir failed: ${error.message}` });
-      return report;
-    }
-    for (const name of entries) {
-      if (keep.has(name)) continue;
-      const slot = path12.join(target.skillsDir, name);
-      const info = await port.lstat(slot);
-      if (info === null || !info.symlink) continue;
-      let pointsHome = false;
-      try {
-        const resolution = await resolveLinkTarget(port, slot);
-        pointsHome = isInsidePath(home, resolution.final);
-      } catch {
-        pointsHome = false;
-      }
-      if (!pointsHome) continue;
-      try {
-        await port.unlink(slot);
-        report.actions.push({ skill: name, kind: "swept-orphan" });
-      } catch (error) {
-        report.errors.push({ skill: name, error: `orphan sweep unlink failed: ${error.message}` });
-      }
-    }
-  }
-  return report;
-}
-async function converge(ports, home, homedir, role, opts = {}) {
-  const loaded = await readConfig(home);
-  const registry = await readRegistry(home);
-  const targets = await resolveTargets(home, homedir, loaded.config.targets);
-  const desired = await desiredSkills(home, role);
-  const ledger = await readMounts(home);
-  const agentsMdPlan = planAgentsMdTargets(targets, registry, homedir);
-  const reports = [];
-  for (const target of targets) {
-    const report = await convergeOneTarget(ports, home, target, desired, ledger, {
-      force: opts.force ?? false,
-      sweep: role === null,
-      role,
-      registryDirs: registrySkillDirs(registry, homedir),
-      agentsMdPlan
-    });
-    reports.push(report);
-  }
-  return {
-    role,
-    targets: reports,
-    ok: reports.every((report) => report.conflicts.length === 0 && report.errors.length === 0)
-  };
-}
-var queueTail = Promise.resolve();
-function enqueue(operation) {
-  const next = queueTail.then(operation, operation);
-  queueTail = next.then(
-    () => void 0,
-    () => void 0
-  );
-  return next;
-}
-async function existsDir2(target) {
-  try {
-    const stat = await fs14.stat(target);
-    return stat.isDirectory();
-  } catch (error) {
-    if (error.code === "ENOENT") return false;
+    if (error.code === "ENOENT") return [];
     throw error;
   }
-}
-async function useRole(ports, home, opts) {
-  return enqueue(async () => {
-    const loaded = await readConfig(home);
-    let role = opts.role;
-    if (role === void 0) {
-      if (loaded.config.activeRole === null) {
-        throw new NeoError("state", "no active role (config.activeRole is null); run: neo use <role>");
-      }
-      role = loaded.config.activeRole;
-    } else {
-      validateRoleName(role);
+  for (const entry of entries.filter((item) => item.isDirectory()).sort((a2, b) => a2.name < b.name ? -1 : 1)) {
+    let skills = 0;
+    try {
+      const inner = await fs8.readdir(path5.join(libraryDir(home), entry.name), { withFileTypes: true });
+      skills = inner.filter((item) => item.isDirectory()).length;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
     }
-    if (!await existsDir2(roleDir(home, role))) {
-      throw new NeoError("state", `role "${role}" not found`);
-    }
-    loaded.config.activeRole = role;
-    await writeConfig(home, loaded);
-    return converge(ports, home, opts.homedir, role, {
-      ...opts.force !== void 0 ? { force: opts.force } : {}
-    });
-  });
-}
-async function offAll(ports, home, opts) {
-  return enqueue(async () => {
-    const loaded = await readConfig(home);
-    loaded.config.activeRole = null;
-    await writeConfig(home, loaded);
-    return converge(ports, home, opts.homedir, null);
-  });
+    out.push({ name: entry.name, skills });
+  }
+  return out;
 }
 
-// packages/core/src/roots.ts
-import fs16 from "node:fs/promises";
-import path13 from "node:path";
+// packages/core/src/assembly.ts
+import fs9 from "node:fs/promises";
+import path6 from "node:path";
+function layerLabel(source) {
+  return source.layer === "domain" ? `domain:${source.container}` : source.container;
+}
+async function layerSkillSources(home, layer, container) {
+  const base = layer === "domain" ? domainDir(home, container) : roleSkillsDir(home, container);
+  const out = /* @__PURE__ */ new Map();
+  try {
+    const entries = await fs9.readdir(base, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+      out.set(entry.name, { layer, container, dir: path6.join(base, entry.name) });
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  return out;
+}
+var LAYER_RANK = { default: 0, domain: 1, role: 2 };
+async function resolveRoleAssembly(home, role) {
+  const domains = await readRoleDomains(home, role);
+  const stack = [
+    { layer: "default", container: "default" },
+    ...[...domains].sort().map((domain) => ({ layer: "domain", container: domain })),
+    { layer: "role", container: role }
+  ];
+  const winners = /* @__PURE__ */ new Map();
+  const seen = /* @__PURE__ */ new Map();
+  for (const frame of stack) {
+    for (const [name, source] of await layerSkillSources(home, frame.layer, frame.container)) {
+      const current = winners.get(name);
+      if (current === void 0 || LAYER_RANK[frame.layer] > LAYER_RANK[current.layer]) {
+        winners.set(name, source);
+      }
+      seen.set(name, [...seen.get(name) ?? [], source]);
+    }
+  }
+  const resolutions = /* @__PURE__ */ new Map();
+  for (const [name, winner] of winners) {
+    const losers = (seen.get(name) ?? []).filter((source) => source.dir !== winner.dir).sort(
+      (a2, b) => LAYER_RANK[b.layer] - LAYER_RANK[a2.layer] || (a2.container < b.container ? -1 : a2.container > b.container ? 1 : 0)
+    );
+    resolutions.set(name, { name, winner, losers });
+  }
+  return { role, domains, resolutions };
+}
+
+// packages/core/src/role-set.ts
+import fs11 from "node:fs/promises";
+import path7 from "node:path";
 
 // packages/core/src/mcp.ts
-var import_yaml5 = __toESM(require_dist(), 1);
-import fs15 from "node:fs/promises";
+var import_yaml6 = __toESM(require_dist(), 1);
+import fs10 from "node:fs/promises";
 var ENV_REF2 = /^env:([A-Za-z_][A-Za-z0-9_]*)$/;
-function invalid5(role, message) {
+function invalid4(role, message) {
   return new NeoError("state", `role "${role}" mcp.yaml: ${message}`);
 }
 function parseServer(role, name, raw) {
-  if (!isRecord(raw)) throw invalid5(role, `servers.${name} must be a mapping`);
+  if (!isRecord(raw)) throw invalid4(role, `servers.${name} must be a mapping`);
   const transport = raw.transport;
   if (transport !== "stdio" && transport !== "http") {
-    throw invalid5(role, `servers.${name}.transport must be "stdio" or "http"`);
+    throw invalid4(role, `servers.${name}.transport must be "stdio" or "http"`);
   }
   const stringMap = (value, field) => {
     if (value === void 0) return void 0;
-    if (!isRecord(value)) throw invalid5(role, `servers.${name}.${field} must be a mapping`);
+    if (!isRecord(value)) throw invalid4(role, `servers.${name}.${field} must be a mapping`);
     const out = {};
     for (const [key, item] of Object.entries(value)) {
       if (typeof item !== "string") {
-        throw invalid5(role, `servers.${name}.${field}.${key} must be a string (use "env:VAR" for secrets)`);
+        throw invalid4(role, `servers.${name}.${field}.${key} must be a string (use "env:VAR" for secrets)`);
       }
       out[key] = item;
     }
@@ -11250,12 +9979,12 @@ function parseServer(role, name, raw) {
   if (transport === "stdio") {
     const command = raw.command;
     if (typeof command !== "string" || command.length === 0) {
-      throw invalid5(role, `servers.${name}.command is required for stdio`);
+      throw invalid4(role, `servers.${name}.command is required for stdio`);
     }
     const args = raw.args;
     if (args !== void 0) {
       if (!Array.isArray(args) || args.some((item) => typeof item !== "string")) {
-        throw invalid5(role, `servers.${name}.args must be a list of strings`);
+        throw invalid4(role, `servers.${name}.args must be a list of strings`);
       }
     }
     const env = stringMap(raw.env, "env");
@@ -11263,13 +9992,13 @@ function parseServer(role, name, raw) {
   }
   const url = raw.url;
   if (typeof url !== "string" || url.length === 0) {
-    throw invalid5(role, `servers.${name}.url is required for http`);
+    throw invalid4(role, `servers.${name}.url is required for http`);
   }
   const headers = stringMap(raw.headers, "headers");
   if (headers !== void 0) {
     for (const [key, value] of Object.entries(headers)) {
       if (isSensitiveHeader(key) && !ENV_REF2.test(value)) {
-        throw invalid5(role, `servers.${name}.headers.${key} must be an env reference (env:VAR)`);
+        throw invalid4(role, `servers.${name}.headers.${key} must be an env reference (env:VAR)`);
       }
     }
   }
@@ -11278,31 +10007,70 @@ function parseServer(role, name, raw) {
 async function readRoleMcp(home, role) {
   let text2;
   try {
-    text2 = await fs15.readFile(roleMcpPath(home, role), "utf8");
+    text2 = await fs10.readFile(roleMcpPath(home, role), "utf8");
   } catch (error) {
     if (error.code === "ENOENT") return {};
     throw error;
   }
+  return parseRoleMcpText(role, text2);
+}
+function parseRoleMcpText(role, text2) {
   let raw;
   try {
-    raw = (0, import_yaml5.parse)(text2);
+    raw = (0, import_yaml6.parse)(text2);
   } catch (error) {
-    throw invalid5(role, `not valid YAML (${error.message})`);
+    throw invalid4(role, `not valid YAML (${error.message})`);
   }
   if (raw === null || raw === void 0) return {};
-  if (!isRecord(raw)) throw invalid5(role, "expected a top-level mapping");
+  if (!isRecord(raw)) throw invalid4(role, "expected a top-level mapping");
   const version = raw.version;
   if (version !== void 0 && version !== 1) {
-    throw invalid5(role, `unsupported version ${String(version)} (supported: 1)`);
+    throw invalid4(role, `unsupported version ${String(version)} (supported: 1)`);
   }
   if (raw.servers === void 0) return {};
-  if (!isRecord(raw.servers)) throw invalid5(role, '"servers" must be a mapping of name to server');
+  if (!isRecord(raw.servers)) throw invalid4(role, '"servers" must be a mapping of name to server');
   const servers = {};
   for (const [name, value] of Object.entries(raw.servers)) {
     if (name === "__proto__" || name === "constructor" || name === "prototype") {
-      throw invalid5(role, `servers.${name}: reserved property name is not allowed`);
+      throw invalid4(role, `servers.${name}: reserved property name is not allowed`);
     }
     servers[name] = parseServer(role, name, value);
+  }
+  return servers;
+}
+var SECRET_KEY_SUBSTRINGS = [
+  "token",
+  "secret",
+  "password",
+  "passwd",
+  "credential",
+  "authorization",
+  "cookie"
+];
+function isSecretVarName(name) {
+  const key = name.trim().toLowerCase();
+  if (isSensitiveHeader(key)) return true;
+  if (SECRET_KEY_SUBSTRINGS.some((part) => key.includes(part))) return true;
+  if (/api[-_]?key/.test(key)) return true;
+  if (/(^|[^a-z0-9])key([^a-z0-9]|$)/.test(key)) return true;
+  if (/(^|[^a-z0-9])auth([^a-z0-9]|$)/.test(key)) return true;
+  return false;
+}
+function validateMcpForWrite(role, text2) {
+  const servers = parseRoleMcpText(role, text2);
+  for (const [name, server] of Object.entries(servers)) {
+    const check = (map, field) => {
+      for (const [key, value] of Object.entries(map ?? {})) {
+        if (isSecretVarName(key) && !ENV_REF2.test(value)) {
+          throw invalid4(
+            role,
+            `servers.${name}.${field}.${key} looks like a credential but holds a literal value; reference it as env:VAR (e.g. env:${key.toUpperCase()})`
+          );
+        }
+      }
+    };
+    if (server.transport === "stdio") check(server.env, "env");
+    else check(server.headers, "headers");
   }
   return servers;
 }
@@ -11542,10 +10310,1659 @@ function renderDshPatch(servers, models) {
       });
     }
   }
-  return (0, import_yaml5.stringify)(entries);
+  return (0, import_yaml6.stringify)(entries);
+}
+
+// packages/core/src/role-set.ts
+async function readTextOrNull(file) {
+  try {
+    return await fs11.readFile(file, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+var homeLabel = (home, file) => path7.relative(home, file).split(path7.sep).join("/");
+async function setRoleAssembly(home, input) {
+  const dryRun = input.dryRun === true;
+  validateRoleName(input.role);
+  if (input.role !== "default" && !await existsDir(roleDir(home, input.role))) {
+    throw new NeoError(
+      "state",
+      `role "${input.role}" does not exist (create it first: neo create ${input.role})`
+    );
+  }
+  if (input.domains !== void 0) {
+    for (const domain of input.domains) validateDomainName(domain);
+  }
+  if (input.mcp !== void 0) validateMcpForWrite(input.role, input.mcp);
+  const lock = await readRoleLock(home, input.role);
+  const targets = [];
+  if (input.agentsMd !== void 0) {
+    targets.push({ key: "agentsMd", file: roleAgentsMd(home, input.role), newText: input.agentsMd, compareBase: null });
+  }
+  if (input.domains !== void 0) {
+    const file = roleYamlPath(home, input.role);
+    const existing = await readTextOrNull(file);
+    targets.push({
+      key: "domains",
+      file,
+      newText: renderRoleYaml(input.role, existing, input.domains),
+      compareBase: existing === null ? null : normalizeRoleYaml(input.role, existing)
+    });
+  }
+  if (input.mcp !== void 0) {
+    targets.push({ key: "mcp", file: roleMcpPath(home, input.role), newText: input.mcp, compareBase: null });
+  }
+  const files = [];
+  const changed = { agentsMd: false, domains: false, mcp: false };
+  for (const target of targets) {
+    const oldText = await readTextOrNull(target.file);
+    const oldCmp = target.compareBase ?? oldText;
+    const change = oldCmp === null ? "created" : oldCmp === target.newText ? "unchanged" : "updated";
+    const diff = change === "unchanged" ? "" : unifiedDiff(homeLabel(home, target.file), oldText ?? "", target.newText);
+    files.push({ file: homeLabel(home, target.file), change, diff });
+    if (change !== "unchanged") {
+      changed[target.key] = true;
+      if (!dryRun) await writeFileAtomic(target.file, target.newText);
+    }
+  }
+  const assemblyChanged = Object.values(changed).some(Boolean);
+  const dirty = isLockDirty(lock) || assemblyChanged;
+  if (!dryRun && assemblyChanged) await markRoleLockDirty(home, input.role, lock);
+  return { role: input.role, dryRun, changed, files, dirty };
+}
+var DIFF_CONTEXT = 3;
+function splitDiffLines(text2) {
+  if (text2.length === 0) return [];
+  const lines = text2.split(/\r?\n/);
+  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  return lines;
+}
+function unifiedDiff(label, oldText, newText) {
+  if (oldText === newText) return "";
+  const a2 = splitDiffLines(oldText);
+  const b = splitDiffLines(newText);
+  const n3 = a2.length;
+  const m2 = b.length;
+  const lcs = Array.from({ length: n3 + 1 }, () => new Array(m2 + 1).fill(0));
+  for (let i2 = n3 - 1; i2 >= 0; i2--) {
+    const row = lcs[i2];
+    const next = lcs[i2 + 1];
+    for (let j = m2 - 1; j >= 0; j--) {
+      row[j] = a2[i2] === b[j] ? next[j + 1] + 1 : Math.max(next[j], row[j + 1]);
+    }
+  }
+  const ops = [];
+  for (let i2 = 0, j = 0; i2 < n3 || j < m2; ) {
+    if (i2 < n3 && j < m2 && a2[i2] === b[j]) {
+      ops.push({ kind: " ", line: a2[i2] });
+      i2++;
+      j++;
+    } else if (j >= m2 || i2 < n3 && lcs[i2 + 1][j] >= lcs[i2][j + 1]) {
+      ops.push({ kind: "-", line: a2[i2] });
+      i2++;
+    } else {
+      ops.push({ kind: "+", line: b[j] });
+      j++;
+    }
+  }
+  const groups = [];
+  for (let idx = 0; idx < ops.length; idx++) {
+    if (ops[idx].kind === " ") continue;
+    const start = Math.max(0, idx - DIFF_CONTEXT);
+    const end = Math.min(ops.length, idx + DIFF_CONTEXT + 1);
+    const prev = groups[groups.length - 1];
+    if (prev !== void 0 && start <= prev.end) prev.end = Math.max(prev.end, end);
+    else groups.push({ start, end });
+  }
+  const body = [];
+  for (const group of groups) {
+    let oldBefore = 0;
+    let newBefore = 0;
+    for (let k = 0; k < group.start; k++) {
+      if (ops[k].kind !== "+") oldBefore++;
+      if (ops[k].kind !== "-") newBefore++;
+    }
+    let oldCount = 0;
+    let newCount = 0;
+    for (let k = group.start; k < group.end; k++) {
+      if (ops[k].kind !== "+") oldCount++;
+      if (ops[k].kind !== "-") newCount++;
+    }
+    body.push(
+      `@@ -${oldBefore + (oldCount > 0 ? 1 : 0)},${oldCount} +${newBefore + (newCount > 0 ? 1 : 0)},${newCount} @@`
+    );
+    for (let k = group.start; k < group.end; k++) {
+      body.push(`${ops[k].kind}${ops[k].line}`);
+    }
+  }
+  const header = [
+    `--- ${oldText.length === 0 ? "/dev/null" : label}`,
+    `+++ ${newText.length === 0 ? "/dev/null" : label}`
+  ];
+  return `${[...header, ...body].join("\n")}
+`;
+}
+
+// packages/core/src/install.ts
+import fs12 from "node:fs/promises";
+import os from "node:os";
+import path8 from "node:path";
+function buildUpstreamAddArgs(opts) {
+  const base = ["npx", "-y", `skills@${opts.skillsRef}`, "add", opts.source];
+  if (opts.listOnly) return [...base, "-l"];
+  const selection = opts.skills?.kind === "all" ? ["-s", "*"] : (opts.skills?.names ?? []).flatMap((name) => ["-s", name]);
+  return [...base, "-a", "universal", "-y", "--copy", "--json", ...selection];
+}
+function parseSourceSkillList(output) {
+  const clean = output.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "").replace(/\r/g, "").replace(/│/g, "|");
+  const lines = clean.split("\n");
+  const parsed = [];
+  let inList = false;
+  let current;
+  let group;
+  for (const line of lines) {
+    if (/Available Skills/i.test(line)) {
+      inList = true;
+      continue;
+    }
+    if (!inList) continue;
+    if (/Use --skill|Installation failed|Found \d+ skills?/i.test(line)) break;
+    const name = /^\|\s{4}([a-zA-Z0-9][a-zA-Z0-9._+-]*)\s*$/.exec(line)?.[1];
+    if (name !== void 0) {
+      if (!parsed.some((item) => item.name === name)) {
+        current = { name, ...group !== void 0 ? { group } : {} };
+        parsed.push(current);
+      }
+      continue;
+    }
+    const description = /^\|\s{6,}(\S.*)$/.exec(line)?.[1]?.trim();
+    if (description !== void 0 && current !== void 0 && current.description === void 0) {
+      current.description = description;
+      continue;
+    }
+    const trimmed = line.trim();
+    if (/^[A-Za-z][A-Za-z0-9 ()-]{0,39}$/.test(trimmed)) group = trimmed;
+  }
+  return parsed.map((item) => {
+    const hint = [item.group, item.description].filter((part) => part !== void 0 && part.length > 0).join(" \xB7 ");
+    return hint.length > 0 ? { name: item.name, description: hint } : { name: item.name };
+  });
+}
+async function listSourceSkills(ports, opts) {
+  const staging = await makeStaging(ports);
+  try {
+    return await ports.exec.run(
+      buildUpstreamAddArgs({ skillsRef: opts.skillsRef, source: opts.source, listOnly: true }),
+      { cwd: staging }
+    );
+  } finally {
+    await fs12.rm(staging, { recursive: true, force: true }).catch(() => void 0);
+  }
+}
+function backupName(name, at) {
+  return `${name}.bak-${at.toISOString().replace(/[-:.]/g, "")}`;
+}
+async function addSource(ports, home, opts) {
+  const now = ports.now ? ports.now() : /* @__PURE__ */ new Date();
+  validateRoleName(opts.role);
+  if (opts.skills.kind === "list") {
+    for (const name of [...new Set(opts.skills.names)]) validateSkillName(name);
+  }
+  const existingLock = await readRoleLock(home, opts.role);
+  const names = opts.skills.kind === "all" ? null : [...new Set(opts.skills.names)];
+  const staging = await makeStaging(ports);
+  try {
+    const result = await ports.exec.run(
+      buildUpstreamAddArgs({ skillsRef: opts.skillsRef, source: opts.source, skills: opts.skills }),
+      { cwd: staging }
+    );
+    const report = {
+      role: opts.role,
+      source: opts.source,
+      installed: [],
+      failed: []
+    };
+    if (result.code !== 0) {
+      report.upstreamError = summarizeUpstreamFailure(result);
+      report.failed = (names ?? []).map((name) => ({ name, error: "upstream install failed" }));
+      return report;
+    }
+    const stagedNames = await enumerateStagedSkills(staging);
+    if (names) {
+      const expected = [...names].sort();
+      const actual = [...stagedNames].sort();
+      if (expected.join("\n") !== actual.join("\n")) {
+        report.upstreamError = `upstream enumeration mismatch: -s requested [${expected.join(", ")}] but staging contains [${actual.join(", ")}]`;
+        report.failed = names.map((name) => ({ name, error: "enumeration mismatch" }));
+        return report;
+      }
+    } else if (stagedNames.length === 0) {
+      report.upstreamError = "no skills found in source (staging .agents/skills is empty)";
+      return report;
+    }
+    const upstreamLock = await readUpstreamLock(staging);
+    await ensureRoleSkillsDir(home, opts.role);
+    const skills = { ...existingLock?.skills ?? {} };
+    for (const name of stagedNames) {
+      if (!isSafeSkillName(name)) {
+        report.failed.push({ name, error: `unsafe staged skill name ${JSON.stringify(name)}` });
+        continue;
+      }
+      const meta = upstreamLock?.skills?.[name];
+      const hash = typeof meta?.computedHash === "string" ? meta.computedHash : "";
+      if (!hash) {
+        report.failed.push({
+          name,
+          error: "upstream lock has no computedHash for this skill (refusing to install untracked content)"
+        });
+        continue;
+      }
+      try {
+        const replaced = await relocateSkill(path8.join(staging, ".agents", "skills", name), home, opts.role, name, now);
+        skills[name] = buildLockEntry(opts.source, meta, hash, now);
+        report.installed.push({ name, hash, replaced });
+      } catch (error) {
+        report.failed.push({ name, error: error.message });
+      }
+    }
+    if (report.installed.length > 0) {
+      const merged = { ...existingLock, version: 1, skills };
+      await writeRoleLock(home, opts.role, merged);
+    }
+    return report;
+  } finally {
+    await fs12.rm(staging, { recursive: true, force: true }).catch(() => void 0);
+  }
+}
+async function addSourceToDomain(ports, home, opts) {
+  const now = ports.now ? ports.now() : /* @__PURE__ */ new Date();
+  validateDomainName(opts.domain);
+  if (opts.skills.kind === "list") {
+    for (const name of [...new Set(opts.skills.names)]) validateSkillName(name);
+  }
+  const names = opts.skills.kind === "all" ? null : [...new Set(opts.skills.names)];
+  const staging = await makeStaging(ports);
+  try {
+    const result = await ports.exec.run(
+      buildUpstreamAddArgs({ skillsRef: opts.skillsRef, source: opts.source, skills: opts.skills }),
+      { cwd: staging }
+    );
+    const report = {
+      domain: opts.domain,
+      source: opts.source,
+      installed: [],
+      failed: []
+    };
+    if (result.code !== 0) {
+      report.upstreamError = summarizeUpstreamFailure(result);
+      report.failed = (names ?? []).map((name) => ({ name, error: "upstream install failed" }));
+      return report;
+    }
+    const stagedNames = await enumerateStagedSkills(staging);
+    if (names) {
+      const expected = [...names].sort();
+      const actual = [...stagedNames].sort();
+      if (expected.join("\n") !== actual.join("\n")) {
+        report.upstreamError = `upstream enumeration mismatch: -s requested [${expected.join(", ")}] but staging contains [${actual.join(", ")}]`;
+        report.failed = names.map((name) => ({ name, error: "enumeration mismatch" }));
+        return report;
+      }
+    } else if (stagedNames.length === 0) {
+      report.upstreamError = "no skills found in source (staging .agents/skills is empty)";
+      return report;
+    }
+    const upstreamLock = await readUpstreamLock(staging);
+    await fs12.mkdir(domainDir(home, opts.domain), { recursive: true });
+    for (const name of stagedNames) {
+      if (!isSafeSkillName(name)) {
+        report.failed.push({ name, error: `unsafe staged skill name ${JSON.stringify(name)}` });
+        continue;
+      }
+      const meta = upstreamLock?.skills?.[name];
+      const hash = typeof meta?.computedHash === "string" ? meta.computedHash : "";
+      if (!hash) {
+        report.failed.push({
+          name,
+          error: "upstream lock has no computedHash for this skill (refusing to install untracked content)"
+        });
+        continue;
+      }
+      try {
+        const replaced = await relocateSkillInto(
+          path8.join(staging, ".agents", "skills", name),
+          domainDir(home, opts.domain),
+          name,
+          now
+        );
+        report.installed.push({ name, hash, replaced });
+      } catch (error) {
+        report.failed.push({ name, error: error.message });
+      }
+    }
+    return report;
+  } finally {
+    await fs12.rm(staging, { recursive: true, force: true }).catch(() => void 0);
+  }
+}
+async function readUpstreamLock(staging) {
+  const file = path8.join(staging, "skills-lock.json");
+  let text2;
+  try {
+    text2 = await fs12.readFile(file, "utf8");
+  } catch (error) {
+    const code = error.code;
+    if (code === "ENOENT" || code === "ENOTDIR") return null;
+    throw error;
+  }
+  try {
+    const parsed = JSON.parse(text2);
+    if (typeof parsed === "object" && parsed !== null) return parsed;
+    return null;
+  } catch {
+    return null;
+  }
+}
+async function enumerateStagedSkills(staging) {
+  try {
+    const entries = await fs12.readdir(path8.join(staging, ".agents", "skills"), {
+      withFileTypes: true
+    });
+    return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
+}
+function buildLockEntry(source, meta, hash, now) {
+  const sourceType = typeof meta?.sourceType === "string" && meta.sourceType.length > 0 ? meta.sourceType : inferSourceType(source);
+  const entry = { sourceType, hash, installedAt: now.toISOString() };
+  if (typeof meta?.sourceUrl === "string" && meta.sourceUrl.length > 0) entry.sourceUrl = meta.sourceUrl;
+  if (typeof meta?.resolvedRef === "string" && meta.resolvedRef.length > 0) entry.resolvedRef = meta.resolvedRef;
+  if (typeof meta?.skillPath === "string" && meta.skillPath.length > 0) entry.skillPath = meta.skillPath;
+  if (sourceType === "local") {
+    entry.path = source;
+  } else {
+    entry.source = source;
+  }
+  if (meta) {
+    const denylist = ["source", "sourceType", "sourceUrl", "resolvedRef", "computedHash", "skillPath", "path", "installedAt"];
+    for (const [key, value] of Object.entries(meta)) {
+      if (!denylist.includes(key)) {
+        entry[key] = value;
+      }
+    }
+  }
+  return entry;
+}
+function inferSourceType(source) {
+  if (/^[a-zA-Z]:[\\/]/.test(source) || source.startsWith("/") || source.startsWith("\\") || source.startsWith(".")) {
+    return "local";
+  }
+  return "git";
+}
+async function relocateSkill(stagedSkill, home, role, name, now) {
+  return relocateSkillInto(stagedSkill, roleSkillsDir(home, role), name, now);
+}
+async function relocateSkillInto(stagedSkill, skillsContainer, name, now) {
+  const dest = path8.join(skillsContainer, name);
+  const existed = await pathExists(dest);
+  let backup;
+  if (existed) {
+    backup = path8.join(skillsContainer, backupName(name, now));
+    await fs12.rename(dest, backup);
+  }
+  try {
+    await relocateDir(stagedSkill, dest);
+  } catch (error) {
+    await fs12.rm(dest, { recursive: true, force: true }).catch(() => void 0);
+    if (backup) {
+      await fs12.rename(backup, dest).catch(() => {
+        throw new NeoError(
+          "failure",
+          `install failed (${error.message}); original kept as backup: ${path8.basename(backup)}`
+        );
+      });
+    }
+    throw error;
+  }
+  if (backup) {
+    await fs12.rm(backup, { recursive: true, force: true }).catch(() => void 0);
+  }
+  return existed;
+}
+async function relocateDir(from, to) {
+  try {
+    await fs12.rename(from, to);
+  } catch (error) {
+    if (error.code !== "EXDEV") throw error;
+    await fs12.cp(from, to, { recursive: true });
+    await fs12.rm(from, { recursive: true, force: true });
+  }
+}
+async function makeStaging(ports) {
+  return fs12.mkdtemp(path8.join(ports.stagingRoot ?? os.tmpdir(), "neo-staging-"));
+}
+var ANSI_ESCAPE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
+var NOISE_LINE = /^(npm (notice|warn|error code|error syscall)|Tip: use the --yes|\|?\s*$|─+$)/i;
+var ERROR_LINE = /failed|failure|error|EPERM|ENOENT|SKILLS_|unable|denied|fatal|cannot|not found|unsupported|missing/i;
+function summarizeUpstreamFailure(result) {
+  const raw = [result.stdout, result.stderr].filter((text2) => text2.trim().length > 0).join("\n");
+  const lines = raw.replace(ANSI_ESCAPE, "").replace(/\r/g, "").split("\n").map((line) => line.trim()).filter((line) => line.length > 0 && !NOISE_LINE.test(line));
+  const interesting = lines.filter((line) => ERROR_LINE.test(line));
+  const picked = (interesting.length > 0 ? interesting : lines.slice(-3)).slice(0, 3).map((line) => line.slice(0, 160));
+  const detail = picked.join(" | ");
+  const gitHint = /SKILLS_GIT_CLONE_FAILED|Failed to clone|spawn EPERM|spawn ENOENT/i.test(raw) ? " (hint: git clone failed to start; make sure `git --version` works from the same shell and git.exe is on PATH)" : "";
+  return `upstream install failed (exit ${result.code})${detail ? `: ${detail}` : ""}${gitHint}`;
+}
+
+// packages/core/src/exec-node.ts
+import { spawn } from "node:child_process";
+import { constants as fsConstants } from "node:fs";
+import { StringDecoder } from "node:string_decoder";
+import fs13 from "node:fs/promises";
+import path9 from "node:path";
+var DEFAULT_TIMEOUT_MS = 10 * 6e4;
+var MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
+async function findWindowsShim(name, env) {
+  const exts = (env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";").filter((ext) => ext.length > 0).map((ext) => ext.toLowerCase());
+  for (const dir of (env.PATH ?? "").split(";")) {
+    if (dir.length === 0) continue;
+    for (const ext of exts) {
+      const candidate = path9.join(dir, `${name}${ext}`);
+      try {
+        const stat = await fs13.stat(candidate);
+        if (stat.isFile()) return candidate;
+      } catch {
+      }
+    }
+  }
+  return null;
+}
+async function resolveWindowsShim(command) {
+  const name = command[0];
+  const shim = /[\\/]/.test(name) || /\.(cmd|bat)$/i.test(name) ? name : await findWindowsShim(name, process.env);
+  if (shim === null || !/\.(cmd|bat)$/i.test(shim)) return null;
+  let text2;
+  try {
+    text2 = await fs13.readFile(shim, "utf8");
+  } catch {
+    return null;
+  }
+  const matches = [
+    ...text2.matchAll(/%~dp0[\\/](node_modules[\\/][^"%\r\n]+?\.(?:js|exe))/gi)
+  ].map((match) => match[1]);
+  const preferred = matches.find((item) => new RegExp(`(^|[\\\\/])${name}-cli\\.js$`, "i").test(item)) ?? matches[matches.length - 1];
+  const relative = preferred;
+  if (relative === void 0) return null;
+  const target = path9.join(path9.dirname(shim), relative);
+  try {
+    const stat = await fs13.stat(target);
+    if (!stat.isFile()) return null;
+  } catch {
+    return null;
+  }
+  if (target.toLowerCase().endsWith(".js")) {
+    const localNode = path9.join(path9.dirname(shim), "node.exe");
+    const nodeExe = (await fs13.stat(localNode).catch(() => null))?.isFile() ? localNode : process.execPath;
+    return { command: nodeExe, args: [target, ...command.slice(1)], shell: false };
+  }
+  return { command: target, args: [...command.slice(1)], shell: false };
+}
+async function windowsInvocation(command) {
+  const resolved = await resolveWindowsShim(command);
+  if (resolved !== null) return resolved;
+  const first = command[0];
+  const looksExecutable = /\.(exe|com)$/i.test(first);
+  if (looksExecutable) {
+    return { command: first, args: command.slice(1), shell: false };
+  }
+  return { command: command.map(quoteForWindowsShell).join(" "), args: [], shell: true };
+}
+var gitDirPromise;
+async function resolveGitDir(isWindows2) {
+  const dirs = (process.env.PATH ?? "").split(path9.delimiter).map((dir) => dir.replace(/^"|"$/g, "")).filter((dir) => dir.length > 0);
+  for (const dir of dirs) {
+    const candidate = path9.join(dir, isWindows2 ? "git.exe" : "git");
+    try {
+      const stat = await fs13.stat(candidate);
+      if (!stat.isFile()) continue;
+      if (!isWindows2) await fs13.access(candidate, fsConstants.X_OK);
+      return dir;
+    } catch {
+    }
+  }
+  return void 0;
+}
+function nodeExecPort() {
+  const isWindows2 = process.platform === "win32";
+  return {
+    async run(command, opts) {
+      if (command.length === 0) throw new Error("nodeExecPort: empty command");
+      const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+      const invocation = isWindows2 ? await windowsInvocation(command) : { command: command[0], args: command.slice(1), shell: false };
+      gitDirPromise ??= resolveGitDir(isWindows2);
+      const gitDir = await gitDirPromise;
+      const childEnv = gitDir === void 0 ? process.env : {
+        ...process.env,
+        PATH: `${gitDir}${path9.delimiter}${process.env.PATH ?? ""}`
+      };
+      return new Promise((resolve, reject) => {
+        const child = invocation.shell ? spawn(invocation.command, {
+          cwd: opts.cwd,
+          env: childEnv,
+          shell: true,
+          stdio: ["ignore", "pipe", "pipe"]
+        }) : spawn(invocation.command, invocation.args, {
+          cwd: opts.cwd,
+          env: childEnv,
+          stdio: ["ignore", "pipe", "pipe"]
+        });
+        const outDec = new StringDecoder("utf8");
+        const errDec = new StringDecoder("utf8");
+        let stdout2 = "";
+        let stderr = "";
+        let totalBytes = 0;
+        let settled = false;
+        const killTree = () => {
+          if (isWindows2 && child.pid !== void 0) {
+            spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" }).on(
+              "error",
+              () => child.kill("SIGKILL")
+            );
+          } else {
+            child.kill("SIGTERM");
+            setTimeout(() => child.kill("SIGKILL"), 2e3).unref();
+          }
+        };
+        const timer = setTimeout(() => {
+          if (settled) return;
+          killTree();
+          finish(
+            () => reject(new Error(`upstream command timed out after ${timeoutMs}ms: ${command.join(" ")}`))
+          );
+        }, timeoutMs);
+        const finish = (fn) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          fn();
+        };
+        child.stdout?.on("data", (chunk) => {
+          totalBytes += chunk.length;
+          if (totalBytes > MAX_OUTPUT_BYTES) {
+            killTree();
+            finish(() => reject(new Error(`upstream output exceeded ${MAX_OUTPUT_BYTES} bytes`)));
+            return;
+          }
+          stdout2 += outDec.write(chunk);
+        });
+        child.stderr?.on("data", (chunk) => {
+          totalBytes += chunk.length;
+          if (totalBytes > MAX_OUTPUT_BYTES) {
+            killTree();
+            finish(() => reject(new Error(`upstream output exceeded ${MAX_OUTPUT_BYTES} bytes`)));
+            return;
+          }
+          stderr += errDec.write(chunk);
+        });
+        child.on("error", (error) => finish(() => reject(error)));
+        child.on("close", (code) => {
+          stdout2 += outDec.end();
+          stderr += errDec.end();
+          finish(() => resolve({ code: code ?? -1, stdout: stdout2, stderr }));
+        });
+      });
+    }
+  };
+}
+function quoteForWindowsShell(arg) {
+  if (arg.includes('"')) {
+    throw new Error(`nodeExecPort: argument contains a double quote, unsupported: ${arg}`);
+  }
+  if (!/[\s&|<>^%]/.test(arg)) return arg;
+  const escaped = arg.replace(/(\\+)$/, "$1$1");
+  return `"${escaped}"`;
+}
+
+// packages/core/src/git-sync.ts
+import fs14 from "node:fs/promises";
+import path10 from "node:path";
+var GITIGNORE = [
+  "/*",
+  "!/.gitignore",
+  "!/.gitattributes",
+  "!/roles/",
+  "!/library/",
+  "!/state/",
+  "/state/*",
+  "!/state/locks/",
+  "/state/locks/.*.tmp",
+  "**/*.bak-*",
+  "**/*.sync-conflict-*",
+  "**/*conflicted copy*",
+  "**/.stversions/",
+  "**/node_modules/",
+  ".DS_Store",
+  "Thumbs.db",
+  "desktop.ini",
+  "**/*.icloud",
+  ".env",
+  ".env.*",
+  "**/*.pem",
+  "**/*.key",
+  ""
+].join("\n");
+var GITATTRIBUTES = [
+  "* text=auto eol=lf",
+  "*.bat text eol=crlf",
+  "*.cmd text eol=crlf",
+  "*.ps1 text eol=crlf",
+  "/roles/** -text",
+  "/library/** -text",
+  "/state/locks/*.yaml text eol=lf",
+  "*.png binary",
+  "*.jpg binary",
+  "*.jpeg binary",
+  "*.gif binary",
+  "*.webp binary",
+  "*.ico binary",
+  "*.pdf binary",
+  "*.zip binary",
+  "*.gz binary",
+  "*.woff2 binary",
+  "*.ttf binary",
+  "*.node binary",
+  ""
+].join("\n");
+async function pathIsFileOrDir(target) {
+  try {
+    await fs14.stat(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function detectRepoScope(home) {
+  if (await pathIsFileOrDir(path10.join(home, ".git"))) return "home";
+  let dir = path10.dirname(home);
+  while (true) {
+    if (await pathIsFileOrDir(path10.join(dir, ".git"))) return "parent";
+    const parent = path10.dirname(dir);
+    if (parent === dir) return "none";
+    dir = parent;
+  }
+}
+async function ensureSyncFiles(home) {
+  await fs14.mkdir(home, { recursive: true });
+  const written = [];
+  const existing = [];
+  for (const [name, content] of [
+    [".gitignore", GITIGNORE],
+    [".gitattributes", GITATTRIBUTES]
+  ]) {
+    const file = path10.join(home, name);
+    if (await pathIsFileOrDir(file)) {
+      existing.push(name);
+      continue;
+    }
+    await fs14.writeFile(file, content, "utf8");
+    written.push(name);
+  }
+  return { written, existing };
+}
+async function gitAvailable(exec2, cwd) {
+  try {
+    const result = await exec2.run(["git", "--version"], { cwd });
+    return result.code === 0;
+  } catch {
+    return false;
+  }
+}
+function validateRemoteUrl(remote) {
+  if (/^[a-z][a-z0-9+.-]*:\/\/[^/@]+:[^/@]+@/i.test(remote)) {
+    throw new NeoError(
+      "usage",
+      "remote URL must not embed credentials (user:pass@); use SSH or a credential helper"
+    );
+  }
+}
+async function gitSync(home, opts) {
+  const scope = await detectRepoScope(home);
+  if (scope !== "none") {
+    return {
+      scope,
+      files: { written: [], existing: [] },
+      repoCreated: false,
+      remoteAdded: false,
+      warnings: []
+    };
+  }
+  const files = await ensureSyncFiles(home);
+  if (opts.remote.length === 0) {
+    return {
+      scope,
+      files,
+      repoCreated: false,
+      remoteAdded: false,
+      warnings: [],
+      next: 'add a remote and run "git init" when ready (the ignore files are already in place)'
+    };
+  }
+  validateRemoteUrl(opts.remote);
+  const warnings = [];
+  if (!await gitAvailable(opts.exec, home)) {
+    warnings.push("git is not runnable from neo; install Git and ensure git.exe is on PATH");
+    return { scope, files, repoCreated: false, remoteAdded: false, warnings };
+  }
+  const run = async (args) => {
+    try {
+      const result = await opts.exec.run(args, { cwd: home });
+      if (result.code !== 0) {
+        warnings.push(`${args.slice(0, 3).join(" ")} failed (exit ${result.code}): ${(result.stderr || result.stdout).trim().slice(0, 200)}`);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      warnings.push(`${args.slice(0, 3).join(" ")} could not start: ${error.message}`);
+      return false;
+    }
+  };
+  if (!await run(["git", "init"])) {
+    return { scope, files, repoCreated: false, remoteAdded: false, warnings };
+  }
+  await run(["git", "add", "-A"]);
+  if (!await run(["git", "commit", "-m", "neo: initialize home"])) {
+    warnings.push("initial commit failed; configure git user.name/user.email, then commit manually");
+  }
+  const remoteAdded = await run(["git", "remote", "add", "origin", opts.remote]);
+  return {
+    scope,
+    files,
+    repoCreated: true,
+    remoteAdded,
+    warnings,
+    ...remoteAdded ? { next: "git push -u origin HEAD" } : {}
+  };
+}
+
+// packages/core/src/classify.ts
+import path11 from "node:path";
+var MAX_LINK_HOPS = 40;
+function normalizeLinkTarget(raw) {
+  if (process.platform !== "win32") return raw;
+  let value = raw;
+  if (/^\\\\\?\\UNC\\/i.test(value)) value = `\\\\${value.slice(8)}`;
+  value = value.replace(/^\\\\\?\\/i, "").replace(/^\\\?\?\\/, "").replace(/^\\\\.\\/, "");
+  return value;
+}
+function caseFoldPath(value) {
+  return process.platform === "win32" || process.platform === "darwin" ? path11.resolve(value).toLowerCase() : path11.resolve(value);
+}
+var samePath = (a2, b) => caseFoldPath(a2) === caseFoldPath(b);
+function isInsidePath(base, target) {
+  const b = caseFoldPath(base);
+  const t2 = caseFoldPath(target);
+  return t2 === b || t2.startsWith(b + path11.sep);
+}
+async function resolveLinkTarget(port, slot) {
+  let current = slot;
+  for (let hop = 0; hop < MAX_LINK_HOPS; hop++) {
+    const raw = await port.readlink(current);
+    const resolved = path11.resolve(path11.dirname(current), normalizeLinkTarget(raw));
+    const info = await port.lstat(resolved);
+    if (info === null) return { final: resolved, exists: false, broken: "missing" };
+    if (!info.symlink) return { final: resolved, exists: true };
+    current = resolved;
+  }
+  return { final: current, exists: false, broken: "cycle" };
+}
+async function classifySlot(port, input) {
+  const info = await port.lstat(input.slot);
+  if (info === null) return { kind: "empty" };
+  if (!info.symlink) {
+    return { kind: "F", real: info.directory ? "dir" : "file" };
+  }
+  if (input.recorded) return { kind: "A" };
+  const resolution = await resolveLinkTarget(port, input.slot);
+  if (!resolution.exists) {
+    return {
+      kind: "E",
+      resolvedTarget: resolution.final,
+      ...resolution.broken !== void 0 ? { broken: resolution.broken } : {}
+    };
+  }
+  if (isInsidePath(input.home, resolution.final)) {
+    return { kind: "B", resolvedTarget: resolution.final };
+  }
+  if (input.registryDirs.some((dir) => isInsidePath(dir, resolution.final))) {
+    return { kind: "C", resolvedTarget: resolution.final };
+  }
+  return { kind: "D", resolvedTarget: resolution.final };
+}
+
+// packages/core/src/link-node.ts
+import fs15 from "node:fs/promises";
+var isMissing = (error) => {
+  const code = error?.code;
+  return code === "ENOENT" || code === "ENOTDIR";
+};
+function nodeLinkPort() {
+  const isWindows2 = process.platform === "win32";
+  return {
+    async lstat(path27) {
+      try {
+        const stat = await fs15.lstat(path27);
+        return { symlink: stat.isSymbolicLink(), directory: stat.isDirectory(), file: stat.isFile() };
+      } catch (error) {
+        if (isMissing(error)) return null;
+        throw error;
+      }
+    },
+    readlink(path27) {
+      return fs15.readlink(path27);
+    },
+    linkDir(target, linkPath) {
+      return fs15.symlink(target, linkPath, isWindows2 ? "junction" : "dir");
+    },
+    async unlink(path27) {
+      try {
+        await fs15.unlink(path27);
+      } catch (error) {
+        const code = error?.code;
+        if (isWindows2 && (code === "EPERM" || code === "EISDIR")) {
+          const stat = await fs15.lstat(path27).catch(() => null);
+          if (stat?.isSymbolicLink() === true) {
+            await fs15.rmdir(path27);
+            return;
+          }
+        }
+        throw error;
+      }
+    }
+  };
+}
+
+// packages/core/src/mounts.ts
+import { randomUUID as randomUUID3 } from "node:crypto";
+import fs16 from "node:fs/promises";
+import path12 from "node:path";
+function emptyMounts() {
+  return { version: 1, targets: {} };
+}
+function invalid5(message) {
+  return new NeoError("state", `state/mounts.json: ${message}`);
+}
+async function readMounts(home) {
+  let text2;
+  try {
+    text2 = await fs16.readFile(mountsJsonPath(home), "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return emptyMounts();
+    throw error;
+  }
+  let raw;
+  try {
+    raw = JSON.parse(text2);
+  } catch (error) {
+    throw invalid5(`not valid JSON (${error.message})`);
+  }
+  if (!isRecord(raw)) throw invalid5("expected a top-level object");
+  if (raw.version === void 0) throw invalid5('missing required field "version"');
+  if (raw.version !== 1) {
+    throw invalid5(
+      `unsupported version ${String(raw.version)} (supported major version: 1; refusing to read or write)`
+    );
+  }
+  if (raw.targets === void 0) throw invalid5('missing required field "targets"');
+  if (!isRecord(raw.targets)) throw invalid5('"targets" must be an object keyed by absolute path');
+  const targets = {};
+  for (const [dir, value] of Object.entries(raw.targets)) {
+    if (!isRecord(value)) throw invalid5(`targets["${dir}"] must be an object`);
+    if (typeof value.agent !== "string" || value.agent.length === 0) {
+      throw invalid5(`targets["${dir}"] is missing required string field "agent"`);
+    }
+    if (!Array.isArray(value.skills)) {
+      throw invalid5(`targets["${dir}"].skills must be an array of skill names`);
+    }
+    if (value.skills.some((name) => typeof name !== "string")) {
+      throw invalid5(`targets["${dir}"].skills must be an array of skill names`);
+    }
+    targets[dir] = value;
+  }
+  return { ...raw, version: 1, targets };
+}
+async function writeMounts(home, ledger) {
+  const file = mountsJsonPath(home);
+  await fs16.mkdir(stateDir(home), { recursive: true });
+  const tmp = path12.join(stateDir(home), `.${path12.basename(file)}.${randomUUID3()}.tmp`);
+  try {
+    await fs16.writeFile(tmp, `${JSON.stringify(ledger, null, 2)}
+`, "utf8");
+    await fs16.rename(tmp, file);
+  } finally {
+    await fs16.rm(tmp, { recursive: true, force: true }).catch(() => void 0);
+  }
+}
+
+// packages/core/src/targets.ts
+import path13 from "node:path";
+async function readRegistry(home) {
+  const extension = await readAgentsExtension(home);
+  return mergeRegistry(BUILTIN_AGENTS, extension?.agents ?? {});
+}
+function resolveDirValue(value, homedir, kind, what) {
+  const expanded = expandTilde(value, homedir);
+  if (!path13.isAbsolute(expanded)) {
+    throw new NeoError(
+      kind,
+      `${what} must resolve to an absolute path after ~ expansion, got: ${JSON.stringify(value)}`
+    );
+  }
+  return path13.resolve(expanded);
+}
+function registrySkillDirs(registry, homedir) {
+  const dirs = [];
+  for (const entry of registry) {
+    const expanded = expandTilde(entry.skillsDir, homedir);
+    if (path13.isAbsolute(expanded)) dirs.push(path13.resolve(expanded));
+  }
+  return dirs;
+}
+function resolveOne(entry, target, homedir) {
+  const raw = target.skillsDir ?? entry.skillsDir;
+  return {
+    agent: target.agent,
+    skillsDir: resolveDirValue(raw, homedir, "state", `target "${target.agent}" skillsDir`),
+    agentsMd: target.agentsMd ?? false
+  };
+}
+async function resolveTargets(home, homedir, targets) {
+  const registry = await readRegistry(home);
+  const resolved = [];
+  const byDir = /* @__PURE__ */ new Map();
+  for (const target of targets) {
+    const entry = registry.find((candidate) => candidate.id === target.agent);
+    if (entry === void 0) {
+      throw new NeoError(
+        "state",
+        `config target "${target.agent}" is not in the merged registry; fix config.yaml or add an agents.yaml entry`
+      );
+    }
+    const one = resolveOne(entry, target, homedir);
+    const key = caseFoldPath(one.skillsDir);
+    const owner = byDir.get(key);
+    if (owner !== void 0) {
+      throw new NeoError(
+        "state",
+        `targets "${owner}" and "${one.agent}" resolve to the same skills directory: ${one.skillsDir}; keep only one`
+      );
+    }
+    byDir.set(key, one.agent);
+    resolved.push(one);
+  }
+  return resolved;
+}
+async function addTarget(home, homedir, id, opts = {}) {
+  const registry = await readRegistry(home);
+  const entry = registry.find((candidate) => candidate.id === id);
+  if (entry === void 0) {
+    const known = registry.map((candidate) => candidate.id).join(", ");
+    throw new NeoError("usage", `unknown agent id "${id}" (known ids: ${known})`);
+  }
+  const loaded = await readConfig(home);
+  if (loaded.config.targets.some((target2) => target2.agent === id)) {
+    throw new NeoError(
+      "state",
+      `target "${id}" is already configured (run: neo target remove ${id} first)`
+    );
+  }
+  const rawDir = opts.skillsDir ?? entry.skillsDir;
+  const kind = opts.skillsDir !== void 0 ? "usage" : "state";
+  const dir = resolveDirValue(rawDir, homedir, kind, `--skills-dir for "${id}"`);
+  const existing = await resolveTargets(home, homedir, loaded.config.targets);
+  const clash = existing.find((target2) => caseFoldPath(target2.skillsDir) === caseFoldPath(dir));
+  if (clash !== void 0) {
+    throw new NeoError(
+      "state",
+      `"${id}" resolves to the same skills directory as target "${clash.agent}": ${dir}; keep only one`
+    );
+  }
+  const target = { agent: id };
+  if (opts.skillsDir !== void 0) target.skillsDir = opts.skillsDir;
+  if (opts.agentsMd) target.agentsMd = true;
+  loaded.config.targets = [...loaded.config.targets, target];
+  await writeConfig(home, loaded);
+  return { agent: id, skillsDir: dir, agentsMd: opts.agentsMd ?? false };
+}
+async function removeTarget(home, homedir, id) {
+  const loaded = await readConfig(home);
+  const target = loaded.config.targets.find((candidate) => candidate.agent === id);
+  if (target === void 0) {
+    throw new NeoError("state", `target "${id}" is not configured`);
+  }
+  let dir = null;
+  try {
+    dir = (await resolveTargets(home, homedir, [target]))[0]?.skillsDir ?? null;
+  } catch {
+    dir = null;
+  }
+  const ledger = await readMounts(home);
+  const stillRecorded = dir !== null && ledger.targets[dir] !== void 0 || Object.values(ledger.targets).some((entry) => entry.agent === id);
+  loaded.config.targets = loaded.config.targets.filter((candidate) => candidate.agent !== id);
+  await writeConfig(home, loaded);
+  return { dir, stillRecorded };
+}
+async function listConfiguredTargets(home, homedir) {
+  const { config } = await readConfig(home);
+  return resolveTargets(home, homedir, config.targets);
+}
+
+// packages/core/src/converge.ts
+import fs18 from "node:fs/promises";
+import path15 from "node:path";
+
+// packages/core/src/agentsmd.ts
+import path14 from "node:path";
+import { randomUUID as randomUUID4 } from "node:crypto";
+import fs17 from "node:fs/promises";
+var BEGIN_LINE = /^<!--\s*neo:begin\s+role=([^\s>]+)\s*-->\r?$/;
+var END_LINE = /^<!--\s*neo:end\s+role=([^\s>]+)\s*-->\r?$/;
+var PROJECT_BEGIN_LINE = /^<!--\s*neo:project:begin\s+role=([^\s>]+)\s*-->\r?$/;
+var PROJECT_END_LINE = /^<!--\s*neo:project:end\s+role=([^\s>]+)\s*-->\r?$/;
+var NEO_MARKER_LINE = /^<!--\s*neo:(?:project:)?(?:begin|end)\b.*-->\r?$/;
+function assertNoNeoMarkerLines(role, content) {
+  const line = content.split(/\r?\n/).find((l) => NEO_MARKER_LINE.test(l));
+  if (line !== void 0) {
+    throw new NeoError(
+      "usage",
+      `role "${role}" prompt contains a reserved neo block marker; remove this line: ${line.trim()}`
+    );
+  }
+}
+function renderNeoBlock(role, content) {
+  return `<!-- neo:begin role=${role} -->
+${content.replace(/\s+$/, "")}
+<!-- neo:end role=${role} -->
+`;
+}
+function renderProjectBlock(role, content) {
+  return `<!-- neo:project:begin role=${role} -->
+${content.replace(/\s+$/, "")}
+<!-- neo:project:end role=${role} -->
+`;
+}
+function containsNeoBlocks(content) {
+  return content.split("\n").some((line) => BEGIN_LINE.test(line));
+}
+function containsProjectBlocks(content) {
+  return content.split("\n").some((line) => PROJECT_BEGIN_LINE.test(line));
+}
+function stripMarkedBlocks(content, beginLine, endLine) {
+  let out = "";
+  let i2 = 0;
+  let removed = 0;
+  while (i2 < content.length) {
+    const lineEnd = content.indexOf("\n", i2);
+    const line = lineEnd === -1 ? content.slice(i2) : content.slice(i2, lineEnd);
+    if (beginLine.test(line)) {
+      let j = lineEnd === -1 ? content.length : lineEnd + 1;
+      let matchedEnd = -1;
+      while (j < content.length) {
+        const innerEnd = content.indexOf("\n", j);
+        const inner = innerEnd === -1 ? content.slice(j) : content.slice(j, innerEnd);
+        if (endLine.test(inner)) {
+          matchedEnd = innerEnd === -1 ? content.length : innerEnd + 1;
+          break;
+        }
+        j = innerEnd === -1 ? content.length : innerEnd + 1;
+      }
+      if (matchedEnd === -1) {
+        out += lineEnd === -1 ? line : `${line}
+`;
+        i2 = lineEnd === -1 ? content.length : lineEnd + 1;
+        continue;
+      }
+      removed++;
+      i2 = matchedEnd;
+      continue;
+    }
+    out += lineEnd === -1 ? line : `${line}
+`;
+    i2 = lineEnd === -1 ? content.length : lineEnd + 1;
+  }
+  return { content: out, removed };
+}
+function stripNeoBlocks(content) {
+  return stripMarkedBlocks(content, BEGIN_LINE, END_LINE);
+}
+function stripProjectBlocks(content) {
+  return stripMarkedBlocks(content, PROJECT_BEGIN_LINE, PROJECT_END_LINE);
+}
+function applyMarkedBlocks(content, blocks, marker) {
+  const { content: stripped, removed } = marker.strip(content);
+  if (blocks.length === 0) {
+    return { content: stripped, changed: removed > 0 };
+  }
+  if (stripped.length > 0 && !stripped.endsWith("\n")) {
+    const withNewline = `${stripped}
+${blocks.map((block2) => marker.render(block2.role, block2.content)).join("")}`;
+    return { content: withNewline, changed: true };
+  }
+  const next = stripped + blocks.map((block2) => marker.render(block2.role, block2.content)).join("");
+  return { content: next, changed: next !== content || removed !== blocks.length };
+}
+function applyNeoBlocks(content, blocks) {
+  return applyMarkedBlocks(content, blocks, { render: renderNeoBlock, strip: stripNeoBlocks });
+}
+function applyProjectBlocks(content, blocks) {
+  return applyMarkedBlocks(content, blocks, { render: renderProjectBlock, strip: stripProjectBlocks });
+}
+function isEmptyPrompt(content, role) {
+  const trimmed = content.trim();
+  if (trimmed.length === 0) return true;
+  return trimmed === roleAgentsMdStub(role).trim();
+}
+function planAgentsMdTargets(targets, registry, homedir) {
+  const byAgent = /* @__PURE__ */ new Map();
+  const errors = /* @__PURE__ */ new Map();
+  const byFile = /* @__PURE__ */ new Map();
+  const drafts = [];
+  for (const target of targets) {
+    if (!target.agentsMd) continue;
+    const entry = registry.find((candidate) => candidate.id === target.agent);
+    if (entry === void 0) continue;
+    const raw = entry.agentsMd;
+    if (raw === void 0) {
+      errors.set(
+        target.agent,
+        `agent "${target.agent}" has no user-level instruction file in the registry; remove its agentsMd opt-in (or remap the agent in agents.yaml)`
+      );
+      continue;
+    }
+    const expanded = expandTilde(raw, homedir);
+    if (!path14.isAbsolute(expanded)) {
+      errors.set(
+        target.agent,
+        `agentsMd path for "${target.agent}" must resolve to an absolute path after ~ expansion, got: ${JSON.stringify(raw)}`
+      );
+      continue;
+    }
+    drafts.push({ agent: target.agent, file: path14.resolve(expanded), rawPath: raw });
+  }
+  for (const draft of drafts) {
+    const key = caseFoldPath(draft.file);
+    const owner = byFile.get(key);
+    if (owner !== void 0) {
+      const message = `agentsMd conflict: targets "${owner}" and "${draft.agent}" resolve to the same instruction file: ${draft.file}; converge to one target`;
+      errors.set(draft.agent, message);
+      errors.set(owner, message);
+      byAgent.delete(owner);
+      continue;
+    }
+    byFile.set(key, draft.agent);
+    byAgent.set(draft.agent, draft);
+  }
+  return { byAgent, errors };
+}
+async function readRolePrompt(home, role) {
+  try {
+    return await fs17.readFile(roleAgentsMd(home, role), "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+async function desiredPromptBlocks(home, role) {
+  if (role === null) return [];
+  const blocks = [];
+  for (const sourceRole of role === "default" ? ["default"] : ["default", role]) {
+    const content = await readRolePrompt(home, sourceRole);
+    if (content !== null && !isEmptyPrompt(content, sourceRole)) {
+      assertNoNeoMarkerLines(sourceRole, content);
+      blocks.push({ role: sourceRole, content });
+    }
+  }
+  return blocks;
+}
+function asAgentsMdLedger(previous) {
+  if (!isRecord(previous) || previous.mounted !== true || typeof previous.file !== "string") {
+    return void 0;
+  }
+  const entry = { ...previous, mounted: true, file: previous.file };
+  if (typeof previous.backup === "string") entry.backup = previous.backup;
+  return entry;
+}
+function backupRelPath(agent, file) {
+  const safeAgent = safeBackupAgentName(agent);
+  return path14.join("state", "backups", `${safeAgent}-${path14.basename(file)}.bak`).split(path14.sep).join("/");
+}
+async function pathExists2(target) {
+  return pathExists(target);
+}
+async function writeFileAtomic2(file, content) {
+  await writeFileAtomic(file, content, { defaultMode: 420 });
+}
+async function backupFileAtomic(from, to) {
+  await fs17.mkdir(path14.dirname(to), { recursive: true });
+  const tmp = `${to}.${randomUUID4()}.tmp`;
+  try {
+    await fs17.copyFile(from, tmp);
+    await fs17.rename(tmp, to);
+  } finally {
+    await fs17.rm(tmp, { force: true }).catch(() => void 0);
+  }
+}
+async function pushOverrideWarning(warnings, resolved, role) {
+  if (role === null) return;
+  if (resolved.agent !== "codex" || path14.basename(resolved.file) !== "AGENTS.md") return;
+  const override = path14.join(path14.dirname(resolved.file), "AGENTS.override.md");
+  if (!await pathExists2(override)) return;
+  warnings.push(`AGENTS.override.md exists (${override}); the mounted ${resolved.file} is not read by codex`);
+}
+async function convergeAgentsMdFile(home, resolved, role, previous) {
+  const actions = [];
+  const warnings = [];
+  const prevEntry = asAgentsMdLedger(previous);
+  try {
+    const desired = await desiredPromptBlocks(home, role);
+    let content;
+    try {
+      content = await fs17.readFile(resolved.file, "utf8");
+    } catch (error) {
+      if (error.code === "ENOENT") content = null;
+      else throw error;
+    }
+    const hasBlocks = content !== null && containsNeoBlocks(content);
+    if (desired.length === 0 && !hasBlocks) {
+      return { actions, warnings, accounting: null };
+    }
+    if (desired.length === 0) {
+      const { content: userPart } = stripNeoBlocks(content ?? "");
+      if (userPart.trim() === "" && prevEntry?.backup === void 0) {
+        await fs17.rm(resolved.file, { force: true });
+        actions.push({ kind: "file-removed", file: resolved.file });
+      } else {
+        await writeFileAtomic2(resolved.file, userPart.trim() === "" ? "" : userPart);
+        actions.push({ kind: "stripped", file: resolved.file });
+      }
+      return { actions, warnings, accounting: null };
+    }
+    const next = applyNeoBlocks(content ?? "", desired);
+    if (!next.changed) {
+      await pushOverrideWarning(warnings, resolved, role);
+      return {
+        actions,
+        warnings,
+        accounting: prevEntry ?? { mounted: true, file: resolved.rawPath }
+      };
+    }
+    let backupRel = prevEntry?.backup;
+    let backupNote;
+    if (content !== null && backupRel === void 0) {
+      backupRel = backupRelPath(resolved.agent, resolved.file);
+      const bakAbs = path14.join(home, ...backupRel.split("/"));
+      if (!await pathExists2(bakAbs)) {
+        await backupFileAtomic(resolved.file, bakAbs);
+        backupNote = `first-touch backup -> ${backupRel}`;
+      }
+    }
+    await writeFileAtomic2(resolved.file, next.content);
+    actions.push({
+      kind: hasBlocks ? "updated" : "mounted",
+      file: resolved.file,
+      ...backupNote !== void 0 ? { note: backupNote } : {}
+    });
+    const accounting = {
+      ...prevEntry ?? {},
+      mounted: true,
+      file: resolved.rawPath,
+      ...backupRel !== void 0 ? { backup: backupRel } : {}
+    };
+    await pushOverrideWarning(warnings, resolved, role);
+    return { actions, warnings, accounting };
+  } catch (error) {
+    return { actions, warnings, accounting: null, error: error.message };
+  }
+}
+
+// packages/core/src/converge.ts
+async function desiredSkills(home, role) {
+  const skills = /* @__PURE__ */ new Map();
+  if (role !== null) {
+    const { resolutions } = await resolveRoleAssembly(home, role);
+    for (const [name, resolution] of resolutions) {
+      skills.set(name, {
+        name,
+        sourceRole: layerLabel(resolution.winner),
+        dir: resolution.winner.dir
+      });
+    }
+  }
+  const groups = /* @__PURE__ */ new Map();
+  for (const name of skills.keys()) {
+    const key = name.toLowerCase();
+    groups.set(key, [...groups.get(key) ?? [], name]);
+  }
+  return {
+    skills,
+    caseCollisions: new Map([...groups].filter(([, names]) => names.length > 1))
+  };
+}
+async function convergeOneTarget(ports, home, target, desired, ledger, opts) {
+  const report = {
+    agent: target.agent,
+    dir: target.skillsDir,
+    actions: [],
+    conflicts: [],
+    errors: [],
+    agentsMd: [],
+    warnings: []
+  };
+  const port = ports.link;
+  try {
+    await fs18.mkdir(target.skillsDir, { recursive: true });
+  } catch (error) {
+    report.errors.push({ skill: "(target)", error: `cannot create skills dir: ${error.message}` });
+    return report;
+  }
+  const previous = ledger.targets[target.skillsDir];
+  const recorded = new Set(previous?.skills ?? []);
+  const finalSkills = /* @__PURE__ */ new Set();
+  const stuckSkills = /* @__PURE__ */ new Set();
+  for (const name of recorded) {
+    if (desired.skills.has(name)) continue;
+    const slot = path15.join(target.skillsDir, name);
+    let info;
+    try {
+      info = await port.lstat(slot);
+    } catch (error) {
+      report.errors.push({ skill: name, error: `lstat failed: ${error.message}` });
+      stuckSkills.add(name);
+      continue;
+    }
+    if (info === null) continue;
+    if (!info.symlink) {
+      report.conflicts.push({
+        skill: name,
+        kind: "F",
+        detail: `recorded slot is now unmanaged real content; left in place and dropped from ledger`
+      });
+      continue;
+    }
+    try {
+      await port.unlink(slot);
+      report.actions.push({ skill: name, kind: "removed" });
+    } catch (error) {
+      report.errors.push({ skill: name, error: `unlink failed: ${error.message}` });
+      stuckSkills.add(name);
+    }
+  }
+  const wanted = [...desired.skills.values()].sort(
+    (a2, b) => a2.name < b.name ? -1 : a2.name > b.name ? 1 : 0
+  );
+  for (const skill of wanted) {
+    const { name, sourceRole } = skill;
+    const collision = desired.caseCollisions.get(name.toLowerCase());
+    if (collision !== void 0) {
+      report.conflicts.push({
+        skill: name,
+        kind: "case",
+        detail: `case-insensitive collision with [${collision.join(", ")}]; rename at role level`
+      });
+      continue;
+    }
+    const slot = path15.join(target.skillsDir, name);
+    const source = skill.dir;
+    const replace = async (note, kind) => {
+      try {
+        await port.unlink(slot);
+        const sourceInfo = await port.lstat(source);
+        if (sourceInfo === null) {
+          report.errors.push({ skill: name, error: `skill source missing: ${source}` });
+          return false;
+        }
+        await port.linkDir(source, slot);
+        report.actions.push({
+          skill: name,
+          kind: kind ?? "repointed",
+          sourceRole,
+          ...note !== void 0 ? { note } : {}
+        });
+        return true;
+      } catch (error) {
+        report.errors.push({ skill: name, error: error.message });
+        return false;
+      }
+    };
+    let classification;
+    try {
+      classification = await classifySlot(port, {
+        slot,
+        recorded: recorded.has(name),
+        home,
+        registryDirs: opts.registryDirs
+      });
+    } catch (error) {
+      report.errors.push({ skill: name, error: error.message });
+      continue;
+    }
+    switch (classification.kind) {
+      case "empty": {
+        try {
+          const sourceInfo = await port.lstat(source);
+          if (sourceInfo === null) {
+            report.errors.push({ skill: name, error: `skill source missing: ${source}` });
+            break;
+          }
+          await port.linkDir(source, slot);
+          report.actions.push({ skill: name, kind: "mounted", sourceRole });
+          finalSkills.add(name);
+        } catch (error) {
+          report.errors.push({ skill: name, error: error.message });
+        }
+        break;
+      }
+      case "A": {
+        let resolved = null;
+        try {
+          const raw = await port.readlink(slot);
+          resolved = path15.resolve(path15.dirname(slot), normalizeLinkTarget(raw));
+        } catch {
+          resolved = null;
+        }
+        if (resolved !== null && samePath(resolved, source)) {
+          finalSkills.add(name);
+          break;
+        }
+        if (await replace()) finalSkills.add(name);
+        break;
+      }
+      case "B": {
+        if (await replace(void 0, "replaced-orphan")) finalSkills.add(name);
+        break;
+      }
+      case "C": {
+        if (await replace(`was -> ${classification.resolvedTarget}`, "replaced-mirror")) {
+          finalSkills.add(name);
+        }
+        break;
+      }
+      case "D": {
+        if (opts.force) {
+          if (await replace(`was -> ${classification.resolvedTarget}`, "replaced-external")) {
+            finalSkills.add(name);
+          }
+        } else {
+          report.conflicts.push({
+            skill: name,
+            kind: "D",
+            detail: `external link -> ${classification.resolvedTarget} (--force to replace)`
+          });
+        }
+        break;
+      }
+      case "E": {
+        if (opts.force) {
+          if (await replace(`was -> ${classification.resolvedTarget}`, "replaced-broken")) {
+            finalSkills.add(name);
+          }
+        } else {
+          report.conflicts.push({
+            skill: name,
+            kind: "E",
+            detail: `broken link (${classification.broken}) -> ${classification.resolvedTarget} (--force to replace)`
+          });
+        }
+        break;
+      }
+      case "F": {
+        report.conflicts.push({
+          skill: name,
+          kind: "F",
+          detail: `unmanaged real ${classification.real}; never replaced (migrate owns absorbing it)`
+        });
+        break;
+      }
+    }
+  }
+  const planned = opts.agentsMdPlan.byAgent.get(target.agent);
+  const planError = opts.agentsMdPlan.errors.get(target.agent);
+  let agentsMdField = previous?.agentsMd;
+  if (planError !== void 0) {
+    report.errors.push({ skill: "(agents-md)", error: planError });
+  } else if (planned !== void 0) {
+    const result = await convergeAgentsMdFile(home, planned, opts.role, previous?.agentsMd);
+    report.agentsMd.push(...result.actions);
+    report.warnings.push(...result.warnings);
+    if (result.error !== void 0) {
+      report.errors.push({ skill: "(agents-md)", error: result.error });
+    } else {
+      agentsMdField = result.accounting === null ? void 0 : result.accounting;
+    }
+  }
+  const skills = [...finalSkills, ...stuckSkills].sort();
+  if (skills.length === 0 && agentsMdField === void 0) {
+    delete ledger.targets[target.skillsDir];
+  } else {
+    const prev = ledger.targets[target.skillsDir];
+    const entry = { ...prev, agent: target.agent, skills };
+    if (agentsMdField === void 0) delete entry.agentsMd;
+    else entry.agentsMd = agentsMdField;
+    ledger.targets[target.skillsDir] = entry;
+  }
+  await writeMounts(home, ledger);
+  if (opts.sweep) {
+    const keep = new Set(skills);
+    let entries;
+    try {
+      entries = await fs18.readdir(target.skillsDir);
+    } catch (error) {
+      report.errors.push({ skill: "(target)", error: `orphan sweep readdir failed: ${error.message}` });
+      return report;
+    }
+    for (const name of entries) {
+      if (keep.has(name)) continue;
+      const slot = path15.join(target.skillsDir, name);
+      const info = await port.lstat(slot);
+      if (info === null || !info.symlink) continue;
+      let pointsHome = false;
+      try {
+        const resolution = await resolveLinkTarget(port, slot);
+        pointsHome = isInsidePath(home, resolution.final);
+      } catch {
+        pointsHome = false;
+      }
+      if (!pointsHome) continue;
+      try {
+        await port.unlink(slot);
+        report.actions.push({ skill: name, kind: "swept-orphan" });
+      } catch (error) {
+        report.errors.push({ skill: name, error: `orphan sweep unlink failed: ${error.message}` });
+      }
+    }
+  }
+  return report;
+}
+async function converge(ports, home, homedir, role, opts = {}) {
+  const loaded = await readConfig(home);
+  const registry = await readRegistry(home);
+  const targets = await resolveTargets(home, homedir, loaded.config.targets);
+  const desired = await desiredSkills(home, role);
+  const ledger = await readMounts(home);
+  const agentsMdPlan = planAgentsMdTargets(targets, registry, homedir);
+  const reports = [];
+  for (const target of targets) {
+    const report = await convergeOneTarget(ports, home, target, desired, ledger, {
+      force: opts.force ?? false,
+      sweep: role === null,
+      role,
+      registryDirs: registrySkillDirs(registry, homedir),
+      agentsMdPlan
+    });
+    reports.push(report);
+  }
+  return {
+    role,
+    targets: reports,
+    ok: reports.every((report) => report.conflicts.length === 0 && report.errors.length === 0)
+  };
+}
+var queueTail = Promise.resolve();
+function enqueue(operation) {
+  const next = queueTail.then(operation, operation);
+  queueTail = next.then(
+    () => void 0,
+    () => void 0
+  );
+  return next;
+}
+async function existsDir2(target) {
+  try {
+    const stat = await fs18.stat(target);
+    return stat.isDirectory();
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  }
+}
+async function useRole(ports, home, opts) {
+  return enqueue(async () => {
+    const loaded = await readConfig(home);
+    let role = opts.role;
+    if (role === void 0) {
+      if (loaded.config.activeRole === null) {
+        throw new NeoError("state", "no active role (config.activeRole is null); run: neo use <role>");
+      }
+      role = loaded.config.activeRole;
+    } else {
+      validateRoleName(role);
+    }
+    if (!await existsDir2(roleDir(home, role))) {
+      throw new NeoError("state", `role "${role}" not found`);
+    }
+    loaded.config.activeRole = role;
+    await writeConfig(home, loaded);
+    const report = await converge(ports, home, opts.homedir, role, {
+      ...opts.force !== void 0 ? { force: opts.force } : {}
+    });
+    if (report.ok) await clearLockDirty(home, role).catch(() => void 0);
+    return report;
+  });
+}
+async function offAll(ports, home, opts) {
+  return enqueue(async () => {
+    const loaded = await readConfig(home);
+    loaded.config.activeRole = null;
+    await writeConfig(home, loaded);
+    return converge(ports, home, opts.homedir, null);
+  });
 }
 
 // packages/core/src/roots.ts
+import fs19 from "node:fs/promises";
+import path16 from "node:path";
 function entryFor(registry, agent) {
   const entry = registry.find((item) => item.id === agent);
   if (entry === void 0) {
@@ -11565,7 +11982,7 @@ function isolationFor(entry) {
 }
 async function listDirOrEmpty(dir) {
   try {
-    const entries = await fs16.readdir(dir, { withFileTypes: true });
+    const entries = await fs19.readdir(dir, { withFileTypes: true });
     return entries.filter((entry) => entry.isDirectory() || entry.isSymbolicLink());
   } catch (error) {
     if (error.code === "ENOENT") return [];
@@ -11575,22 +11992,20 @@ async function listDirOrEmpty(dir) {
 async function desiredSkillSources(home, role) {
   const dirs = /* @__PURE__ */ new Map();
   const roles = /* @__PURE__ */ new Map();
-  const sourceRoles = role === "default" ? ["default"] : ["default", role];
-  for (const sourceRole of sourceRoles) {
-    for (const entry of await listDirOrEmpty(roleSkillsDir(home, sourceRole))) {
-      dirs.set(entry.name, path13.join(roleSkillsDir(home, sourceRole), entry.name));
-      roles.set(entry.name, sourceRole);
-    }
+  const { resolutions } = await resolveRoleAssembly(home, role);
+  for (const [name, resolution] of resolutions) {
+    dirs.set(name, resolution.winner.dir);
+    roles.set(name, layerLabel(resolution.winner));
   }
   return { dirs, roles };
 }
 async function convergeSkillLinks(link, skillsRoot, desired) {
-  await fs16.mkdir(skillsRoot, { recursive: true });
+  await fs19.mkdir(skillsRoot, { recursive: true });
   const notes = [];
   const counts = { added: 0, kept: 0, removed: 0, replaced: 0 };
   const present = /* @__PURE__ */ new Set();
-  for (const entry of await fs16.readdir(skillsRoot, { withFileTypes: true })) {
-    const slot = path13.join(skillsRoot, entry.name);
+  for (const entry of await fs19.readdir(skillsRoot, { withFileTypes: true })) {
+    const slot = path16.join(skillsRoot, entry.name);
     present.add(entry.name);
     const source = desired.get(entry.name);
     if (source === void 0) {
@@ -11615,7 +12030,7 @@ async function convergeSkillLinks(link, skillsRoot, desired) {
     } catch {
       raw = null;
     }
-    const resolved = raw === null ? null : path13.resolve(path13.dirname(slot), normalizeLinkTarget(raw));
+    const resolved = raw === null ? null : path16.resolve(path16.dirname(slot), normalizeLinkTarget(raw));
     if (resolved !== null && samePath(resolved, source)) {
       counts.kept++;
       continue;
@@ -11626,14 +12041,14 @@ async function convergeSkillLinks(link, skillsRoot, desired) {
   }
   for (const [name, source] of desired) {
     if (present.has(name)) continue;
-    await link.linkDir(source, path13.join(skillsRoot, name));
+    await link.linkDir(source, path16.join(skillsRoot, name));
     counts.added++;
   }
   return { ...counts, notes };
 }
 async function readTextIfExists(file) {
   try {
-    return await fs16.readFile(file, "utf8");
+    return await fs19.readFile(file, "utf8");
   } catch (error) {
     if (error.code === "ENOENT") return null;
     throw error;
@@ -11642,9 +12057,9 @@ async function readTextIfExists(file) {
 async function ensureShareDirs(link, root, realRoot, dirs, notes) {
   const shared = [];
   for (const dir of dirs) {
-    const source = path13.join(realRoot, dir);
+    const source = path16.join(realRoot, dir);
     if (!await pathExists(source)) continue;
-    const slot = path13.join(root, dir);
+    const slot = path16.join(root, dir);
     const info = await link.lstat(slot);
     if (info === null) {
       await link.linkDir(source, slot);
@@ -11653,7 +12068,7 @@ async function ensureShareDirs(link, root, realRoot, dirs, notes) {
     }
     if (info.symlink === true) {
       const raw = await link.readlink(slot).catch(() => null);
-      if (raw !== null && samePath(path13.resolve(path13.dirname(slot), normalizeLinkTarget(raw)), source)) {
+      if (raw !== null && samePath(path16.resolve(path16.dirname(slot), normalizeLinkTarget(raw)), source)) {
         shared.push(dir);
         continue;
       }
@@ -11673,31 +12088,31 @@ async function convergeRoot(ports, home, homedir, opts) {
     throw new NeoError("state", `role "${role}" not found`);
   }
   const root = opts.root ?? rootDir(home, role, opts.agent);
-  await fs16.mkdir(root, { recursive: true });
+  await fs19.mkdir(root, { recursive: true });
   const { dirs: desired, roles: sourceRoles } = await desiredSkillSources(home, role);
   const skillResult = await convergeSkillLinks(
     ports.link,
-    path13.join(root, isolate.skillsDir),
+    path16.join(root, isolate.skillsDir),
     desired
   );
   const notes = [...skillResult.notes];
   const blocks = await desiredPromptBlocks(home, role);
   const instructionText = blocks.map((block2) => block2.content.replace(/\s+$/, "")).filter((text2) => text2.length > 0).join("\n\n");
-  const instructionFile = path13.join(root, isolate.instructionFile);
+  const instructionFile = path16.join(root, isolate.instructionFile);
   if (instructionText.length > 0) {
     await writeFileAtomic(instructionFile, `${instructionText}
 `);
   } else {
-    await fs16.rm(instructionFile, { force: true });
+    await fs19.rm(instructionFile, { force: true });
   }
   const realRoot = expandTilde(isolate.homeDir, homedir);
   const auth = [];
   for (const file of isolate.authFiles ?? []) {
-    const source = path13.join(realRoot, file);
+    const source = path16.join(realRoot, file);
     try {
-      await fs16.copyFile(source, path13.join(root, file));
+      await fs19.copyFile(source, path16.join(root, file));
       if (process.platform !== "win32") {
-        await fs16.chmod(path13.join(root, file), 384).catch(() => void 0);
+        await fs19.chmod(path16.join(root, file), 384).catch(() => void 0);
       }
       auth.push(file);
     } catch (error) {
@@ -11727,7 +12142,7 @@ async function convergeRoot(ports, home, homedir, opts) {
   let mcpFile = null;
   let mcpWritten = false;
   if (isolate.mcp !== void 0) {
-    const file = path13.join(root, isolate.mcp.file);
+    const file = path16.join(root, isolate.mcp.file);
     mcpFile = file;
     switch (isolate.mcp.format) {
       case "codex-toml": {
@@ -11735,7 +12150,7 @@ async function convergeRoot(ports, home, homedir, opts) {
         if (opts.isolated === true && isolate.sharedSkillsDir !== void 0) {
           const sharedSkills = expandTilde(isolate.sharedSkillsDir, homedir);
           for (const entry2 of await listDirOrEmpty(sharedSkills)) {
-            if (!desired.has(entry2.name)) disabled.push(path13.join(sharedSkills, entry2.name, "SKILL.md"));
+            if (!desired.has(entry2.name)) disabled.push(path16.join(sharedSkills, entry2.name, "SKILL.md"));
           }
         }
         const codexModels = isolate.models !== void 0 && isolate.models.format === "codex-toml" && modelContent ? {
@@ -11784,7 +12199,7 @@ async function convergeRoot(ports, home, homedir, opts) {
   if (isolate.models !== void 0 && modelContent) {
     resolveModelEnv(roleModels, opts.env ?? {});
     const providerCount = Object.keys(roleModels.providers).length;
-    const file = path13.join(root, isolate.models.file);
+    const file = path16.join(root, isolate.models.file);
     switch (isolate.models.format) {
       case "pi-models-json": {
         if (providerCount > 0) await writeFileAtomic(file, renderPiModelsJson(roleModels));
@@ -11795,7 +12210,7 @@ async function convergeRoot(ports, home, homedir, opts) {
             roleModels.default.model
           )?.model.thinkingLevel;
           const thinkingLevelsByModel = startup === void 0 ? void 0 : { [`${roleModels.default.provider}/${roleModels.default.model}`]: startup };
-          const settingsFile = path13.join(root, isolate.models.settingsFile);
+          const settingsFile = path16.join(root, isolate.models.settingsFile);
           await writeFileAtomic(
             settingsFile,
             renderPiSettingsJson(
@@ -11823,7 +12238,7 @@ async function convergeRoot(ports, home, homedir, opts) {
         break;
       }
       case "claude-settings-json": {
-        const settingsPath = path13.join(root, isolate.models.file);
+        const settingsPath = path16.join(root, isolate.models.file);
         await writeFileAtomic(
           settingsPath,
           renderClaudeSettingsJson(await readTextIfExists(settingsPath), roleModels.default?.model)
@@ -11840,7 +12255,7 @@ async function convergeRoot(ports, home, homedir, opts) {
       }
     }
   }
-  const metaFile = path13.join(root, "root.json");
+  const metaFile = path16.join(root, "root.json");
   if (!await pathExists(metaFile)) {
     const now = ports.now?.() ?? /* @__PURE__ */ new Date();
     await writeFileAtomic(
@@ -11876,24 +12291,24 @@ async function convergeRoot(ports, home, homedir, opts) {
   };
 }
 async function listRoots(home) {
-  const rootBase = path13.join(home, "roots");
+  const rootBase = path16.join(home, "roots");
   let roleDirs;
   try {
-    roleDirs = (await fs16.readdir(rootBase, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+    roleDirs = (await fs19.readdir(rootBase, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
   } catch (error) {
     if (error.code === "ENOENT") return [];
     throw error;
   }
   const out = [];
   for (const role of roleDirs) {
-    const base = path13.join(rootBase, role);
-    const agents = (await fs16.readdir(base, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+    const base = path16.join(rootBase, role);
+    const agents = (await fs19.readdir(base, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
     const roleExists = await pathExists(roleDir(home, role));
     for (const agent of agents) {
-      const dir = path13.join(base, agent);
+      const dir = path16.join(base, agent);
       let meta = false;
       try {
-        const raw = JSON.parse(await fs16.readFile(path13.join(dir, "root.json"), "utf8"));
+        const raw = JSON.parse(await fs19.readFile(path16.join(dir, "root.json"), "utf8"));
         meta = typeof raw === "object" && raw !== null && raw.version === 1 && raw.role === role && raw.agent === agent;
       } catch {
         meta = false;
@@ -11904,11 +12319,11 @@ async function listRoots(home) {
   return out.sort((a2, b) => a2.role === b.role ? a2.agent < b.agent ? -1 : 1 : a2.role < b.role ? -1 : 1);
 }
 async function cleanRoleRoots(home, role) {
-  const base = path13.join(rootsDir(home), role);
+  const base = path16.join(rootsDir(home), role);
   const summary = await listRoots(home).then((all) => all.filter((item) => item.role === role));
   if (summary.length === 0) return [];
   if (!await pathExists(base)) return [];
-  await fs16.rm(base, { recursive: true, force: true });
+  await fs19.rm(base, { recursive: true, force: true });
   return summary.map((item) => item.dir);
 }
 async function rootSnapshot(home) {
@@ -11918,19 +12333,19 @@ async function rootSnapshot(home) {
 
 // packages/core/src/materialize.ts
 import { createHash as createHash2, randomUUID as randomUUID6 } from "node:crypto";
-import fs18 from "node:fs/promises";
-import path15 from "node:path";
+import fs21 from "node:fs/promises";
+import path18 from "node:path";
 
 // packages/core/src/migrate.ts
 import { createHash, randomUUID as randomUUID5 } from "node:crypto";
-import fs17 from "node:fs/promises";
-import path14 from "node:path";
+import fs20 from "node:fs/promises";
+import path17 from "node:path";
 var MIGRATE_STRATEGIES = ["first", "newest", "skip"];
 async function readV3Lock(homedir) {
-  const file = path14.join(homedir, ".agents", ".skill-lock.json");
+  const file = path17.join(homedir, ".agents", ".skill-lock.json");
   let text2;
   try {
-    text2 = await fs17.readFile(file, "utf8");
+    text2 = await fs20.readFile(file, "utf8");
   } catch (error) {
     if (error.code === "ENOENT") {
       return { present: false, path: file, entries: {} };
@@ -11958,12 +12373,12 @@ async function readV3Lock(homedir) {
 }
 var HASH_IGNORED_NAMES = /* @__PURE__ */ new Set([".git", "node_modules"]);
 async function collectFiles(dir, prefix, out) {
-  const entries = await fs17.readdir(dir, { withFileTypes: true });
+  const entries = await fs20.readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
     if (HASH_IGNORED_NAMES.has(entry.name)) continue;
     const rel = prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`;
     if (entry.isDirectory()) {
-      await collectFiles(path14.join(dir, entry.name), rel, out);
+      await collectFiles(path17.join(dir, entry.name), rel, out);
     } else if (entry.isFile()) {
       out.push(rel);
     }
@@ -11976,7 +12391,7 @@ async function computeSkillFolderHash(dir) {
   const hash = createHash("sha256");
   for (const rel of files) {
     hash.update(rel, "utf8");
-    hash.update(await fs17.readFile(path14.join(dir, ...rel.split("/"))));
+    hash.update(await fs20.readFile(path17.join(dir, ...rel.split("/"))));
   }
   return hash.digest("hex");
 }
@@ -12025,11 +12440,11 @@ function parseTime(value) {
   return typeof value === "string" ? Date.parse(value) : Number.NaN;
 }
 function buildScanSet(homedir, registry, withAgents) {
-  const dirs = [{ agent: null, dir: path14.resolve(path14.join(homedir, ".agents", "skills")) }];
+  const dirs = [{ agent: null, dir: path17.resolve(path17.join(homedir, ".agents", "skills")) }];
   if (withAgents) {
     for (const entry of registry) {
       const expanded = expandTilde(entry.skillsDir, homedir);
-      if (path14.isAbsolute(expanded)) dirs.push({ agent: entry.id, dir: path14.resolve(expanded) });
+      if (path17.isAbsolute(expanded)) dirs.push({ agent: entry.id, dir: path17.resolve(expanded) });
     }
   }
   const seen = /* @__PURE__ */ new Set();
@@ -12042,7 +12457,7 @@ function buildScanSet(homedir, registry, withAgents) {
 }
 async function hasSkillMd(dir) {
   try {
-    const stat = await fs17.stat(path14.join(dir, "SKILL.md"));
+    const stat = await fs20.stat(path17.join(dir, "SKILL.md"));
     return stat.isFile();
   } catch {
     return false;
@@ -12050,7 +12465,7 @@ async function hasSkillMd(dir) {
 }
 async function mtimeMs(target) {
   try {
-    return (await fs17.stat(target)).mtimeMs;
+    return (await fs20.stat(target)).mtimeMs;
   } catch {
     return 0;
   }
@@ -12064,7 +12479,7 @@ async function candidateTime(origin, v3) {
 }
 async function readDirEntries(dir) {
   try {
-    return await fs17.readdir(dir, { withFileTypes: true });
+    return await fs20.readdir(dir, { withFileTypes: true });
   } catch (error) {
     if (error.code === "ENOENT") return [];
     throw error;
@@ -12072,7 +12487,7 @@ async function readDirEntries(dir) {
 }
 async function pathExists3(target) {
   try {
-    await fs17.lstat(target);
+    await fs20.lstat(target);
     return true;
   } catch (error) {
     if (error.code === "ENOENT") return false;
@@ -12110,7 +12525,7 @@ async function runMigrate(ports, home, opts) {
     const anchored = scan.agent === null;
     for (const entry of await readDirEntries(scan.dir)) {
       if (!SKILL_NAME_PATTERN2.test(entry.name)) continue;
-      const origin = path14.join(scan.dir, entry.name);
+      const origin = path17.join(scan.dir, entry.name);
       const v3Entry = scan.agent === null ? v3.entries[entry.name] : void 0;
       if (entry.isSymbolicLink()) {
         if (opts.absorbLinks !== true) {
@@ -12202,7 +12617,7 @@ async function runMigrate(ports, home, opts) {
     const lockEntry = existingLock?.skills[name];
     const all = [];
     if (lockEntry !== void 0) {
-      const dest = path14.join(roleSkillsDir(home, role), name);
+      const dest = path17.join(roleSkillsDir(home, role), name);
       if (await pathExists3(dest)) {
         all.push({
           name,
@@ -12285,7 +12700,7 @@ async function runMigrate(ports, home, opts) {
       }
     }
   }
-  const quarantineDir = apply ? quarantineRunDir : plannedQuarantine ? path14.join(stateDir(home), "backups", "migrate", compactTimestamp(now)) : null;
+  const quarantineDir = apply ? quarantineRunDir : plannedQuarantine ? path17.join(stateDir(home), "backups", "migrate", compactTimestamp(now)) : null;
   const notes = [];
   if (v3.present && items.some((item) => item.disposition === "absorb")) {
     notes.push(
@@ -12312,19 +12727,19 @@ async function runMigrate(ports, home, opts) {
   };
 }
 async function reserveRunDir(stateRoot, now) {
-  const runDir = path14.join(stateRoot, "backups", "migrate", compactTimestamp(now));
-  await fs17.mkdir(runDir, { recursive: true });
+  const runDir = path17.join(stateRoot, "backups", "migrate", compactTimestamp(now));
+  await fs20.mkdir(runDir, { recursive: true });
   return runDir;
 }
 async function persistManifest(runDir, manifest) {
-  const file = path14.join(runDir, "manifest.json");
+  const file = path17.join(runDir, "manifest.json");
   const tmp = `${file}.${randomUUID5()}.tmp`;
   try {
-    await fs17.writeFile(tmp, `${JSON.stringify(manifest, null, 2)}
+    await fs20.writeFile(tmp, `${JSON.stringify(manifest, null, 2)}
 `, "utf8");
-    await fs17.rename(tmp, file);
+    await fs20.rename(tmp, file);
   } finally {
-    await fs17.rm(tmp, { force: true }).catch(() => void 0);
+    await fs20.rm(tmp, { force: true }).catch(() => void 0);
   }
 }
 async function relocateInto(from, to) {
@@ -12332,16 +12747,16 @@ async function relocateInto(from, to) {
     throw new Error(`relocate target already exists (refusing to overwrite): ${to}`);
   }
   try {
-    await fs17.rename(from, to);
+    await fs20.rename(from, to);
   } catch (error) {
     if (error.code !== "EXDEV") throw error;
-    await fs17.cp(from, to, { recursive: true });
-    await fs17.rm(from, { recursive: true, force: true });
+    await fs20.cp(from, to, { recursive: true });
+    await fs20.rm(from, { recursive: true, force: true });
   }
 }
 async function quarantineSide(ctx, side, reason) {
   const runDir = await ctx.ensureRunDir();
-  const stored = path14.join(runDir, ctx.nextSlot(side.name));
+  const stored = path17.join(runDir, ctx.nextSlot(side.name));
   const row = {
     skill: side.name,
     kind: side.kind === "link" ? "link" : "dir",
@@ -12383,7 +12798,7 @@ function loserReason(loser, winnerHash) {
 async function applyOne(ctx) {
   const { plan } = ctx;
   const winner = plan.winner;
-  const dest = path14.join(roleSkillsDir(ctx.home, ctx.role), winner.name);
+  const dest = path17.join(roleSkillsDir(ctx.home, ctx.role), winner.name);
   const undo = [];
   const rowsStart = ctx.manifest.length;
   const rollback = async (cause) => {
@@ -12396,7 +12811,7 @@ async function applyOne(ctx) {
       }
     }
     if (ctx.manifest.length > rowsStart) {
-      const runDir = path14.dirname(ctx.manifest[rowsStart].storedPath);
+      const runDir = path17.dirname(ctx.manifest[rowsStart].storedPath);
       ctx.manifest.splice(rowsStart);
       try {
         await persistManifest(runDir, ctx.manifest);
@@ -12434,8 +12849,8 @@ async function applyOne(ctx) {
       if (await pathExists3(dest)) {
         throw new Error(`absorb target already exists (refusing to merge/overwrite): ${dest}`);
       }
-      await fs17.cp(winner.linkTarget, dest, { recursive: true });
-      undo.push(() => fs17.rm(dest, { recursive: true, force: true }));
+      await fs20.cp(winner.linkTarget, dest, { recursive: true });
+      undo.push(() => fs20.rm(dest, { recursive: true, force: true }));
       await quarantineWithUndo(winner, "absorbed-link");
     }
     for (const loser of plan.losers) {
@@ -12459,7 +12874,7 @@ async function applyOne(ctx) {
 // packages/core/src/materialize.ts
 async function readMarker(dir) {
   try {
-    const raw = JSON.parse(await fs18.readFile(path15.join(dir, "root.json"), "utf8"));
+    const raw = JSON.parse(await fs21.readFile(path18.join(dir, "root.json"), "utf8"));
     if (typeof raw === "object" && raw !== null && raw.version === 1 && typeof raw.role === "string" && typeof raw.agent === "string") {
       return raw;
     }
@@ -12469,29 +12884,29 @@ async function readMarker(dir) {
   }
 }
 function stagingFor(out) {
-  return path15.join(
-    path15.dirname(out),
-    `.${path15.basename(out)}.materialize-${randomUUID6()}.tmp`
+  return path18.join(
+    path18.dirname(out),
+    `.${path18.basename(out)}.materialize-${randomUUID6()}.tmp`
   );
 }
 async function removeMaterializedTree(link, dir) {
-  for (const entry of await fs18.readdir(dir, { withFileTypes: true })) {
-    const abs = path15.join(dir, entry.name);
-    const info = await fs18.lstat(abs);
+  for (const entry of await fs21.readdir(dir, { withFileTypes: true })) {
+    const abs = path18.join(dir, entry.name);
+    const info = await fs21.lstat(abs);
     if (info.isSymbolicLink()) {
       await link.unlink(abs);
     } else if (info.isDirectory()) {
       await removeMaterializedTree(link, abs);
-      await fs18.rmdir(abs);
+      await fs21.rmdir(abs);
     } else {
-      await fs18.unlink(abs);
+      await fs21.unlink(abs);
     }
   }
 }
 async function assertOutUsable(out, role, agent) {
   let info;
   try {
-    info = await fs18.lstat(out);
+    info = await fs21.lstat(out);
   } catch (error) {
     if (error.code === "ENOENT") return { kind: "new" };
     throw error;
@@ -12499,7 +12914,7 @@ async function assertOutUsable(out, role, agent) {
   if (!info.isDirectory()) {
     throw new NeoError("state", `--out is not a directory: ${out}`);
   }
-  const contents = await fs18.readdir(out);
+  const contents = await fs21.readdir(out);
   if (contents.length === 0) return { kind: "empty" };
   const marker = await readMarker(out);
   if (marker === null) {
@@ -12527,22 +12942,22 @@ function manifestHash(manifest) {
   return createHash2("sha256").update(canonical, "utf8").digest("hex");
 }
 async function swapOutOwned(link, out, staging) {
-  const backup = path15.join(
-    path15.dirname(out),
-    `.${path15.basename(out)}.old-${randomUUID6()}.tmp`
+  const backup = path18.join(
+    path18.dirname(out),
+    `.${path18.basename(out)}.old-${randomUUID6()}.tmp`
   );
-  await fs18.rename(out, backup);
+  await fs21.rename(out, backup);
   try {
-    await fs18.rename(staging, out);
+    await fs21.rename(staging, out);
   } catch (error) {
-    await fs18.rename(backup, out).catch(() => void 0);
+    await fs21.rename(backup, out).catch(() => void 0);
     throw new NeoError(
       "failure",
       `materialize: swap into ${out} failed (${error.message}); old root restored (or preserved at ${backup}), nothing half-written`
     );
   }
   await removeMaterializedTree(link, backup).catch(() => void 0);
-  await fs18.rm(backup, { recursive: true, force: true }).catch(() => void 0);
+  await fs21.rm(backup, { recursive: true, force: true }).catch(() => void 0);
 }
 async function materializeRoot(ports, home, homedir, opts) {
   validateRoleName(opts.role);
@@ -12558,20 +12973,20 @@ async function materializeRoot(ports, home, homedir, opts) {
     });
   } catch (error) {
     await removeMaterializedTree(ports.link, staging).catch(() => void 0);
-    await fs18.rm(staging, { recursive: true, force: true }).catch(() => void 0);
+    await fs21.rm(staging, { recursive: true, force: true }).catch(() => void 0);
     throw error;
   }
   try {
     if (outState.kind === "owned") {
       await swapOutOwned(ports.link, opts.out, staging);
     } else {
-      if (outState.kind === "empty") await fs18.rmdir(opts.out);
-      await fs18.rename(staging, opts.out);
+      if (outState.kind === "empty") await fs21.rmdir(opts.out);
+      await fs21.rename(staging, opts.out);
     }
   } catch (error) {
     if (error instanceof NeoError) throw error;
     await removeMaterializedTree(ports.link, staging).catch(() => void 0);
-    await fs18.rm(staging, { recursive: true, force: true }).catch(() => void 0);
+    await fs21.rm(staging, { recursive: true, force: true }).catch(() => void 0);
     throw new NeoError(
       "failure",
       `materialize: rename into ${opts.out} failed (${error.message}); staging cleaned, out unchanged`
@@ -12590,11 +13005,11 @@ async function materializeRoot(ports, home, homedir, opts) {
     agent: opts.agent,
     skills,
     mcp: {
-      file: report.mcp.file === null ? null : path15.relative(staging, report.mcp.file),
+      file: report.mcp.file === null ? null : path18.relative(staging, report.mcp.file),
       servers: report.mcp.servers
     },
     model: {
-      file: report.models.file === null ? null : path15.relative(staging, report.models.file),
+      file: report.models.file === null ? null : path18.relative(staging, report.models.file),
       providers: report.models.providers,
       default: report.models.default
     }
@@ -12863,16 +13278,16 @@ function modelReferencedByDefault(loaded, providerId, modelId) {
 }
 
 // packages/core/src/launch.ts
-import fs19 from "node:fs/promises";
+import fs22 from "node:fs/promises";
 import { constants as fsConstants2 } from "node:fs";
 import net from "node:net";
 import os2 from "node:os";
-import path16 from "node:path";
+import path19 from "node:path";
 var isWindows = process.platform === "win32";
 var PI_SUBCOMMANDS = /* @__PURE__ */ new Set(["install", "remove", "uninstall", "update", "list", "config", "auth", "mcp"]);
 async function isFile(target) {
   try {
-    const stat = await fs19.stat(target);
+    const stat = await fs22.stat(target);
     return stat.isFile();
   } catch (error) {
     const code = error.code;
@@ -12884,15 +13299,15 @@ async function isExecutableFile(target) {
   if (!await isFile(target)) return false;
   if (isWindows) return true;
   try {
-    await fs19.access(target, fsConstants2.X_OK);
+    await fs22.access(target, fsConstants2.X_OK);
     return true;
   } catch {
     return false;
   }
 }
 async function findOnPath(command, env, cwd) {
-  if (path16.isAbsolute(command) || command.includes("/") || command.includes("\\")) {
-    const target = path16.isAbsolute(command) ? command : path16.resolve(cwd, command);
+  if (path19.isAbsolute(command) || command.includes("/") || command.includes("\\")) {
+    const target = path19.isAbsolute(command) ? command : path19.resolve(cwd, command);
     return await isExecutableFile(target) ? target : null;
   }
   const pathVar = env.PATH ?? env.Path ?? "";
@@ -12901,14 +13316,14 @@ async function findOnPath(command, env, cwd) {
   for (const dir of pathVar.split(delimiter)) {
     if (dir.length === 0) continue;
     for (const ext of exts) {
-      const candidate = path16.join(dir, `${command}${ext.toLowerCase()}`);
+      const candidate = path19.join(dir, `${command}${ext.toLowerCase()}`);
       if (await isExecutableFile(candidate)) return candidate;
       if (isWindows) {
-        const upper = path16.join(dir, `${command}${ext.toUpperCase()}`);
+        const upper = path19.join(dir, `${command}${ext.toUpperCase()}`);
         if (await isExecutableFile(upper)) return upper;
       }
     }
-    const bare = path16.join(dir, command);
+    const bare = path19.join(dir, command);
     if (await isExecutableFile(bare)) return bare;
   }
   return null;
@@ -12916,24 +13331,24 @@ async function findOnPath(command, env, cwd) {
 async function resolveDsh(entry, homedir, env, cwd) {
   const layouts = [];
   if (isWindows) {
-    const local = env.LOCALAPPDATA ?? path16.join(homedir, "AppData", "Local");
+    const local = env.LOCALAPPDATA ?? path19.join(homedir, "AppData", "Local");
     for (const install of [
-      path16.join(local, "Programs", "DeepSeek Harness"),
-      path16.join(env.ProgramFiles ?? "C:\\Program Files", "DeepSeek Harness")
+      path19.join(local, "Programs", "DeepSeek Harness"),
+      path19.join(env.ProgramFiles ?? "C:\\Program Files", "DeepSeek Harness")
     ]) {
       layouts.push({ install, exe: "DeepSeek Harness.exe", resources: "resources" });
     }
   } else if (process.platform === "darwin") {
     layouts.push({
       install: "/Applications/DeepSeek Harness.app/Contents",
-      exe: path16.join("MacOS", "DeepSeek Harness"),
+      exe: path19.join("MacOS", "DeepSeek Harness"),
       resources: "Resources"
     });
   }
   for (const layout of layouts) {
-    const exe = path16.join(layout.install, layout.exe);
-    const resources = path16.join(layout.install, layout.resources);
-    const cli = path16.join(
+    const exe = path19.join(layout.install, layout.exe);
+    const resources = path19.join(layout.install, layout.resources);
+    const cli = path19.join(
       resources,
       "app.asar",
       "dsh",
@@ -12943,7 +13358,7 @@ async function resolveDsh(entry, homedir, env, cwd) {
       "lib",
       "cli.js"
     );
-    if (await isFile(exe) && await isFile(path16.join(resources, "app.asar"))) {
+    if (await isFile(exe) && await isFile(path19.join(resources, "app.asar"))) {
       return {
         command: exe,
         baseArgs: ["--expose-internals", cli],
@@ -13012,7 +13427,7 @@ async function planLaunch(ports, home, homedir, opts) {
   }
   const env = opts.env ?? {};
   const ephemeral = opts.ephemeral === true;
-  const root = ephemeral ? await fs19.mkdtemp(path16.join(os2.tmpdir(), `neo-run-${opts.role}-${opts.agent}-`)) : void 0;
+  const root = ephemeral ? await fs22.mkdtemp(path19.join(os2.tmpdir(), `neo-run-${opts.role}-${opts.agent}-`)) : void 0;
   const isolated = opts.isolated === true;
   const report = await convergeRoot(ports, home, homedir, {
     role: opts.role,
@@ -13027,8 +13442,8 @@ async function planLaunch(ports, home, homedir, opts) {
   const args = [...resolvedCommand.baseArgs];
   const childEnv = { ...resolvedCommand.env, [isolate.homeEnv]: report.root };
   if (isolate.agentsEnv !== void 0) {
-    const agentsHome = path16.join(report.root, "agents");
-    await fs19.mkdir(agentsHome, { recursive: true });
+    const agentsHome = path19.join(report.root, "agents");
+    await fs22.mkdir(agentsHome, { recursive: true });
     childEnv[isolate.agentsEnv] = agentsHome;
   }
   const servers = mergeMcpServers(await readRoleMcp(home, "default"), await readRoleMcp(home, opts.role));
@@ -13052,7 +13467,7 @@ async function planLaunch(ports, home, homedir, opts) {
       args.push(...isolate.isolatedFlags);
       if (entry.id === "pi") {
         for (const skill of report.desiredSkills) {
-          args.push("--skill", path16.join(report.root, isolate.skillsDir, skill));
+          args.push("--skill", path19.join(report.root, isolate.skillsDir, skill));
         }
       }
     }
@@ -13076,40 +13491,36 @@ async function planLaunch(ports, home, homedir, opts) {
 }
 async function disposeLaunch(plan) {
   if (!plan.ephemeral) return;
-  await fs19.rm(plan.root, { recursive: true, force: true });
+  await fs22.rm(plan.root, { recursive: true, force: true });
 }
 
 // packages/core/src/status.ts
-import fs20 from "node:fs/promises";
-import path17 from "node:path";
+import fs23 from "node:fs/promises";
+import path20 from "node:path";
 async function fileExists(target) {
   try {
-    await fs20.stat(target);
+    await fs23.stat(target);
     return true;
   } catch (error) {
     if (error.code === "ENOENT") return false;
     throw error;
   }
 }
-async function dirNames(dir) {
-  try {
-    const entries = await fs20.readdir(dir, { withFileTypes: true });
-    return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
-  } catch (error) {
-    if (error.code === "ENOENT") return [];
-    throw error;
+function parseNeoSource(home, target) {
+  if (isInsidePath(rolesDir(home), target)) {
+    const rel = path20.relative(rolesDir(home), target).split(path20.sep);
+    if (rel.length >= 3 && rel[1] === "skills") {
+      return { layer: "role", container: rel[0], name: rel[2] };
+    }
+    return null;
   }
-}
-function expectedRoleFor(name, activeRole, roleSkills) {
-  if (activeRole === null) return null;
-  if (activeRole !== "default" && roleSkills.has(name)) return activeRole;
-  return "default";
-}
-function parseNeoSkillSource(home, target) {
-  if (!isInsidePath(rolesDir(home), target)) return null;
-  const rel = path17.relative(rolesDir(home), target).split(path17.sep);
-  if (rel.length < 3 || rel[1] !== "skills") return null;
-  return { role: rel[0], name: rel[2] };
+  if (isInsidePath(libraryDir(home), target)) {
+    const rel = path20.relative(libraryDir(home), target).split(path20.sep);
+    if (rel.length >= 2 && rel[0] !== "" && rel[1] !== void 0) {
+      return { layer: "domain", container: rel[0], name: rel[1] };
+    }
+  }
+  return null;
 }
 function parseAgentsMdAccounting(previous) {
   if (!isRecord(previous) || previous.mounted !== true || typeof previous.file !== "string") {
@@ -13122,9 +13533,9 @@ function parseAgentsMdAccounting(previous) {
   if (typeof previous.backup === "string") entry.backup = previous.backup;
   return entry;
 }
-async function readTextOrNull(file) {
+async function readTextOrNull2(file) {
   try {
-    return await fs20.readFile(file, "utf8");
+    return await fs23.readFile(file, "utf8");
   } catch (error) {
     if (error.code === "ENOENT") return null;
     throw error;
@@ -13144,11 +13555,11 @@ async function auditAgentsMd(report, opts) {
   };
   try {
     if (planError !== void 0) {
-      finding("plan", planned?.file ?? path17.join(target.skillsDir, "(agents-md)"), planError);
+      finding("plan", planned?.file ?? path20.join(target.skillsDir, "(agents-md)"), planError);
       return "invalid opt-in";
     }
     if (planned !== void 0) {
-      const content = await readTextOrNull(planned.file);
+      const content = await readTextOrNull2(planned.file);
       const hasBlocks = content !== null && containsNeoBlocks(content);
       const accounting2 = parseAgentsMdAccounting(entry?.agentsMd);
       if (accounting2 === void 0 && !hasBlocks) {
@@ -13198,8 +13609,8 @@ async function auditAgentsMd(report, opts) {
     }
     const accounting = parseAgentsMdAccounting(entry?.agentsMd);
     if (accounting !== void 0) {
-      const file = path17.resolve(expandTilde(accounting.file, homedir));
-      const content = await readTextOrNull(file);
+      const file = path20.resolve(expandTilde(accounting.file, homedir));
+      const content = await readTextOrNull2(file);
       if (content !== null && containsNeoBlocks(content)) {
         finding(
           "residual-blocks",
@@ -13218,9 +13629,9 @@ async function auditAgentsMd(report, opts) {
     const raw = registry.find((candidate) => candidate.id === target.agent)?.agentsMd;
     if (raw !== void 0) {
       const expanded = expandTilde(raw, homedir);
-      if (path17.isAbsolute(expanded)) {
-        const file = path17.resolve(expanded);
-        const content = await readTextOrNull(file);
+      if (path20.isAbsolute(expanded)) {
+        const file = path20.resolve(expanded);
+        const content = await readTextOrNull2(file);
         if (content !== null && containsNeoBlocks(content)) {
           finding(
             "residual-blocks",
@@ -13248,6 +13659,8 @@ function notInitialized(home) {
     warnings: [],
     notes: [],
     legacyGlobalMounts: [],
+    roles: [],
+    adjudications: [],
     roots: [],
     launch: [],
     errors: [message],
@@ -13258,12 +13671,12 @@ async function checkOverrideShadow(report, opts) {
   const accounting = parseAgentsMdAccounting(opts.entry?.agentsMd);
   if (accounting === void 0) return;
   if (opts.target.agent !== "codex") return;
-  const file = opts.planned?.file ?? path17.resolve(expandTilde(accounting.file, opts.homedir));
-  if (path17.basename(file) !== "AGENTS.md") return;
-  const override = path17.join(path17.dirname(file), "AGENTS.override.md");
+  const file = opts.planned?.file ?? path20.resolve(expandTilde(accounting.file, opts.homedir));
+  if (path20.basename(file) !== "AGENTS.md") return;
+  const override = path20.join(path20.dirname(file), "AGENTS.override.md");
   let shadowed = false;
   try {
-    await fs20.lstat(override);
+    await fs23.lstat(override);
     shadowed = true;
   } catch {
     shadowed = false;
@@ -13276,7 +13689,7 @@ async function checkOverrideShadow(report, opts) {
   });
 }
 async function auditRecordedSlots(report, ports, opts) {
-  const { home, target, recorded, activeRole, roleSkills, registryDirs } = opts;
+  const { home, target, recorded, activeRole, assembly, registryDirs } = opts;
   const push = (check, kind, slot, detail) => {
     report.findings.push({
       check,
@@ -13289,7 +13702,7 @@ async function auditRecordedSlots(report, ports, opts) {
   };
   let verified = 0;
   for (const name of recorded) {
-    const slot = path17.join(target.skillsDir, name);
+    const slot = path20.join(target.skillsDir, name);
     try {
       const info = await ports.link.lstat(slot);
       if (info === null) {
@@ -13306,8 +13719,11 @@ async function auditRecordedSlots(report, ports, opts) {
         continue;
       }
       const resolution = await resolveLinkTarget(ports.link, slot);
-      const expectedRole = expectedRoleFor(name, activeRole, roleSkills);
-      const expectedPath = expectedRole === null ? null : path17.join(roleSkillsDir(home, expectedRole), name);
+      const adjudication = assembly?.resolutions.get(name);
+      const expectedPath = adjudication !== void 0 ? adjudication.winner.dir : activeRole === null ? null : (
+        // 不在装配集内(旧账):期望沿用 default 来源(与既有语义一致)
+        path20.join(roleSkillsDir(home, "default"), name)
+      );
       if (expectedPath !== null && resolution.exists && samePath(resolution.final, expectedPath)) {
         verified++;
         continue;
@@ -13321,7 +13737,7 @@ async function auditRecordedSlots(report, ports, opts) {
         );
         continue;
       }
-      const source = parseNeoSkillSource(home, resolution.final);
+      const source = parseNeoSource(home, resolution.final);
       if (source === null || source.name !== name) {
         const kind = isInsidePath(home, resolution.final) ? "unexpected-target" : registryDirs.some((dir) => isInsidePath(dir, resolution.final)) ? "mirror" : "external";
         push(
@@ -13332,7 +13748,7 @@ async function auditRecordedSlots(report, ports, opts) {
         );
         continue;
       }
-      if (expectedRole === null) {
+      if (activeRole === null) {
         push(
           "active-role",
           "off-but-mounted",
@@ -13340,11 +13756,13 @@ async function auditRecordedSlots(report, ports, opts) {
           `config.activeRole is null (off) but recorded link remains -> ${resolution.final}; run "neo off --global"`
         );
       } else {
+        const loser = adjudication?.losers.find((l) => samePath(l.dir, resolution.final));
+        const why = adjudication !== void 0 && loser !== void 0 ? `; assembly: ${layerLabel(adjudication.winner)} wins over ${layerLabel(loser)} (role > domain > default)` : "";
         push(
           "active-role",
           "role-mismatch",
           slot,
-          `activeRole "${activeRole}" expects ${expectedPath} but link points to ${resolution.final}; re-run "neo use --global"`
+          `activeRole "${activeRole}" expects ${expectedPath} but link points to ${resolution.final}${why}; re-run "neo use --global"`
         );
       }
     } catch (error) {
@@ -13368,7 +13786,7 @@ async function auditUnrecordedEntries(report, ports, opts) {
   };
   let entries;
   try {
-    entries = (await fs20.readdir(target.skillsDir)).sort();
+    entries = (await fs23.readdir(target.skillsDir)).sort();
   } catch (error) {
     if (error.code !== "ENOENT") {
       report.errors.push(`cannot scan target dir ${target.skillsDir}: ${error.message}`);
@@ -13378,7 +13796,7 @@ async function auditUnrecordedEntries(report, ports, opts) {
   }
   for (const name of entries) {
     if (recordedSet.has(name)) continue;
-    const slot = path17.join(target.skillsDir, name);
+    const slot = path20.join(target.skillsDir, name);
     try {
       const info = await ports.link.lstat(slot);
       if (info === null) continue;
@@ -13416,11 +13834,8 @@ async function statusAudit(ports, home, opts) {
   const agentsMdPlan = planAgentsMdTargets(targets, registry, opts.homedir);
   const desiredBlocks = await desiredPromptBlocks(home, config.activeRole);
   const activeRole = config.activeRole;
-  const roleSkills = new Set(
-    activeRole === null ? [] : await dirNames(roleSkillsDir(home, activeRole))
-  );
-  const defaultSkills = new Set(await dirNames(roleSkillsDir(home, "default")));
-  const desiredSkills2 = activeRole === null ? /* @__PURE__ */ new Set() : /* @__PURE__ */ new Set([...defaultSkills, ...activeRole === "default" ? [] : roleSkills]);
+  const assembly = activeRole === null ? null : await resolveRoleAssembly(home, activeRole);
+  const desiredSkills2 = new Set(assembly?.resolutions.keys() ?? []);
   const report = {
     initialized: true,
     home,
@@ -13430,6 +13845,19 @@ async function statusAudit(ports, home, opts) {
     warnings: [],
     notes: [],
     legacyGlobalMounts: [],
+    roles: await Promise.all(
+      (await listRoles(home, activeRole)).map(async (role) => ({
+        ...role,
+        domains: await readRoleDomains(home, role.name),
+        dirty: false
+      }))
+    ),
+    adjudications: (assembly ? [...assembly.resolutions.values()] : []).filter((resolution) => resolution.losers.length > 0).sort((a2, b) => a2.name < b.name ? -1 : a2.name > b.name ? 1 : 0).map((resolution) => ({
+      skill: resolution.name,
+      role: assembly?.role ?? "",
+      winner: layerLabel(resolution.winner),
+      losers: resolution.losers.map(layerLabel)
+    })),
     roots: [],
     launch: [],
     errors: [],
@@ -13443,7 +13871,7 @@ async function statusAudit(ports, home, opts) {
       target,
       recorded,
       activeRole,
-      roleSkills,
+      assembly,
       registryDirs
     });
     await auditUnrecordedEntries(report, ports, { home, target, recorded, registryDirs });
@@ -13491,8 +13919,8 @@ async function statusAudit(ports, home, opts) {
       );
     }
   }
-  const legacyHome = path17.join(opts.homedir, "neo");
-  if (!samePath(home, legacyHome) && await fileExists(path17.join(legacyHome, "config.yaml"))) {
+  const legacyHome = path20.join(opts.homedir, "neo");
+  if (!samePath(home, legacyHome) && await fileExists(path20.join(legacyHome, "config.yaml"))) {
     report.notes.push(
       "legacy neo home found at ~/neo; move it to ~/.neo (or set NEO_HOME=~/neo to keep using it)"
     );
@@ -13522,23 +13950,36 @@ async function statusAudit(ports, home, opts) {
       models: isolate?.models?.format ?? "none"
     };
   });
+  const dirtyRoles = /* @__PURE__ */ new Set();
+  for (const role of await listLockedRoles(home)) {
+    try {
+      const lock = await readRoleLock(home, role);
+      if (isLockDirty(lock)) {
+        dirtyRoles.add(role);
+        report.findings.push({
+          check: "lock-dirty",
+          kind: "assembly-changed",
+          path: roleLockPath(home, role),
+          detail: `role "${role}" assembly changed since last convergence; run "neo update" or "neo use --global" to re-converge and clear`,
+          agent: "",
+          dir: ""
+        });
+      }
+    } catch (error) {
+      report.errors.push(`cannot audit lock for role "${role}": ${error.message}`);
+    }
+  }
+  for (const view of report.roles) {
+    if (dirtyRoles.has(view.name)) view.dirty = true;
+  }
   report.ok = report.initialized && report.findings.length === 0 && report.errors.length === 0;
   return report;
 }
 
 // packages/core/src/update.ts
-import fs21 from "node:fs/promises";
+import fs24 from "node:fs/promises";
 import os3 from "node:os";
-import path18 from "node:path";
-async function listLockedRoles(home) {
-  try {
-    const entries = await fs21.readdir(locksDir(home));
-    return entries.filter((name) => name.endsWith(".yaml")).map((name) => name.slice(0, -".yaml".length)).filter((role) => ROLE_NAME_PATTERN.test(role)).sort();
-  } catch (error) {
-    if (error.code === "ENOENT") return [];
-    throw error;
-  }
-}
+import path21 from "node:path";
 function groupLockSources(skills) {
   const groups = /* @__PURE__ */ new Map();
   const orphans = [];
@@ -13576,7 +14017,7 @@ async function classifyItems(home, role, group, stagedNames, upstreamLock) {
     }
     const meta = upstreamLock?.skills?.[name];
     const newHash = typeof meta?.computedHash === "string" ? meta.computedHash : "";
-    const dirExists = await pathExists(path18.join(roleSkillsDir(home, role), name));
+    const dirExists = await pathExists(path21.join(roleSkillsDir(home, role), name));
     if (newHash !== "" && newHash === entry.hash && dirExists) {
       items.push({ name, state: "unchanged", oldHash: entry.hash, newHash });
     } else {
@@ -13671,7 +14112,7 @@ async function updateOneRole(ports, home, role, opts, now) {
       outcome.sources.push(sourceOutcome);
       continue;
     }
-    const staging = await fs21.mkdtemp(path18.join(ports.stagingRoot ?? os3.tmpdir(), "neo-staging-"));
+    const staging = await fs24.mkdtemp(path21.join(ports.stagingRoot ?? os3.tmpdir(), "neo-staging-"));
     try {
       const listed = await ports.exec.run(
         buildUpstreamAddArgs({ skillsRef: opts.skillsRef, source: group.source, listOnly: true }),
@@ -13749,7 +14190,7 @@ async function updateOneRole(ports, home, role, opts, now) {
               );
             }
             const replaced = await relocateSkill(
-              path18.join(staging, ".agents", "skills", item.name),
+              path21.join(staging, ".agents", "skills", item.name),
               home,
               role,
               item.name,
@@ -13769,20 +14210,25 @@ async function updateOneRole(ports, home, role, opts, now) {
         }
       }
     } finally {
-      await fs21.rm(staging, { recursive: true, force: true }).catch(() => void 0);
+      await fs24.rm(staging, { recursive: true, force: true }).catch(() => void 0);
     }
     outcome.sources.push(sourceOutcome);
   }
-  if (!opts.dryRun && outcome.applied.length > 0) {
-    const merged = { ...lock, version: 1, skills };
-    await writeRoleLock(home, role, merged);
+  if (!opts.dryRun) {
+    const cleanPass = outcome.sources.every((source) => source.error === void 0) && outcome.failed.length === 0;
+    const clearDirty = isLockDirty(lock) && cleanPass;
+    if (outcome.applied.length > 0 || clearDirty) {
+      const merged = { ...lock, version: 1, skills };
+      if (clearDirty) delete merged.dirty;
+      await writeRoleLock(home, role, merged);
+    }
   }
   return outcome;
 }
 
 // packages/core/src/remove.ts
-import fs22 from "node:fs/promises";
-import path19 from "node:path";
+import fs25 from "node:fs/promises";
+import path22 from "node:path";
 function normalizeSkills(skills) {
   return [...new Set(skills)];
 }
@@ -13793,7 +14239,7 @@ async function planRemove(home, opts) {
   const items = [];
   const missing = [];
   for (const name of normalizeSkills(opts.skills)) {
-    const hasDir = await pathExists(path19.join(roleSkillsDir(home, opts.role), name));
+    const hasDir = await pathExists(path22.join(roleSkillsDir(home, opts.role), name));
     const hasLockEntry = lock?.skills[name] !== void 0;
     if (hasDir || hasLockEntry) items.push({ name, hasDir, hasLockEntry });
     else missing.push(name);
@@ -13808,7 +14254,7 @@ async function removeSkills(ports, home, opts) {
   const skills = { ...lock?.skills ?? {} };
   let lockDirty = false;
   for (const name of normalizeSkills(opts.skills)) {
-    const dir = path19.join(roleSkillsDir(home, opts.role), name);
+    const dir = path22.join(roleSkillsDir(home, opts.role), name);
     const hasDir = await pathExists(dir);
     const hasLockEntry = Object.prototype.hasOwnProperty.call(skills, name);
     if (!hasDir && !hasLockEntry) {
@@ -13816,7 +14262,7 @@ async function removeSkills(ports, home, opts) {
       continue;
     }
     try {
-      if (hasDir) await fs22.rm(dir, { recursive: true, force: true });
+      if (hasDir) await fs25.rm(dir, { recursive: true, force: true });
     } catch (error) {
       report.failed.push({ name, error: error.message });
       continue;
@@ -13847,12 +14293,12 @@ async function removeSkills(ports, home, opts) {
 }
 
 // packages/core/src/project.ts
-var import_yaml6 = __toESM(require_dist(), 1);
+var import_yaml7 = __toESM(require_dist(), 1);
 import { randomUUID as randomUUID7 } from "node:crypto";
-import fs23 from "node:fs/promises";
-import path20 from "node:path";
+import fs26 from "node:fs/promises";
+import path23 from "node:path";
 function projectManifestPath(root) {
-  return path20.join(root, ".agents", "neo.yaml");
+  return path23.join(root, ".agents", "neo.yaml");
 }
 function invalid6(message) {
   return new NeoError("state", `.agents/neo.yaml: ${message}`);
@@ -13861,14 +14307,14 @@ async function readProjectManifest(root) {
   const file = projectManifestPath(root);
   let text2;
   try {
-    text2 = await fs23.readFile(file, "utf8");
+    text2 = await fs26.readFile(file, "utf8");
   } catch (error) {
     if (error.code === "ENOENT") return null;
     throw error;
   }
   let raw;
   try {
-    raw = (0, import_yaml6.parse)(text2);
+    raw = (0, import_yaml7.parse)(text2);
   } catch (error) {
     throw invalid6(`not valid YAML (${error.message})`);
   }
@@ -13947,26 +14393,26 @@ async function writeProjectManifest(root, loaded) {
     skills: sortedSkills
   };
   const file = projectManifestPath(root);
-  await fs23.mkdir(path20.dirname(file), { recursive: true });
-  const tmp = path20.join(path20.dirname(file), `.${path20.basename(file)}.${randomUUID7()}.tmp`);
+  await fs26.mkdir(path23.dirname(file), { recursive: true });
+  const tmp = path23.join(path23.dirname(file), `.${path23.basename(file)}.${randomUUID7()}.tmp`);
   try {
-    await fs23.writeFile(tmp, (0, import_yaml6.stringify)(out), "utf8");
-    await fs23.rename(tmp, file);
+    await fs26.writeFile(tmp, (0, import_yaml7.stringify)(out), "utf8");
+    await fs26.rename(tmp, file);
   } finally {
-    await fs23.rm(tmp, { recursive: true, force: true }).catch(() => void 0);
+    await fs26.rm(tmp, { recursive: true, force: true }).catch(() => void 0);
   }
 }
 async function discoverProjectManifest(cwd) {
-  let current = path20.resolve(cwd);
+  let current = path23.resolve(cwd);
   for (; ; ) {
     const file = projectManifestPath(current);
     try {
-      const stat = await fs23.stat(file);
+      const stat = await fs26.stat(file);
       if (stat.isFile()) return { root: current, file };
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
-    const parent = path20.dirname(current);
+    const parent = path23.dirname(current);
     if (parent === current) return null;
     current = parent;
   }
@@ -13993,17 +14439,17 @@ async function desiredSet(home, roles) {
         `role "${role}" is not installed in this NEO_HOME; add it first (run: neo add <source> -s <skill> --role ${role}); project binding never absorbs skills from the project`
       );
     }
-    const names = await skillDirNames2(roleSkillsDir(home, role));
+    const names = await skillDirNames(roleSkillsDir(home, role));
     for (const name of names) {
-      const sourcePath = path20.join(roleSkillsDir(home, role), name);
+      const sourcePath = path23.join(roleSkillsDir(home, role), name);
       desired.set(name, { name, sourceRole: role, sourcePath, sourceHash: await computeSkillFolderHash(sourcePath) });
     }
   }
   return desired;
 }
-async function skillDirNames2(dir) {
+async function skillDirNames(dir) {
   try {
-    const entries = await fs23.readdir(dir, { withFileTypes: true });
+    const entries = await fs26.readdir(dir, { withFileTypes: true });
     return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
   } catch (error) {
     if (error.code === "ENOENT") return [];
@@ -14049,10 +14495,10 @@ async function projectShadowingWarnings(home, homedir, skills) {
     const entry = registry.find((candidate) => candidate.id === agentId);
     if (entry === void 0) continue;
     const expanded = expandTilde(entry.skillsDir, homedir);
-    if (!path20.isAbsolute(expanded)) continue;
-    const dir = path20.resolve(expanded);
+    if (!path23.isAbsolute(expanded)) continue;
+    const dir = path23.resolve(expanded);
     for (const skill of skills) {
-      if (!await pathExists(path20.join(dir, skill))) continue;
+      if (!await pathExists(path23.join(dir, skill))) continue;
       warnings.push(
         `skill "${skill}" in this project is shadowed by the global layer under ${agentId} (user level wins over workspace); fix: unmount it globally or remove it from the project binding`
       );
@@ -14071,7 +14517,7 @@ async function desiredProjectBlocks(home, roles) {
   for (const role of roles) {
     let content = null;
     try {
-      content = await fs23.readFile(roleAgentsMd(home, role), "utf8");
+      content = await fs26.readFile(roleAgentsMd(home, role), "utf8");
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
@@ -14085,9 +14531,9 @@ async function desiredProjectBlocks(home, roles) {
 var writeTextAtomic = (file, content) => writeFileAtomic(file, content, { defaultMode: 420 });
 async function convergeProjectAgentsMd(root, home, roles, opts) {
   const desired = opts.agentsMd ? await desiredProjectBlocks(home, roles) : [];
-  const targets = [path20.join(root, "AGENTS.md")];
+  const targets = [path23.join(root, "AGENTS.md")];
   for (const rel of PROJECT_EXTRA_MD) {
-    const file = path20.join(root, ...rel.split("/"));
+    const file = path23.join(root, ...rel.split("/"));
     if (await pathExists(file)) targets.push(file);
   }
   const actions = [];
@@ -14096,7 +14542,7 @@ async function convergeProjectAgentsMd(root, home, roles, opts) {
     try {
       let content = null;
       try {
-        content = await fs23.readFile(file, "utf8");
+        content = await fs26.readFile(file, "utf8");
       } catch (error) {
         if (error.code !== "ENOENT") throw error;
       }
@@ -14143,9 +14589,9 @@ async function syncProject(ports, home, homedir, opts) {
   const notes = [];
   const errors = [];
   const slots = (skill) => MATERIALIZE_DIRS.map((base) => {
-    const dir = path20.join(loaded.root, ...base.split("/"));
-    const slot = path20.join(dir, skill);
-    if (path20.dirname(slot) !== dir || !isInsidePath(dir, slot)) {
+    const dir = path23.join(loaded.root, ...base.split("/"));
+    const slot = path23.join(dir, skill);
+    if (path23.dirname(slot) !== dir || !isInsidePath(dir, slot)) {
       throw new NeoError(
         "state",
         `refusing to touch ${JSON.stringify(skill)} outside materialize dir ${dir}`
@@ -14317,7 +14763,7 @@ async function useProject(ports, home, homedir, opts) {
       },
       raw: {},
       file: projectManifestPath(opts.cwd),
-      root: path20.resolve(opts.cwd)
+      root: path23.resolve(opts.cwd)
     };
     await writeProjectManifest(loaded.root, loaded);
     created = true;
@@ -14385,7 +14831,7 @@ async function offProject(ports, home, homedir, opts) {
   else await writeProjectManifest(loaded.root, loaded);
   const sync = await syncProject(ports, home, homedir, { root: loaded.root, apply: true, loaded });
   if (cleared && sync.ok) {
-    await fs23.rm(loaded.file, { force: true });
+    await fs26.rm(loaded.file, { force: true });
   } else if (cleared) {
     sync.warnings.push(
       `project manifest kept at ${loaded.file}: sync did not fully succeed; fix the skipped items and rerun "neo off --project"`
@@ -14399,7 +14845,7 @@ async function removeSlots(ports, slots, facts) {
     try {
       const info = await ports.link.lstat(slot);
       if (info !== null && info.symlink) await ports.link.unlink(slot);
-      else await fs23.rm(slot, { recursive: true, force: true });
+      else await fs26.rm(slot, { recursive: true, force: true });
     } catch (error) {
       return `remove failed at ${slot}: ${error.message}`;
     }
@@ -14413,17 +14859,17 @@ async function convergeSlots(ports, mode, slots, facts, sourcePath, sourceHash) 
     const fact = facts[index];
     if (slotAligned(mode, fact, sourcePath, sourceHash)) continue;
     try {
-      await fs23.mkdir(path20.dirname(slot), { recursive: true });
+      await fs26.mkdir(path23.dirname(slot), { recursive: true });
       if (fact.exists) {
         const info = await ports.link.lstat(slot);
         if (info !== null && info.symlink) await ports.link.unlink(slot);
-        else await fs23.rm(slot, { recursive: true, force: true });
+        else await fs26.rm(slot, { recursive: true, force: true });
       }
       if (await pathExists(slot)) {
         return `materialize target still occupied (refusing to overwrite): ${slot}`;
       }
       if (mode === "link") await ports.link.linkDir(sourcePath, slot);
-      else await fs23.cp(sourcePath, slot, { recursive: true });
+      else await fs26.cp(sourcePath, slot, { recursive: true });
     } catch (error) {
       return `materialize failed at ${slot}: ${error.message}`;
     }
@@ -14434,7 +14880,7 @@ async function gitignoreHint(root) {
   const wanted = [".agents/skills", ".claude/skills"];
   let text2 = null;
   try {
-    text2 = await fs23.readFile(path20.join(root, ".gitignore"), "utf8");
+    text2 = await fs26.readFile(path23.join(root, ".gitignore"), "utf8");
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
@@ -14448,13 +14894,13 @@ async function gitignoreHint(root) {
 }
 
 // packages/core/src/detect.ts
-import path21 from "node:path";
+import path24 from "node:path";
 async function detectAgent(entry, homedir, port) {
   const signals = [];
   if (entry.detect !== void 0) {
     if (entry.detect.dir !== void 0) {
       const expanded = expandTilde(entry.detect.dir, homedir);
-      if (path21.isAbsolute(expanded) && await port.exists(expanded)) signals.push("dir");
+      if (path24.isAbsolute(expanded) && await port.exists(expanded)) signals.push("dir");
     }
     if (entry.detect.binary !== void 0 && await port.binaryOnPath(entry.detect.binary)) {
       signals.push("binary");
@@ -14467,28 +14913,28 @@ async function detectAgents(entries, homedir, port) {
 }
 
 // packages/core/src/detect-node.ts
-import fs24 from "node:fs/promises";
+import fs27 from "node:fs/promises";
 import { constants as fsConstants3 } from "node:fs";
-import path22 from "node:path";
+import path25 from "node:path";
 function nodeDetectPort() {
   return {
     async exists(absPath) {
       try {
-        await fs24.access(absPath);
+        await fs27.access(absPath);
         return true;
       } catch {
         return false;
       }
     },
     async binaryOnPath(binary) {
-      const dirs = (process.env.PATH ?? "").split(path22.delimiter).filter((dir) => dir.length > 0);
+      const dirs = (process.env.PATH ?? "").split(path25.delimiter).filter((dir) => dir.length > 0);
       const candidates = process.platform === "win32" ? [binary, `${binary}.exe`, `${binary}.cmd`, `${binary}.bat`] : [binary];
       for (const dir of dirs) {
         for (const candidate of candidates) {
           try {
-            await fs24.access(path22.join(dir, candidate), fsConstants3.F_OK);
+            await fs27.access(path25.join(dir, candidate), fsConstants3.F_OK);
             if (process.platform !== "win32") {
-              await fs24.access(path22.join(dir, candidate), fsConstants3.X_OK);
+              await fs27.access(path25.join(dir, candidate), fsConstants3.X_OK);
             }
             return true;
           } catch {
@@ -15568,19 +16014,31 @@ var COMMANDS = [
     flags: []
   },
   {
+    name: "role",
+    summary: "write role assembly: AGENTS.md body, role.yaml domains, mcp.yaml (create only writes the stub)",
+    usage: ["neo role set <role> [--agents-md <file>|'-'] [--domains a,b] [--mcp <file>|'-'] [--dry-run] [--json]"],
+    flags: [
+      "--agents-md <file>   replace roles/<role>/AGENTS.md body ('-' = stdin)",
+      "--domains a,b        overwrite role.yaml domains (empty value clears the list, keeps the file)",
+      "--mcp <file>         replace mcp.yaml ('-' = stdin); credential-looking values must be env:VAR refs",
+      "--dry-run            print unified diffs; write nothing"
+    ]
+  },
+  {
     name: "list",
     aliases: ["ls"],
-    summary: "list roles (default), skills, or known agents (registry + targets + detection)",
-    usage: ["neo list [roles|skills|agents] [--role <name>] [--json]"],
+    summary: "list roles (default), skills, library domains, or known agents (registry + targets + detection)",
+    usage: ["neo list [roles|skills|domains|agents] [--role <name>] [--json]"],
     flags: ['--role <name>  filter (applies to "list skills" only)']
   },
   {
     name: "add",
-    summary: "install skills from a single source into a role",
-    usage: ["neo add <source> --role <name> [--skill|-s <skill>\u2026|*] [-l]"],
+    summary: "install skills from a single source into a role, or into a library domain (--domain)",
+    usage: ["neo add <source> --role <name> [--skill|-s <skill>\u2026|*] [-l]", "neo add <source> --domain <name> [--skill|-s <skill>\u2026|*] [-l]"],
     flags: [
       "--skill, -s <skill>  skill to install (repeatable; comma-separated; * = all)",
-      "--role <name>        target role (required; no implicit default \u2014 TTY shows a picker)",
+      "--role <name>        target role (no implicit default \u2014 TTY shows a picker; mutually exclusive with --domain)",
+      "--domain <name>      target library domain: skills land in library/<name> (no role lock; mutually exclusive with --role)",
       "-l                   list source skills and exit (upstream text, passed through)",
       '                     (without --skill/-s: TTY multi-select with an "(all N skills)" option,',
       "                      a = all / i = invert; non-TTY requires a flag)"
@@ -15655,7 +16113,7 @@ var COMMANDS = [
     summary: "export a role\xD7agent launch root (resources only) to an external dir; never launches",
     usage: ["neo materialize --role <name> --agent <agent-id> --out <dir> [--json]"],
     flags: [
-      "--role <name>   role to assemble (required; default \u222A role, role wins same names)",
+      "--role <name>   role to assemble (required; default \u222A domain \u222A role, role > domain > default)",
       "--agent <id>    launchable agent id (required; see: neo list agents)",
       "--out <dir>     external dir owned by this command (staged + swapped in; foreign content refused)"
     ]
@@ -15682,7 +16140,7 @@ var COMMANDS = [
     flags: MODEL_FLAGS_HELP
   }
 ];
-var JSON_MATRIX = /* @__PURE__ */ new Set(["status", "list", "migrate", "sync", "update", "model", "materialize"]);
+var JSON_MATRIX = /* @__PURE__ */ new Set(["status", "list", "role", "migrate", "sync", "update", "model", "materialize"]);
 function resolveCommand2(name) {
   return COMMANDS.find(
     (spec) => spec.name === name || spec.aliases?.includes(name)
@@ -15718,7 +16176,7 @@ async function printFullHelp(io, deps) {
     "  --version   print version and exit",
     "  --help      show this help (per command: neo <command> --help)",
     "  --yes       assume yes (v1: only remove consumes it; elsewhere a no-op)",
-    "  --json      machine output (only: status, list, update --dry-run, migrate, sync, materialize)",
+    "  --json      machine output (only: status, list, role, update --dry-run, migrate, sync, materialize)",
     "",
     "aliases: ls \u2192 list \xB7 rm \u2192 remove",
     `home: ${helpHome(deps)} (override with NEO_HOME)`
@@ -15807,6 +16265,8 @@ async function dispatch(argv, io, deps) {
       return cmdMigrate(rest, io, deps);
     case "create":
       return cmdCreate(rest, io, deps);
+    case "role":
+      return cmdRole(rest, io, deps);
     case "list":
       return cmdList(rest, io, deps);
     case "add":
@@ -15852,9 +16312,9 @@ async function cmdInit(args, io, deps) {
   const detected = detections.filter((detection) => detection.signals.length > 0);
   io.stdout(`neo init: ${home}
 `);
-  if (home !== path23.join(deps.homedir, "neo")) {
+  if (home !== path26.join(deps.homedir, "neo")) {
     try {
-      await fs25.stat(path23.join(deps.homedir, "neo", "config.yaml"));
+      await fs28.stat(path26.join(deps.homedir, "neo", "config.yaml"));
       io.stderr(
         "hint: legacy home ~/neo still exists; this version uses ~/.neo \u2014 move it (mv ~/neo ~/.neo) or set NEO_HOME=~/neo\n"
       );
@@ -16041,11 +16501,16 @@ async function resolveRoleTarget(io, deps, roleFlag, action, allowCreate) {
 }
 async function cmdAdd(args, io, deps) {
   const parsed = parseArgs(args, {
-    valued: /* @__PURE__ */ new Set(["s", "skill", "role"]),
+    valued: /* @__PURE__ */ new Set(["s", "skill", "role", "domain"]),
     boolean: boolFlags("l")
   });
-  const source = expectSinglePositional(parsed, "add <source> --role <name>");
+  const source = expectSinglePositional(parsed, "add <source> --role <name> | --domain <name>");
   const listRequested = parsed.bools.has("l");
+  const roleFlag = lastFlag(parsed, "role");
+  const domainFlag = lastFlag(parsed, "domain");
+  if (roleFlag !== void 0 && domainFlag !== void 0) {
+    throw new NeoError("usage", "add: --role and --domain are mutually exclusive (target either a role or a library domain)");
+  }
   let skills = [...parsed.flags.get("s") ?? [], ...parsed.flags.get("skill") ?? []].flatMap((value) => value.split(",")).map((s) => s.trim()).filter((s) => s.length > 0);
   if (skills.length > 0 && listRequested) {
     throw new NeoError("usage", "add: -l cannot be combined with --skill/-s");
@@ -16066,7 +16531,7 @@ async function cmdAdd(args, io, deps) {
     if (result.stderr) io.stderr(result.stderr);
     return result.code === 0 ? 0 : 1;
   }
-  const role = await resolveRoleTarget(io, deps, lastFlag(parsed, "role"), "add", true);
+  const role = domainFlag !== void 0 ? void 0 : await resolveRoleTarget(io, deps, roleFlag, "add", true);
   if (skills.length === 0) {
     const isTty = interactiveTty(deps);
     if (!isTty) {
@@ -16093,9 +16558,9 @@ async function cmdAdd(args, io, deps) {
     if (options.length === 1 && only !== void 0) {
       skills = [only];
     } else {
-      const installed = Object.keys((await readRoleLock(home, role))?.skills ?? {});
+      const installed = role !== void 0 ? Object.keys((await readRoleLock(home, role))?.skills ?? {}) : await listDomainSkillNames(home, domainFlag);
       const select2 = deps.selectSkills ?? promptSkillSelection;
-      const picked = await select2(options, { role, installed });
+      const picked = await select2(options, { role: domainFlag ?? role, installed });
       if (picked.length === 0) {
         io.stdout("nothing selected; no skills installed\n");
         return 0;
@@ -16104,15 +16569,21 @@ async function cmdAdd(args, io, deps) {
     }
   }
   const selection = skills.length === 1 && skills[0] === "*" ? { kind: "all" } : { kind: "list", names: skills };
-  const report = await addSource(ports, home, {
+  const report = domainFlag !== void 0 ? await addSourceToDomain(ports, home, {
+    source,
+    skills: selection,
+    domain: domainFlag,
+    skillsRef: config.skillsRef
+  }) : await addSource(ports, home, {
     source,
     skills: selection,
     role,
     skillsRef: config.skillsRef
   });
+  const where = domainFlag !== void 0 ? `into domain ${domainFlag}` : `into role ${role}`;
   for (const skill of report.installed) {
     const verb = skill.replaced ? "replaced" : "installed";
-    io.stdout(`${verb} ${skill.name} (hash ${skill.hash}) into role ${report.role}
+    io.stdout(`${verb} ${skill.name} (hash ${skill.hash}) ${where}
 `);
   }
   if (report.upstreamError) io.stderr(`${report.upstreamError}
@@ -16127,6 +16598,13 @@ async function cmdAdd(args, io, deps) {
   }
   return report.failed.length === 0 && !report.upstreamError ? 0 : 1;
 }
+async function listDomainSkillNames(home, domain) {
+  try {
+    return await fs28.readdir(path26.join(libraryDir(home), domain));
+  } catch {
+    return [];
+  }
+}
 async function cmdCreate(args, io, deps) {
   const parsed = parseArgs(args, { valued: /* @__PURE__ */ new Set(), boolean: boolFlags() });
   const name = expectSinglePositional(parsed, "create <name>");
@@ -16139,11 +16617,114 @@ next: make it the default with "neo use ${name}", or launch with "neo run <agent
   );
   return 0;
 }
+async function cmdRole(args, io, deps) {
+  const cleaned = args.filter((arg) => arg !== "--yes");
+  const sub = cleaned[0];
+  if (sub !== "set") {
+    throw new NeoError(
+      "usage",
+      `role: subcommand required (expected "set": neo role set <role> [--agents-md <file>|'-'] [--domains a,b] [--mcp <file>|'-'] [--dry-run] [--json])`
+    );
+  }
+  return cmdRoleSet(cleaned.slice(1), io, deps);
+}
+function absorbStdinDash(args) {
+  const out = [];
+  for (let i2 = 0; i2 < args.length; i2++) {
+    const arg = args[i2];
+    if ((arg === "--agents-md" || arg === "--mcp") && args[i2 + 1] === "-") {
+      out.push(`${arg}=-`);
+      i2++;
+      continue;
+    }
+    out.push(arg);
+  }
+  return out;
+}
+async function readStdinAll() {
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks).toString("utf8");
+}
+async function cmdRoleSet(args, io, deps) {
+  const parsed = parseArgs(absorbStdinDash(args), {
+    valued: /* @__PURE__ */ new Set(["agents-md", "domains", "mcp"]),
+    boolean: boolFlags("dry-run", "json")
+  });
+  const role = expectSinglePositional(parsed, "role set <role> [--agents-md <file>|'-'] [--domains a,b] [--mcp <file>|'-']");
+  const agentsMdFlag = lastFlag(parsed, "agents-md");
+  const mcpFlag = lastFlag(parsed, "mcp");
+  const domainsFlag = parsed.flags.has("domains") ? lastFlag(parsed, "domains") : void 0;
+  if (agentsMdFlag === void 0 && mcpFlag === void 0 && domainsFlag === void 0) {
+    throw new NeoError(
+      "usage",
+      "role set: at least one of --agents-md, --domains, --mcp is required (see: neo role set --help)"
+    );
+  }
+  const cwd = deps.cwd ?? process.cwd();
+  const readInputText = async (value, flag) => {
+    if (value === "-") return (deps.readStdin ?? readStdinAll)();
+    try {
+      return await fs28.readFile(path26.resolve(cwd, value), "utf8");
+    } catch (error) {
+      throw new NeoError(
+        "failure",
+        `role set: cannot read ${flag} file ${JSON.stringify(value)}: ${error.message}`
+      );
+    }
+  };
+  const input = { role };
+  if (agentsMdFlag !== void 0) input.agentsMd = await readInputText(agentsMdFlag, "--agents-md");
+  if (mcpFlag !== void 0) input.mcp = await readInputText(mcpFlag, "--mcp");
+  if (domainsFlag !== void 0) {
+    input.domains = domainsFlag.split(",").map((domain) => domain.trim()).filter((domain) => domain.length > 0);
+  }
+  if (parsed.bools.has("dry-run")) input.dryRun = true;
+  const result = await setRoleAssembly(resolveHome(deps), input);
+  if (parsed.bools.has("json")) {
+    io.stdout(
+      `${JSON.stringify(
+        {
+          ok: true,
+          role: result.role,
+          dryRun: result.dryRun,
+          changed: Object.entries(result.changed).filter(([, on]) => on).map(([key]) => key === "agentsMd" ? "agents-md" : key),
+          dirty: result.dirty,
+          files: result.files
+        },
+        null,
+        2
+      )}
+`
+    );
+    return 0;
+  }
+  const headline = `role set ${result.role}${result.dryRun ? " (dry-run)" : ""}`;
+  if (result.files.every((file) => file.change === "unchanged")) {
+    io.stdout(`${headline}: no change
+`);
+    return 0;
+  }
+  io.stdout(`${headline}:
+`);
+  for (const file of result.files) {
+    io.stdout(`  ${file.change} ${file.file}
+`);
+    if (result.dryRun && file.diff.length > 0) io.stdout(file.diff);
+  }
+  if (result.dryRun) {
+    io.stdout(`dry-run: nothing written${result.dirty ? " (lock would be marked dirty)" : ""}
+`);
+  } else if (result.dirty) {
+    io.stdout('lock marked dirty: run "neo update" or re-converge ("neo use <role> --global") to clear\n');
+  }
+  return 0;
+}
 async function cmdList(args, io, deps) {
   const parsed = parseArgs(args, { valued: /* @__PURE__ */ new Set(["role"]), boolean: boolFlags("json") });
   const sub = parsed.positionals[0] ?? "roles";
-  if (sub !== "roles" && sub !== "skills" && sub !== "agents") {
-    throw new NeoError("usage", `list: unknown subcommand "${sub}" (expected roles|skills|agents)`);
+  if (sub !== "roles" && sub !== "skills" && sub !== "domains" && sub !== "agents") {
+    throw new NeoError("usage", `list: unknown subcommand "${sub}" (expected roles|skills|domains|agents)`);
   }
   if (parsed.positionals.length > 1) throw new NeoError("usage", "list: too many arguments");
   const roleFlag = lastFlag(parsed, "role");
@@ -16160,6 +16741,19 @@ async function cmdList(args, io, deps) {
     } else {
       for (const role of roles) {
         io.stdout(`${role.active ? "*" : " "} ${role.name} (${role.skills} skills)
+`);
+      }
+    }
+    return 0;
+  }
+  if (sub === "domains") {
+    const domains = await listDomains(home);
+    if (parsed.bools.has("json")) {
+      io.stdout(`${JSON.stringify({ domains }, null, 2)}
+`);
+    } else {
+      for (const domain of domains) {
+        io.stdout(`  ${domain.name} (${domain.skills} skills)
 `);
       }
     }
@@ -16483,16 +17077,16 @@ var isWindowsShim = (command) => process.platform === "win32" && /\.(cmd|bat)$/i
 async function resolveShimTarget(shim) {
   let text2;
   try {
-    text2 = await fs25.readFile(shim, "utf8");
+    text2 = await fs28.readFile(shim, "utf8");
   } catch {
     return null;
   }
   const match = /%dp0%[\\/](node_modules[\\/][^"%\r\n]+?\.(?:js|exe))/i.exec(text2);
   const relative = match?.[1];
   if (relative === void 0) return null;
-  const target = path23.join(path23.dirname(shim), relative);
+  const target = path26.join(path26.dirname(shim), relative);
   try {
-    const stat = await fs25.stat(target);
+    const stat = await fs28.stat(target);
     if (!stat.isFile()) return null;
   } catch {
     return null;
@@ -16562,7 +17156,7 @@ async function cmdMaterialize(args, io, deps) {
     { link: nodeLinkPort(), now: deps.now },
     resolveHome(deps),
     deps.homedir,
-    { role, agent, out: path23.resolve(cwd, out), env: deps.env }
+    { role, agent, out: path26.resolve(cwd, out), env: deps.env }
   );
   if (parsed.bools.has("json")) {
     io.stdout(`${JSON.stringify(manifest, null, 2)}
@@ -16748,7 +17342,7 @@ function printMigrateReport(io, report) {
     switch (item.disposition) {
       case "absorb": {
         const dest = roleSkillsDir(report.home, report.role);
-        io.stdout(`  absorb ${item.skill}:${hashTag(item.winner?.hash)} ${item.winner?.origin ?? ""} -> ${path23.join(dest, item.skill)}
+        io.stdout(`  absorb ${item.skill}:${hashTag(item.winner?.hash)} ${item.winner?.origin ?? ""} -> ${path26.join(dest, item.skill)}
 `);
         for (const loser of item.losers ?? []) {
           io.stdout(`    quarantine ${loser.origin}${hashTag(loser.hash)} -> ${report.quarantineDir ?? "(none)"}
@@ -16849,8 +17443,25 @@ function printStatusReport(io, report) {
 `);
     }
   }
+  for (const finding of report.findings.filter((f) => f.check === "lock-dirty")) {
+    io.stdout(`drift [${finding.check}/${finding.kind}] ${finding.path}
+`);
+    io.stdout(`    ${finding.detail}
+`);
+  }
   for (const note of report.notes) io.stdout(`note: ${note}
 `);
+  for (const role of report.roles.filter((item) => item.domains.length > 0)) {
+    io.stdout(`domains: ${role.name} \u2190 [${role.domains.join(", ")}]
+`);
+  }
+  if (report.adjudications.length > 0) {
+    io.stdout("same-name adjudication (role > domain > default):\n");
+    for (const item of report.adjudications) {
+      io.stdout(`  ${item.skill} (role ${item.role}): ${item.winner} wins over ${item.losers.join(", ")}
+`);
+    }
+  }
   if (report.legacyGlobalMounts.length > 0) {
     io.stdout(`legacy global mounts: ${report.legacyGlobalMounts.length}
 `);

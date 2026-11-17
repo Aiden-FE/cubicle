@@ -9,13 +9,18 @@ Cubicle 只读 `~/.neo` 文件、通过 **Neo CLI** 做装配计算（决策：`
 
 | 文件 | 说明 |
 |---|---|
-| `neo/bin/neo.js` | esbuild 单文件 bundle（ESM，node22 target，运行时依赖 `yaml` / `@clack` 全部内联；零 node_modules）；sha256 `d2409ef584bf0cef6d233766e1e7563e37323fe427bbbea843b368ffde668869` |
+| 文件 | 说明 |
+|---|---|
+| `neo/bin/neo.js` | esbuild 单文件 bundle（ESM，node22 target，运行时依赖 `yaml` / `@clack` 全部内联；零 node_modules）；sha256 `9d903df328054f910eedca36b4f600b6ca07a5bbf703a0b110cf727cac9f0900` |
 
 ## 钉住的来源
 
 - 仓库：`C:\Users\Aiden\dev\aiden\neo`（github.com/Aiden-FE/neo）
-- **pin：`4aebbde7a0fc5c2043ee9ddc3a3b2147062acb82`**（main 上包含 `materialize` 的最新提交；`fa37a6c` 是 materialize 的 squash 提交，`4aebbde` 只在其后追加文档）
+- **pin：`4ee1dcd68d4692d5f299fa7dc0a048c985d1776b`**（main：academy 票 03 `neo role set` 的 squash；
+  含票 01 `materialize`（`fa37a6c`）与票 02 library+domain（`447ee80`），即
+  `default ∪ domain ∪ role` 三层装配）。其后的 main 提交（`8cc90c3`…）只动文档。
 - 版本：0.2.8
+- 历史 pin：`4aebbde`（只含 materialize，不认 domain 层 —— N2 落地前使用，已作废）
 
 ## 怎么重新构建（可复现步骤）
 
@@ -24,7 +29,7 @@ Cubicle 只读 `~/.neo` 文件、通过 **Neo CLI** 做装配计算（决策：`
 ```bash
 # 1) 取固定 commit（git archive 只读，不 checkout）
 mkdir -p tmp/neo-vendor-build
-git -C /c/Users/Aiden/dev/aiden/neo archive 4aebbde | tar -x -C tmp/neo-vendor-build
+git -C /c/Users/Aiden/dev/aiden/neo archive 4ee1dcd | tar -x -C tmp/neo-vendor-build
 
 # 2) 装 bundle 所需运行时依赖（版本钉死自 neo 的 pnpm-lock；archived 根 package.json
 #    带 pnpm workspace: 协议 npm 吃不下，所以装到干净目录再拷 node_modules）
@@ -52,3 +57,7 @@ cp neo-bundle.mjs ../../vendor/neo/bin/neo.js
 - `NEO_HOME` 环境变量控制 neo 的家目录；测试一律用 `tmp/` 下的 fixture，绝不读写真实 `~/.neo`。
 - `materialize --out` 的产物含 **auth 凭据副本**（convergeRoot 原生行为）——产物只准落在
   机器本地的 data 目录（`CUBICLE_DATA_DIR`），永不入 git。
+- **锁 dirty 顺序（宿主合同）**：角色写入（`neo role set`）会把角色锁标 dirty；清脏只发生在
+  `neo update` / `neo use --global`，`materialize` 永不清脏。装配流形的正确顺序是
+  （可选角色写入 →）`update`/`use` → `materialize`。Cubicle 的 02 票不写角色，只消费这个顺序；
+  a03（下发面板）/a04（e2e:15）若触发角色写，必须按此顺序排。

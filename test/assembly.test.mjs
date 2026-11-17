@@ -281,8 +281,38 @@ test("fingerprint: stable per role content, changes when the role's skills chang
   }
 });
 
-test("preset/probe employees assemble to null — the vendored CLI is never invoked", async () => {
-  const { dir, dispose } = await withTempDir("null-path");
+test("domain-layer skills (Neo N2) mirror into the employee too: assembly stays rule-free on Cubicle's side", async () => {
+  const { dir, dispose } = await withTempDir("domain");
+  try {
+    const neoHome = path.join(dir, "neo-home");
+    const dataDir = path.join(dir, "data");
+    await seedSkill(neoHome, "dev", "own-skill", "OWN");
+    // library/<domain>/<skill> + role.yaml declaring the domain (Neo's N2 shape).
+    const libSkill = path.join(neoHome, "library", "frontend", "domain-skill");
+    await mkdir(libSkill, { recursive: true });
+    await writeFile(path.join(libSkill, "SKILL.md"), "DOMAIN", "utf8");
+    await mkdir(path.join(neoHome, "roles", "dev"), { recursive: true });
+    await writeFile(path.join(neoHome, "roles", "dev", "role.yaml"), "version: 1\ndomains:\n  - frontend\n", "utf8");
+
+    const assembler = createAcademyAssembler({
+      dataDir,
+      nodeBinary: process.execPath,
+      cliEntry: VENDOR_CLI,
+      env: { ...process.env, NEO_HOME: neoHome },
+    });
+    const outcome = await assembler.assemble({ employee: neoEmployee(1, "A", "dev", "pi"), engine: "pi" });
+    assert.ok(outcome);
+    assert.deepEqual(outcome.skills.map((s) => s.name).sort(), ["domain-skill", "own-skill"]);
+
+    const skillsRoot = path.join(enginePaths(dataDir, "pi", 1).agentDir, "skills");
+    assert.deepEqual((await readdir(skillsRoot)).sort(), ["domain-skill", "own-skill"]);
+    assert.equal(path.resolve(await readlink(path.join(skillsRoot, "domain-skill"))), path.resolve(libSkill));
+  } finally {
+    await dispose();
+  }
+});
+
+test("preset/probe employees assemble to null — the vendored CLI is never invoked", async () => {  const { dir, dispose } = await withTempDir("null-path");
   try {
     const assembler = createAcademyAssembler({
       dataDir: path.join(dir, "data"),
