@@ -69,6 +69,11 @@ const HISTORY_CAP = 400;
  *   configFingerprint?(): string | null,
  * } | null} options.getAdapter
  * @param {(payload: { runId: number, employeeId: number, sessionId: number, at: number, event: NormalizedEvent }) => void} options.emit
+ * @param {(ctx: { employee: unknown, engine: string }) => Promise<{ fingerprint: string } | null>} [options.assemble]
+ *   票 a02 academy assembly: lands the role's skills/MCP into this employee's
+ *   engine root before the engine opens; null = nothing to assemble (preset
+ *   roles), a fingerprint change retires the reused live session, a throw
+ *   fails the run before any engine starts.
  * @param {(finished: TaskRunFinished) => void | Promise<void>} [options.onTaskRunFinished] task-runs-only hook (ticket 05 artifact collection)
  * @param {(taskId: number) => void} [options.onTaskArtifactsReady] after an async artifact hook settles (UI refresh)
  * @param {number} [options.drainTimeoutMs] cancel/abort waits this long for the engine's own settle before forcing the end
@@ -78,6 +83,7 @@ export function createRunManager({
   store,
   getAdapter,
   emit,
+  assemble,
   onTaskRunFinished,
   onTaskArtifactsReady,
   drainTimeoutMs = 4000,
@@ -468,8 +474,15 @@ export function createRunManager({
       }
     };
     try {
-      const fingerprint =
+      // 票 a02: academy assembly first — the role's links/MCP config must be
+      // in place before any engine (re)opens its resources, and the assembled
+      // set joins the session fingerprint so a role change retires the old
+      // live session on the next dispatch.
+      const assembly = assemble ? await assemble({ employee, engine: runRef.run.engine }) : null;
+      const adapterFingerprint =
         typeof adapter.configFingerprint === "function" ? adapter.configFingerprint() : null;
+      const fingerprint =
+        assembly === null ? adapterFingerprint : `${adapterFingerprint ?? ""}|assembly:${assembly.fingerprint}`;
       let handle = liveSessions.get(session.id) ?? null;
       if (handle && (sessionFingerprints.get(session.id) ?? null) !== fingerprint) {
         // BYOK config changed since this engine session was opened. Retire the

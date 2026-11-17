@@ -13,7 +13,7 @@ import { appError } from "../src/shared/apperror.mjs";
  * @param {{ adapter?: any, dataDirPrefix?: string, drainTimeoutMs?: number, runTimeoutMs?: number }} [options]
  */
 async function withManager(name, options = {}) {
-  const { adapter, dataDirPrefix = `cubicle-runs-${name}-`, drainTimeoutMs, runTimeoutMs } = options;
+  const { adapter, assemble, dataDirPrefix = `cubicle-runs-${name}-`, drainTimeoutMs, runTimeoutMs } = options;
   const dataDir = await mkdtemp(path.join(tmpdir(), dataDirPrefix));
   const store = openStore({ dataDir });
   const group = store.officeSnapshot().groups[0];
@@ -27,6 +27,7 @@ async function withManager(name, options = {}) {
     store,
     getAdapter: (engine) => (adapter && (adapter.forAll || engine === "pi") ? adapter : null),
     emit: (payload) => emitted.push(payload),
+    ...(assemble === undefined ? {} : { assemble }),
     ...(drainTimeoutMs === undefined ? {} : { drainTimeoutMs }),
     ...(runTimeoutMs === undefined ? {} : { runTimeoutMs }),
   });
@@ -1000,6 +1001,73 @@ test("预算软闸 100%：发 budget_exhausted 后自动 pause — 复用 09 的
     assert.equal(hookCalls.length, 1);
     assert.equal(hookCalls[0].status, "paused", "task hook 认得 paused：不落四件套");
     assert.equal(stub.state.aborts, 1, "暂停走引擎 abort — 到顶后不再产生新的工具调用");
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+// — 票 a02: academy assembly rides the dispatch path —
+
+test("academy assemble runs before the engine opens; a new fingerprint retires the reused session", async () => {
+  const order = /** @type {string[]} */ ([]);
+  let fingerprint = "role-v1";
+  const assemble = async () => {
+    order.push("assemble");
+    return { fingerprint };
+  };
+  const stub = makeStub();
+  const wrapped = {
+    ...stub,
+    async open(input) {
+      order.push("open");
+      return stub.open(input);
+    },
+  };
+  const ctx = await withManager("assemble-order", { adapter: wrapped, assemble });
+  try {
+    ctx.manager.start({ employeeId: ctx.employeeId, text: "第一轮" });
+    await ctx.manager.whenQuiet();
+    ctx.manager.start({ employeeId: ctx.employeeId, text: "第二轮" });
+    await ctx.manager.whenQuiet();
+    assert.ok(order.indexOf("assemble") < order.indexOf("open"), "assembly lands before the engine opens");
+    assert.equal(stub.state.opens, 1, "same fingerprint → the live session is reused (no needless engine restart)");
+
+    fingerprint = "role-v2";
+    ctx.manager.start({ employeeId: ctx.employeeId, text: "第三轮" });
+    await ctx.manager.whenQuiet();
+    assert.equal(stub.state.opens, 2, "changed assembly fingerprint → the live session is retired and re-opened");
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("academy assembly failure fails the run before any engine starts", async () => {
+  const stub = makeStub();
+  const assemble = async () => {
+    throw appError("academy_mcp_env_missing", "GITHUB_TOKEN 没有设置");
+  };
+  const ctx = await withManager("assemble-fail", { adapter: stub, assemble });
+  try {
+    const { run } = ctx.manager.start({ employeeId: ctx.employeeId, text: "干活" });
+    await ctx.manager.whenQuiet();
+    assert.equal(stub.state.opens, 0, "engine never opened for a broken assembly");
+    const errors = ctx.emitted.filter((p) => p.event.type === "error");
+    assert.ok(errors.some((p) => p.event.code === "academy_mcp_env_missing"), "the readable reason rides the run stream");
+    assert.equal(/** @type {any} */ (ctx.store.runById(run.id)).status, "failed");
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test("no assemble hook (preset era / other callers): behavior unchanged, session reuse intact", async () => {
+  const stub = makeStub();
+  const ctx = await withManager("no-assemble", { adapter: stub });
+  try {
+    ctx.manager.start({ employeeId: ctx.employeeId, text: "一" });
+    await ctx.manager.whenQuiet();
+    ctx.manager.start({ employeeId: ctx.employeeId, text: "二" });
+    await ctx.manager.whenQuiet();
+    assert.equal(stub.state.opens, 1);
   } finally {
     await ctx.dispose();
   }

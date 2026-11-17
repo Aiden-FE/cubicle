@@ -25,6 +25,7 @@ async function main() {
     { createDutyRuntime },
     { taskPrompt },
     { engineLedgerFile, sweepPidLedger },
+    { createAcademyAssembler },
     { existsSync },
     path,
     { parseEnvelope, createEvent, TOPICS },
@@ -42,6 +43,7 @@ async function main() {
     import("./duty/runtime.mjs"),
     import("./task/playbook.mjs"),
     import("./engine/child-ledger.mjs"),
+    import("./academy/assembly.mjs"),
     import("node:fs"),
     import("node:path"),
     import("../shared/envelope.mjs"),
@@ -102,6 +104,18 @@ async function main() {
     codexBinary: process.env.CUBICLE_CODEX_PATH || "codex",
   });
   const dshAdapter = createDshAdapter({ dataDir: store.dataDir });
+
+  // 票 a02: academy resource assembly — per dispatch, before the engine
+  // opens. The vendored neo CLI (vendor/README.md) is a plain node child:
+  // process.execPath is electron.exe here, so ELECTRON_RUN_AS_NODE=1 goes in
+  // **the child env only** (never leaks into any Electron launch, per the M0
+  // pitfall). NEO_HOME override works through process.env as usual.
+  const academyAssembler = createAcademyAssembler({
+    dataDir: store.dataDir,
+    nodeBinary: process.execPath,
+    cliEntry: path.join(__dirname, "..", "..", "vendor", "neo", "bin", "neo.js"),
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+  });
   // Abrupt host exit (supervisor stop → kill) must still reclaim engine
   // children, so no codex/dsh process is left under this host pid.
   process.on("exit", () => {
@@ -113,6 +127,7 @@ async function main() {
     store,
     getAdapter: (engine) =>
       engine === "pi" ? piAdapter : engine === "codex" ? codexAdapter : engine === "dsh" ? dshAdapter : null,
+    assemble: ({ employee, engine }) => academyAssembler.assemble({ employee, engine }),
     // Engine events ride the run.event topic; the main process coalesces and
     // the view subscribes per topic. (Payloads stay envelope-shaped.)
     emit: (payload) => send(createEvent(TOPICS.runEvent, payload)),
