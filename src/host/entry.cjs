@@ -27,7 +27,7 @@ async function main() {
     { engineLedgerFile, sweepPidLedger },
     { createAcademyAssembler },
     { createAcademyPanel },
-    { existsSync },
+    { existsSync, mkdirSync },
     path,
     { parseEnvelope, createEvent, TOPICS },
     { readModelLibrary, listCompatible, writePiModels },
@@ -112,8 +112,26 @@ async function main() {
   // process.execPath is electron.exe here, so ELECTRON_RUN_AS_NODE=1 goes in
   // **the child env only** (never leaks into any Electron launch, per the M0
   // pitfall). NEO_HOME override works through process.env as usual.
+  //
+  // 票 a03 (M1 坑的下游): 本机安全策略只允许 electron.exe 写仓库工作区，而
+  // ELECTRON_RUN_AS_NODE 让 npx/npm 与 vendored CLI 的 mktemp 暂存全都以
+  // electron.exe 身份写 %TEMP%/%LOCALAPPDATA% → EPERM。把 neo 子进程的临时
+  // 目录与 npm 缓存一律指进数据目录（机器本地、与 materialize --out 同一姿态）。
   const neoCliEntry = path.join(__dirname, "..", "..", "vendor", "neo", "bin", "neo.js");
-  const neoChildEnv = { ...process.env, ELECTRON_RUN_AS_NODE: "1" };
+  const neoTmpDir = path.join(store.dataDir, "neo-tmp");
+  try {
+    mkdirSync(neoTmpDir, { recursive: true });
+  } catch {
+    // 建不出来也照常传：CLI 自己会在错误里点名 TMP。
+  }
+  const neoChildEnv = {
+    ...process.env,
+    ELECTRON_RUN_AS_NODE: "1",
+    TMPDIR: neoTmpDir,
+    TEMP: neoTmpDir,
+    TMP: neoTmpDir,
+    npm_config_cache: path.join(store.dataDir, "npm-cache"),
+  };
   const academyAssembler = createAcademyAssembler({
     dataDir: store.dataDir,
     nodeBinary: process.execPath,
