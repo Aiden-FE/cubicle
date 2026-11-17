@@ -47,9 +47,6 @@ import { parse as parseYaml } from "yaml";
 /** Neo's role-name rule (schema §1 / core names.ts). */
 const ROLE_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
-/** One-shot upgrade marker for readers that follow materialize. */
-export const INTERIM_DIRECT_READ = true;
-
 /**
  * Resolve the Neo home, mirroring Neo's own rule (schema §2):
  * `NEO_HOME` env > `<homedir>/.neo`; the value expands a leading `~`;
