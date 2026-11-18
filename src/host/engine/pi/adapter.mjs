@@ -11,8 +11,10 @@
  * Capability injection: the employee's role persona goes into the system
  * prompt, the role's tool list becomes the session allowlist, and 票 a02's
  * academy assembly lands the role's skills (links in `<agentDir>/skills`,
- * noSkills + additionalSkillPaths) and MCP (`<agentDir>/mcp.json` + built-in
- * MCP extension) — per employee, roles never see each other.
+ * noSkills + additionalSkillPaths) and MCP (the canonical academy-mcp.json
+ * holds env:VAR references; at open this adapter resolves them and renders
+ * `<agentDir>/mcp.json` + pulls the built-in MCP extension) — per employee,
+ * roles never see each other.
  *
  * Runtime policy (ticket 07): an inline pi extension runs the host policy
  * gate at every tool_call — a denied call never executes, and the verdict
@@ -25,11 +27,12 @@
  * session file) is re-opened after a host restart, so a conversation can
  * continue (票 04: 可续).
  */
-import { existsSync, mkdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { appError } from "../../../shared/apperror.mjs";
 import { readModelLibrary, resolveModelForManifest } from "../../models/library.mjs";
+import { readAcademyMcpDocSync, renderPiMcpJson, resolveMcpEnv } from "../../academy/neo-mcp.mjs";
 import { decideToolAccess } from "../policy.mjs";
 import { normalizePiEvent } from "./normalize.mjs";
 
@@ -165,10 +168,22 @@ export function createPiAdapter({ dataDir, moduleImporter }) {
     // skills dir — the junction links the academy assembler put there.
     const skillsDir = path.join(session.agentDir, "skills");
     mkdirSync(skillsDir, { recursive: true });
-    // MCP: the assembler renders pi-native <agentDir>/mcp.json when the role
-    // declares servers; the built-in MCP extension is only pulled in then, so
-    // employees without MCP behave exactly as before this ticket.
-    const mcpReady = existsSync(path.join(session.agentDir, "mcp.json"));
+    // 票 a04 MCP (launch injection): the academy assembler leaves an
+    // env:VAR-REFERENCE file (academy-mcp.json). At engine open we resolve
+    // the references against this process' env (missing secret = readable
+    // academy_mcp_env_missing — the run fails before the model is asked)
+    // and render the pi-native <agentDir>/mcp.json; the built-in MCP
+    // extension is only pulled in when servers exist. No academy file →
+    // stale renders are removed and the employee behaves exactly as before.
+    const academyServers = readAcademyMcpDocSync(path.join(session.agentDir, "academy-mcp.json"));
+    let mcpReady = false;
+    if (academyServers !== null) {
+      const resolvedServers = resolveMcpEnv(academyServers, process.env);
+      writeFileSync(path.join(session.agentDir, "mcp.json"), renderPiMcpJson(resolvedServers), "utf8");
+      mcpReady = typeof pi.createMcpExtension === "function";
+    } else {
+      rmSync(path.join(session.agentDir, "mcp.json"), { force: true });
+    }
     const extensionFactories = [
       policyExtension(onEvent, session.workspaceDir),
       ...(mcpReady && typeof pi.createMcpExtension === "function" ? [pi.createMcpExtension()] : []),

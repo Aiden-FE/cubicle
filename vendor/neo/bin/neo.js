@@ -9127,7 +9127,8 @@ var renderRef = (value) => {
   const match = ENV_REF.exec(value);
   return match === null ? value : `$${match[1]}`;
 };
-function resolveModelEnv(models, env) {
+function resolveModelEnv(models, env, strict = true) {
+  if (strict === false) return;
   for (const [id, provider] of Object.entries(models.providers)) {
     const check = (value, where) => {
       if (typeof value !== "string") return;
@@ -10077,7 +10078,23 @@ function validateMcpForWrite(role, text2) {
 function mergeMcpServers(base, override) {
   return { ...base, ...override };
 }
-function resolveMcpEnv(servers, env, target) {
+function collectMcpEnvRefs(servers) {
+  const out = {};
+  for (const [name, server] of Object.entries(servers)) {
+    const refs = {};
+    const collect = (map) => {
+      for (const [key, value] of Object.entries(map ?? {})) {
+        const match = ENV_REF2.exec(value);
+        if (match !== null) refs[key] = match[1];
+      }
+    };
+    if (server.transport === "stdio") collect(server.env);
+    else collect(server.headers);
+    if (Object.keys(refs).length > 0) out[name] = refs;
+  }
+  return out;
+}
+function resolveMcpEnv(servers, env, target, strict = true) {
   const extraEnv = {};
   const headerRefs = {};
   const resolve = (ref, where) => {
@@ -10086,6 +10103,7 @@ function resolveMcpEnv(servers, env, target) {
     const name = match[1];
     const value = env[name];
     if (value === void 0 || value.length === 0) {
+      if (strict === false) return void 0;
       throw new NeoError(
         "state",
         `mcp ${where} references env:${name}, but ${name} is not set in the launch environment`
@@ -10096,7 +10114,9 @@ function resolveMcpEnv(servers, env, target) {
   for (const [name, server] of Object.entries(servers)) {
     if (server.transport === "stdio") {
       for (const [key, value] of Object.entries(server.env ?? {})) {
-        if (ENV_REF2.test(value)) extraEnv[key] = resolve(value, `${name}.env.${key}`);
+        if (!ENV_REF2.test(value)) continue;
+        const resolvedValue = resolve(value, `${name}.env.${key}`);
+        if (resolvedValue !== void 0) extraEnv[key] = resolvedValue;
       }
       continue;
     }
@@ -12107,7 +12127,7 @@ async function convergeRoot(ports, home, homedir, opts) {
   }
   const realRoot = expandTilde(isolate.homeDir, homedir);
   const auth = [];
-  for (const file of isolate.authFiles ?? []) {
+  if (opts.skipAuth !== true) for (const file of isolate.authFiles ?? []) {
     const source = path16.join(realRoot, file);
     try {
       await fs19.copyFile(source, path16.join(root, file));
@@ -12127,7 +12147,7 @@ async function convergeRoot(ports, home, homedir, opts) {
     await readRoleMcp(home, "default"),
     await readRoleMcp(home, role)
   );
-  const resolved = resolveMcpEnv(servers, opts.env ?? {}, opts.agent);
+  const resolved = resolveMcpEnv(servers, opts.env ?? {}, opts.agent, opts.strictEnv !== false);
   const { config } = await readConfig(home);
   const roleSelection = await readRoleModels(home, role);
   const roleModels = {
@@ -12137,7 +12157,7 @@ async function convergeRoot(ports, home, homedir, opts) {
   };
   const modelContent = opts.skipModels !== true && (Object.keys(roleModels.providers).length > 0 || roleModels.default !== void 0);
   if (isolate.models !== void 0 && modelContent) {
-    resolveModelEnv(roleModels, opts.env ?? {});
+    resolveModelEnv(roleModels, opts.env ?? {}, opts.strictEnv !== false);
   }
   let mcpFile = null;
   let mcpWritten = false;
@@ -12197,7 +12217,7 @@ async function convergeRoot(ports, home, homedir, opts) {
   }
   let modelsReport = { file: null, providers: 0, default: null };
   if (isolate.models !== void 0 && modelContent) {
-    resolveModelEnv(roleModels, opts.env ?? {});
+    resolveModelEnv(roleModels, opts.env ?? {}, opts.strictEnv !== false);
     const providerCount = Object.keys(roleModels.providers).length;
     const file = path16.join(root, isolate.models.file);
     switch (isolate.models.format) {
@@ -12937,7 +12957,8 @@ function manifestHash(manifest) {
     agent: manifest.agent,
     skills: manifest.skills,
     mcp: manifest.mcp,
-    model: manifest.model
+    model: manifest.model,
+    authExcluded: manifest.authExcluded
   });
   return createHash2("sha256").update(canonical, "utf8").digest("hex");
 }
@@ -12969,7 +12990,13 @@ async function materializeRoot(ports, home, homedir, opts) {
       role: opts.role,
       agent: opts.agent,
       root: staging,
-      ...opts.env !== void 0 ? { env: opts.env } : {}
+      ...opts.env !== void 0 ? { env: opts.env } : {},
+      // T3:`--no-auth` 才排除 auth 副本(缺省保持票 01 同形;run 路径不经此处,校验照旧);
+      // T2:env 存在性校验只属于 run(导出渲染本就落 `$VAR` 插值,明文不上盘);
+      // T4:宿主自带模型时整段跳过模型渲染。
+      skipAuth: opts.noAuth === true,
+      strictEnv: false,
+      ...opts.skipModels === true ? { skipModels: true } : {}
     });
   } catch (error) {
     await removeMaterializedTree(ports.link, staging).catch(() => void 0);
@@ -13006,13 +13033,24 @@ async function materializeRoot(ports, home, homedir, opts) {
     skills,
     mcp: {
       file: report.mcp.file === null ? null : path18.relative(staging, report.mcp.file),
-      servers: report.mcp.servers
+      servers: report.mcp.servers,
+      // T1:导出根不自足的 env 绑定以引用形式进清单(与 convergeRoot 同一份 merge,不开第二份装配)。
+      envRefs: collectMcpEnvRefs(
+        mergeMcpServers(await readRoleMcp(home, "default"), await readRoleMcp(home, opts.role))
+      )
     },
     model: {
       file: report.models.file === null ? null : path18.relative(staging, report.models.file),
       providers: report.models.providers,
-      default: report.models.default
-    }
+      default: report.models.default,
+      // T4:模型配置归属方;宿主自带(`--agent-models`)时为 host。
+      owner: opts.skipModels === true ? "host" : "neo",
+      ...report.models.file === null ? {
+        reason: opts.skipModels === true ? "agent-models: host supplies its own model config" : report.models.providers === 0 && report.models.default === null ? "no-neo-model-declaration: config.yaml providers is empty" : "agent-has-no-model-file"
+      } : {}
+    },
+    // T3:排除凭据副本时清单显式声明;默认 false(导出与启动根资源部分同形)。
+    authExcluded: opts.noAuth === true
   };
   return {
     outDir: opts.out,
@@ -16111,11 +16149,16 @@ var COMMANDS = [
   {
     name: "materialize",
     summary: "export a role\xD7agent launch root (resources only) to an external dir; never launches",
-    usage: ["neo materialize --role <name> --agent <agent-id> --out <dir> [--json]"],
+    usage: ["neo materialize --role <name> --agent <agent-id> --out <dir> [--no-auth] [--agent-models] [--json]"],
     flags: [
       "--role <name>   role to assemble (required; default \u222A domain \u222A role, role > domain > default)",
       "--agent <id>    launchable agent id (required; see: neo list agents)",
-      "--out <dir>     external dir owned by this command (staged + swapped in; foreign content refused)"
+      "--out <dir>     MUST be a dir owned by this command (root.json marker): export into a dedicated",
+      "                subdir, never an existing agent config root; foreign content refused (staged + swapped)",
+      "--no-auth       exclude auth credential copies from the export (manifest authExcluded: true);",
+      "                default keeps them (same shape as the launch root); external hosts pass this",
+      "--agent-models  skip neo model rendering \u2014 host supplies its own models",
+      '                (manifest model: { file: null, owner: "host", reason })'
     ]
   },
   {
@@ -17133,7 +17176,7 @@ async function cmdRoots(args, io, deps) {
 async function cmdMaterialize(args, io, deps) {
   const parsed = parseArgs(args, {
     valued: /* @__PURE__ */ new Set(["role", "agent", "out"]),
-    boolean: boolFlags("json")
+    boolean: boolFlags("json", "no-auth", "agent-models")
   });
   if (parsed.positionals.length > 0) {
     throw new NeoError("usage", "materialize: takes no positional arguments");
@@ -17156,7 +17199,14 @@ async function cmdMaterialize(args, io, deps) {
     { link: nodeLinkPort(), now: deps.now },
     resolveHome(deps),
     deps.homedir,
-    { role, agent, out: path26.resolve(cwd, out), env: deps.env }
+    {
+      role,
+      agent,
+      out: path26.resolve(cwd, out),
+      env: deps.env,
+      ...parsed.bools.has("agent-models") ? { skipModels: true } : {},
+      ...parsed.bools.has("no-auth") ? { noAuth: true } : {}
+    }
   );
   if (parsed.bools.has("json")) {
     io.stdout(`${JSON.stringify(manifest, null, 2)}
@@ -17168,13 +17218,16 @@ async function cmdMaterialize(args, io, deps) {
   io.stdout(`  skills: ${manifest.skills.map((s) => `${s.name} (${s.source})`).join(", ") || "none"}
 `);
   io.stdout(
-    `  mcp: ${manifest.mcp.servers} server(s)${manifest.mcp.file === null ? "" : ` -> ${manifest.mcp.file}`}
+    `  mcp: ${manifest.mcp.servers} server(s)${manifest.mcp.file === null ? "" : ` -> ${manifest.mcp.file}`}${Object.keys(manifest.mcp.envRefs).length > 0 ? ` (env refs: ${Object.keys(manifest.mcp.envRefs).join(", ")})` : ""}
 `
   );
   io.stdout(
-    `  model: ${manifest.model.default ?? "none"}${manifest.model.file === null ? "" : ` -> ${manifest.model.file}`}
+    `  model: ${manifest.model.file === null ? `none${manifest.model.reason !== void 0 ? ` (${manifest.model.reason})` : ""}` : `${manifest.model.default ?? "custom"} -> ${manifest.model.file}`}
 `
   );
+  if (manifest.authExcluded) {
+    io.stdout("  auth: excluded (--no-auth; credential-free export, authExcluded=true)\n");
+  }
   io.stdout("  (resources only: neo materialize never launches a process)\n");
   return 0;
 }

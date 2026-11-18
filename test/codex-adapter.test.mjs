@@ -510,37 +510,58 @@ test("shutdown kills live codex children (host exit reclamation)", async () => {
   }
 });
 
-test("academy MCP: assembled academy-mcp.json folds [mcp_servers.*] into the employee config.toml", async () => {
+test("academy MCP: canonical academy-mcp.json refs resolve at open into [mcp_servers.*] of the employee config.toml", async () => {
   const dir = tempDir();
   try {
     seedModels(dir);
     const session = sessionFixture(dir);
     mkdirSync(session.agentDir, { recursive: true });
-    // The academy assembler's engine-agnostic render (values already resolved).
+    // The academy assembler's canonical file (票 a04): env:VAR REFERENCES —
+    // the value is injected by codex's open() from the host env, not from disk.
     writeFileSync(
       path.join(session.agentDir, "academy-mcp.json"),
       JSON.stringify({
-        version: 1,
+        version: 2,
         roleKey: "dev",
+        envRefs: { github: { GITHUB_TOKEN: "A04_CODEX_TOKEN" } },
         servers: {
-          github: { transport: "stdio", command: "npx", args: ["-y", "srv"], env: { GITHUB_TOKEN: "tok-42" } },
+          github: { transport: "stdio", command: "npx", args: ["-y", "srv"], env: { GITHUB_TOKEN: "env:A04_CODEX_TOKEN" } },
         },
       }),
       "utf8",
     );
-    const adapter = createCodexAdapter({ dataDir: dir, spawnProcess: () => fakeChild() });
-    await adapter.open({
-      employee: { name: "甲", roleSnapshot: { roleKey: "dev", domains: [], locks: {}, engine: "codex" } },
-      session,
-      onEvent: () => {},
-    });
-    const config = readFileSync(path.join(session.agentDir, "config.toml"), "utf8");
-    assert.match(config, /\[mcp_servers\.github\]/);
-    assert.match(config, /command = "npx"/);
-    assert.match(config, /args = \["-y", "srv"\]/);
-    assert.match(config, /env = \{ GITHUB_TOKEN = "tok-42" \}/);
-    // The policy hook must survive alongside the MCP blocks.
-    assert.match(config, /\[\[hooks\.PreToolUse\]\]/);
+    process.env.A04_CODEX_TOKEN = "tok-42";
+    try {
+      const adapter = createCodexAdapter({ dataDir: dir, spawnProcess: () => fakeChild() });
+      await adapter.open({
+        employee: { name: "甲", roleSnapshot: { roleKey: "dev", domains: [], locks: {}, engine: "codex" } },
+        session,
+        onEvent: () => {},
+      });
+      const config = readFileSync(path.join(session.agentDir, "config.toml"), "utf8");
+      assert.match(config, /\[mcp_servers\.github\]/);
+      assert.match(config, /command = "npx"/);
+      assert.match(config, /args = \["-y", "srv"\]/);
+      assert.match(config, /env = \{ GITHUB_TOKEN = "tok-42" \}/);
+      // The policy hook must survive alongside the MCP blocks.
+      assert.match(config, /\[\[hooks\.PreToolUse\]\]/);
+
+      // Missing secret at open → readable academy_mcp_env_missing; no half-
+      // configured config.toml is (re)written.
+      delete process.env.A04_CODEX_TOKEN;
+      const adapter2 = createCodexAdapter({ dataDir: dir, spawnProcess: () => fakeChild() });
+      await assert.rejects(
+        () =>
+          adapter2.open({
+            employee: { name: "甲", roleSnapshot: { roleKey: "dev", domains: [], locks: {}, engine: "codex" } },
+            session,
+            onEvent: () => {},
+          }),
+        (/** @type {{ code?: string }} */ err) => err.code === "academy_mcp_env_missing",
+      );
+    } finally {
+      delete process.env.A04_CODEX_TOKEN;
+    }
 
     // No academy MCP → today's config unchanged (no [mcp_servers] section).
     const dir2 = tempDir();

@@ -160,20 +160,24 @@ test("dsh session/new keeps mcpServers empty without assembly, mapped when acade
       const live1 = await adapter.open({ employee, session: s1, onEvent: () => {} });
       await live1.prompt("一轮");
 
-      // 2) the assembler's render for the SAME employee → mapped ACP entries
-      //    on the next session (the running server is reused).
+      // 2) the assembler's canonical REFERENCE file for the SAME employee →
+      //    values resolved AT OPEN, mapped ACP entries on the next session
+      //    (the running server is reused).
       writeFileSync(
         path.join(s1.agentDir, "academy-mcp.json"),
         JSON.stringify({
-          version: 1,
+          version: 2,
           roleKey: "dev",
+          envRefs: { github: { GITHUB_TOKEN: "A04_DSH_TOKEN" }, remote: { Authorization: "A04_DSH_HDR" } },
           servers: {
-            github: { transport: "stdio", command: "npx", args: ["-y", "srv"], env: { GITHUB_TOKEN: "tok" } },
-            remote: { transport: "http", url: "https://x/mcp", headers: { Authorization: "hdr" } },
+            github: { transport: "stdio", command: "npx", args: ["-y", "srv"], env: { GITHUB_TOKEN: "env:A04_DSH_TOKEN" } },
+            remote: { transport: "http", url: "https://x/mcp", headers: { Authorization: "env:A04_DSH_HDR" } },
           },
         }),
         "utf8",
       );
+      process.env.A04_DSH_TOKEN = "tok";
+      process.env.A04_DSH_HDR = "hdr";
       const live2 = await adapter.open({ employee, session: s1, onEvent: () => {} });
       await live2.prompt("二轮");
       adapter.shutdown();
@@ -187,6 +191,8 @@ test("dsh session/new keeps mcpServers empty without assembly, mapped when acade
     } finally {
       delete process.env.FAKE_DUMP;
       delete process.env.FAKE_MODEL_VALUE;
+      delete process.env.A04_DSH_TOKEN;
+      delete process.env.A04_DSH_HDR;
     }
   } finally {
     dispose();

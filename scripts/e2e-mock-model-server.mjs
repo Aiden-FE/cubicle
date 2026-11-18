@@ -27,7 +27,8 @@ import { setTimeout as sleepFrames } from "node:timers/promises";
  * @typedef {object} MockModelServer
  * @property {string} baseUrl
  * @property {() => Promise<void>} close
- * @property {Array<{ messageCount: number, hasToolResult: boolean, slow: boolean, userPreview: string }>} requests
+ * @property {Array<{ messageCount: number, hasToolResult: boolean, slow: boolean, userPreview: string, raw: string }>} requests
+ *   `raw` (票 a04): the full JSON request body as received — 上下文断言打在原始请求上，不靠模型复述。
  */
 
 const MODEL_ID = "cubicle-e2e-model";
@@ -128,9 +129,10 @@ export async function startMockModelServer({ planReply, completionPrefix, chunkP
       return;
     }
 
+    const rawText = await readBody(req);
     let body;
     try {
-      body = JSON.parse(await readBody(req));
+      body = JSON.parse(rawText);
     } catch {
       res.writeHead(400, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: { message: "invalid JSON body" } }));
@@ -149,6 +151,7 @@ export async function startMockModelServer({ planReply, completionPrefix, chunkP
       hasToolResult,
       slow,
       userPreview: lastUserText(messages).slice(0, 24),
+      raw: rawText,
     });
 
     res.writeHead(200, {
