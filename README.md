@@ -4,7 +4,7 @@
 
 - **形态**：Windows 优先的桌面应用（Electron + React + Three.js）
 - **引擎**：不绑定任何 agent 引擎 —— 统一适配层调用本机已装的 pi / codex / claude / dsh / qoder…
-- **状态**：**M0-M7 全部通过（2026-11-12）—— 18 张 v1 研发票全部 done**，含统一设置、引擎无关模型库、pi/codex/dsh 三引擎、Blender/Three.js 3D 办公室（8 工位 + 咖啡机/饮水机）、视口自适应与缩放/平移巡检、工位屏幕状态与随机摸鱼、无文字场景（形象 + 桌面名牌 + 走道寻路），以及打包验收。下一步 = [员工学院 effort](.scratch/academy/map.md)：接 Neo 做技能 / MCP 的集中管理与按角色隔离下发。
+- **状态**：**M0-M7 全部通过（2026-11-12）+ 员工学院 effort 结项（2026-11-18）**——18 张 v1 研发票 + 学院四票全部 done，`e2e:15` 全链路正反断言一条命令全绿；首个发布 **v0.1.0**（GitHub Release，win-x64 / mac-x64 zip）。
 
 ## 从这里开始
 
@@ -12,6 +12,8 @@
 |---|---|
 | [.scratch/cubicle/map.md](.scratch/cubicle/map.md) | 蓝图入口：15 条决策索引 + 雾区 + 范围边界 |
 | [.scratch/cubicle/issues/12-milestones-risks.md](.scratch/cubicle/issues/12-milestones-risks.md) | 6 个里程碑（26–36 人日）、9 条风险、「只做三件事」 |
+| [.scratch/academy/map.md](.scratch/academy/map.md) | **员工学院 effort**（已结项）：Neo 集成、技能/MCP 下发、角色隔离 |
+| [docs/release.md](docs/release.md) | 发布流程（tag lockstep → CI 双平台打包 → GitHub Release） |
 | [GLOSSARY.md](GLOSSARY.md) | 领域术语（公司 / 项目组 / 工位 / 员工 / 角色 / 任务 / 会话 / 产出） |
 | `.scratch/cubicle/prototypes/` | 可点原型：办公室动画、首启向导、主界面五稿 |
 | `.scratch/cubicle/research/` | 调研：pi 嵌入、引擎准入矩阵、技术选型、Marvis 拆解 |

@@ -1,0 +1,22 @@
+# CI：main 与 PR 的守门（typecheck + 单元测试 + 渲染层构建）。
+# GUI e2e（e2e:NN）不在 CI 跑：需要真实 Electron 会话与本机引擎，验收在本地做
+# （见 docs/release.md）。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build:renderer

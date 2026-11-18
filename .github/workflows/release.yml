@@ -1,0 +1,120 @@
+# Release：一次 tag 触发「版本 lockstep → 全量校验 → 双平台打包 → GitHub Release」。
+#
+# 触发：
+#   - push tag v*（主入口）：tag 必须与 package.json 的 version lockstep 一致；
+#   - workflow_dispatch（重跑）：按输入的 tag 重出包，不再校验 lockstep 之外的东西。
+# 流程与票 13 的打包决策一致：target = dir（便携目录），CI 负责压成 zip 作为
+# Release 资产；不做 nsis/dmg（本机与 CI 都免签名、免安装器，验收 = 解包即跑）。
+# mac 构建未签名：CSC_IDENTITY_AUTO_DISCOVERY=false，验收机器按
+# docs/release-mac-intel.md 处理 quarantine。
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag（= package.json version，例如 v0.1.0）'
+        required: true
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: version lockstep（tag v* == package.json version）
+        if: github.ref_type == 'tag'
+        run: node -e "const v=require('./package.json').version;const t=process.env.GITHUB_REF_NAME;if(t!=='v'+v){console.error('tag '+t+' != v'+v);process.exit(1)}"
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build:renderer
+
+  build-windows:
+    needs: verify
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:renderer
+      - run: npx electron-builder --win --dir
+      - name: zip win-unpacked
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/package/win-unpacked/* `
+            -DestinationPath Cubicle-win-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cubicle-win-x64
+          path: Cubicle-win-x64.zip
+
+  build-macos:
+    needs: verify
+    runs-on: macos-latest
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:renderer
+      - run: npx electron-builder --mac --x64 --dir
+      - name: zip mac/Cubicle.app
+        run: |
+          cd dist/package/mac
+          ditto -c -k --keepParent Cubicle.app ../../../Cubicle-mac-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cubicle-mac-x64
+          path: Cubicle-mac-x64.zip
+
+  release:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: 'cubicle-*'
+          merge-multiple: true
+      - name: release notes（自上个 tag 以来的提交）
+        id: notes
+        run: |
+          PREV=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || echo "")
+          {
+            echo "## 安装与验收"
+            echo ""
+            echo "- Windows：解压 \`Cubicle-win-x64.zip\`，双击 \`cubicle.exe\`（或 \`Start-Cubicle.ps1\`）。"
+            echo "- macOS Intel：解压 \`Cubicle-mac-x64.zip\`，首次运行按 quarantine 处理（未签名），要求 macOS Ventura+。见 docs/release-mac-intel.md。"
+            echo ""
+            if [ -n "$PREV" ]; then
+              echo "## 自 $PREV 以来的变更"
+              git log --pretty='- %s' "$PREV..${GITHUB_REF_NAME}"
+            else
+              echo "## 首个发布"
+              git log --pretty='- %s' "${GITHUB_REF_NAME}" | head -40
+            fi
+          } > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
+          body_path: RELEASE_NOTES.md
+          files: |
+            Cubicle-win-x64.zip
+            Cubicle-mac-x64.zip

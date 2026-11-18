@@ -16,6 +16,7 @@ directories:
 files:
   - src/**/*
   - dist/renderer/**/*
+  - vendor/neo/**/*
   - scripts/e2e-harness.mjs
   - scripts/e2e-13-runner.mjs
   - scripts/sandbox-degrade.mjs
@@ -28,6 +29,14 @@ extraFiles:
 asar: true
 
 win:
+  target:
+    - dir
+  executableName: cubicle
+
+# Release CI 的 mac x64 构建（未签名；验收机器按 docs/release-mac-intel.md 的
+# quarantine 说明处理）。打包应用内的 vendored neo CLI 走 asar 内路径
+# （ELECTRON_RUN_AS_NODE 子进程由 asar-aware fs 加载，见 vendor/README.md）。
+mac:
   target:
     - dir
   executableName: cubicle
