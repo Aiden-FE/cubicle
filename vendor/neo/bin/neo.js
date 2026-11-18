@@ -7363,7 +7363,7 @@ var require_dist = __commonJS({
 });
 
 // packages/cli/src/cli.ts
-import os4 from "node:os";
+import os5 from "node:os";
 import path27 from "node:path";
 import { spawn as spawn2 } from "node:child_process";
 import fs29 from "node:fs/promises";
@@ -11206,7 +11206,9 @@ function nodeLinkPort() {
 
 // packages/core/src/link-safe.ts
 import { execFile } from "node:child_process";
+import crypto from "node:crypto";
 import fs16 from "node:fs/promises";
+import os2 from "node:os";
 import path12 from "node:path";
 import { promisify } from "node:util";
 var execFileAsync = promisify(execFile);
@@ -11233,15 +11235,54 @@ async function removeVisibleLink(target, link, platform) {
     throw error;
   }
 }
+async function renameAsideLink(target) {
+  const name = `.link-quarantined-${crypto.randomUUID()}`;
+  const quarantineDir = path12.join(os2.tmpdir(), "neo-link-quarantine");
+  try {
+    await fs16.mkdir(quarantineDir, { recursive: true });
+  } catch {
+  }
+  try {
+    await fs16.rename(target, path12.join(quarantineDir, name));
+    return true;
+  } catch {
+    try {
+      await fs16.rename(target, path12.join(path12.dirname(target), name));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
 async function removeOpaqueLink(target, platform) {
   if (platform === "win32") {
+    if (await renameAsideLink(target)) {
+      return;
+    }
     const escaped = target.replace(/'/g, "''");
-    await execFileAsync(
-      "powershell.exe",
-      ["-NoProfile", "-NonInteractive", "-Command", `[System.IO.Directory]::Delete('${escaped}')`],
-      { windowsHide: true }
-    );
-    return;
+    const doors = [
+      () => execFileAsync("cmd.exe", ["/c", "rmdir", target], { windowsHide: true }),
+      () => execFileAsync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-Command", `[System.IO.Directory]::Delete('${escaped}')`],
+        { windowsHide: true }
+      ),
+      () => execFileAsync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-Command", `Remove-Item -LiteralPath '${escaped}' -Force -Confirm:$false -ErrorAction Stop`],
+        { windowsHide: true }
+      )
+    ];
+    let lastError = new Error(`opaque link removal refused: ${target}`);
+    for (const door of doors) {
+      try {
+        await door();
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError;
   }
   try {
     await fs16.unlink(target);
@@ -13389,7 +13430,7 @@ function modelReferencedByDefault(loaded, providerId, modelId) {
 import fs23 from "node:fs/promises";
 import { constants as fsConstants2 } from "node:fs";
 import net from "node:net";
-import os2 from "node:os";
+import os3 from "node:os";
 import path20 from "node:path";
 var isWindows = process.platform === "win32";
 var PI_SUBCOMMANDS = /* @__PURE__ */ new Set(["install", "remove", "uninstall", "update", "list", "config", "auth", "mcp"]);
@@ -13535,7 +13576,7 @@ async function planLaunch(ports, home, homedir, opts) {
   }
   const env = opts.env ?? {};
   const ephemeral = opts.ephemeral === true;
-  const root = ephemeral ? await fs23.mkdtemp(path20.join(os2.tmpdir(), `neo-run-${opts.role}-${opts.agent}-`)) : void 0;
+  const root = ephemeral ? await fs23.mkdtemp(path20.join(os3.tmpdir(), `neo-run-${opts.role}-${opts.agent}-`)) : void 0;
   const isolated = opts.isolated === true;
   const report = await convergeRoot(ports, home, homedir, {
     role: opts.role,
@@ -14086,7 +14127,7 @@ async function statusAudit(ports, home, opts) {
 
 // packages/core/src/update.ts
 import fs25 from "node:fs/promises";
-import os3 from "node:os";
+import os4 from "node:os";
 import path22 from "node:path";
 function groupLockSources(skills) {
   const groups = /* @__PURE__ */ new Map();
@@ -14220,7 +14261,7 @@ async function updateOneRole(ports, home, role, opts, now) {
       outcome.sources.push(sourceOutcome);
       continue;
     }
-    const staging = await fs25.mkdtemp(path22.join(ports.stagingRoot ?? os3.tmpdir(), "neo-staging-"));
+    const staging = await fs25.mkdtemp(path22.join(ports.stagingRoot ?? os4.tmpdir(), "neo-staging-"));
     try {
       const listed = await ports.exec.run(
         buildUpstreamAddArgs({ skillsRef: opts.skillsRef, source: group.source, listOnly: true }),
@@ -16076,7 +16117,7 @@ var MODEL_FLAGS_HELP = [
 function defaultCliDeps() {
   return {
     env: process.env,
-    homedir: os4.homedir(),
+    homedir: os5.homedir(),
     exec: nodeExecPort(),
     now: () => /* @__PURE__ */ new Date()
   };
