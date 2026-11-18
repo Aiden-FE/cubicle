@@ -11,18 +11,23 @@
  * safe doors below, and hands materialize a clean dir.
  *
  * Rules (depth-first):
- *  - node-visible links (dirent symlink): unlink; EPERM (junction) → rmdir
- *    (safe: node-visible junctions delete as links).
- *  - node-INVISIBLE links (stat says dir but realpath resolves elsewhere — or
- *    realpath fails: dangling): the .NET door — `[IO.Directory]::Delete(path)`
- *    removes a reparse point WITHOUT following it, and REFUSES (throws) a real
- *    non-empty directory. The old `cmd /c rmdir` door is gone: on newer
- *    Windows/Server images (GH runner, Node 22.21 class) cmd reports such
- *    junctions as "The directory is not empty" and cmd /s would follow the
- *    target — exactly what this module exists to prevent.
+ *  - node-visible links (dirent symlink): unlink; EPERM (junction) → rmdir.
+ *  - every other Windows link candidate (junction, dangling, node-INVISIBLE
+ *    reparse point): run the link-deletion DOORS in order (see linkDoors) —
+ *    each one removes a reparse point AS A LINK at worst, never recursively
+ *    into the target; then last-resort rename-aside quarantine (reparse
+ *    renames are platform-guaranteed and never touch the target).
+ *    A path that survives every door AND readdir()s as a plain directory is
+ *    a REAL non-empty directory: refuse, never eat (a04).
+ *    (Runner + dev-box evidence 2026-11-18: no single door is correct on
+ *    both images — cmd refused DANGLING junctions on the GH runner, .NET
+ *    resolved THROUGH live junctions there, Remove-Item NullReferences on
+ *    live junctions on Win 26300; every failure observed so far is safe —
+ *    it deletes nothing.)
  *  - real directories: recurse, then rmdir (empty by then).
  */
 import fs from "node:fs/promises";
+import crypto from "node:crypto";
 import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -39,12 +44,73 @@ const execFileAsync = promisify(execFile);
  * @param {string} p
  */
 async function removeReparseLinkWindows(p) {
+  const errors = [];
+  for (const door of linkDoors(p)) {
+    try {
+      await door();
+      return;
+    } catch (/** @type {unknown} */ err) {
+      errors.push(err);
+      if (!(await exists(p))) return;
+    }
+  }
+  const info = await fs.lstat(p).catch(() => null);
+  const definitelyRealDir =
+    info !== null && info.isDirectory() && !info.isSymbolicLink() && (await fs.readdir(p).then(() => true, () => false));
+  if (!definitelyRealDir) {
+    try {
+      const quarantine = path.join(path.dirname(p), `.link-quarantined-${crypto.randomBytes(4).toString("hex")}`);
+      await fs.rename(p, quarantine);
+      for (const door of linkDoors(quarantine)) {
+        try {
+          await door();
+        } catch {
+          // leftover quarantined LINKS are inert; the caller's path is gone
+        }
+      }
+      return;
+    } catch (/** @type {unknown} */ err) {
+      errors.push(err);
+    }
+  }
+  if (!(await exists(p))) return;
+  throw errors.length > 0 ? errors[errors.length - 1] : new Error(`link removal refused for ${p}`);
+}
+
+/**
+ * Link-only deletion doors bound to one path. Each is non-recursive by
+ * construction (rmdir without /s, Directory.Delete without recursion,
+ * Remove-Item without -Recurse). No single door is correct on every Windows
+ * image: cmd refused DANGLING junctions on the GH runner, .NET resolved
+ * THROUGH live junctions there, and Remove-Item NullReferenceExceptions on
+ * live junctions on Win 26300 — so we try them all, then rename-aside.
+ * @param {string} p
+ */
+function linkDoors(p) {
   const escaped = p.replace(/'/g, "''");
-  await execFileAsync(
-    "powershell.exe",
-    ["-NoProfile", "-NonInteractive", "-Command", `[System.IO.Directory]::Delete('${escaped}')`],
-    { windowsHide: true },
-  );
+  return [
+    /** @returns {Promise<unknown>} */
+    () => execFileAsync("cmd.exe", ["/c", "rmdir", p], { windowsHide: true }),
+    /** @returns {Promise<unknown>} */
+    () =>
+      execFileAsync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-Command", `[System.IO.Directory]::Delete('${escaped}')`],
+        { windowsHide: true },
+      ),
+    /** @returns {Promise<unknown>} */
+    () =>
+      execFileAsync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-Command", `Remove-Item -LiteralPath '${escaped}' -Force -ErrorAction Stop`],
+        { windowsHide: true },
+      ),
+  ];
+}
+
+/** @param {string} p */
+async function exists(p) {
+  return (await fs.lstat(p).catch(() => null)) !== null;
 }
 
 /**
