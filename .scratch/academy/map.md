@@ -1,7 +1,7 @@
 # 员工学院 · 决策地图
 
 > 用 `/wayfinder` 维护。目的地是一份能直接开工的蓝图，不是代码。
-> **状态：设计与共识完成（2026-11-17）；Cubicle 侧施工完成（2026-11-18）** —— impl 四票 a01–a04 全部 done，`npm run build:renderer && npm run e2e:15` 一条命令全绿（正反双向断言）；Neo 侧 01–04 由 Neo 项目自行恢复复验（`894e5bf`，vendor 已重钉）；未决：N5（materialize 重复导出经 electron junction 吞学院内容）已按 SCOPE §3 交接 Neo 项目，Cubicle 侧 link-safe-remove 已缓解。
+> **状态：设计与共识完成（2026-11-17）；Cubicle 侧施工完成（2026-11-18）** —— impl 四票 a01–a04 全部 done，`npm run build:renderer && npm run e2e:15` 一条命令全绿（正反双向断言）；Neo 侧 01–04 由 Neo 项目自行恢复复验（`894e5bf`，vendor 已重钉）；N5（materialize 重复导出经 electron junction 吞学院内容）已由 Neo `b0767f9` 修复（lead 复现并验证：修复前 electron 双跑丢内容，修复后保留）；Cubicle 侧 link-safe-remove 缓解保留至 vendor 重钉 ≥ `b0767f9`。
 > 前情：`.scratch/cubicle/map.md`（v1 蓝图，已关闭）把「能力插件市场」留在雾区，这个 effort 把它兑现。
 
 ## Destination
@@ -62,8 +62,9 @@ Cubicle 里长出一个**学院**：本机级的公共能力资源库（技能 +
 | [N2 library + domain](neo-tickets/N2-library-domain.md) | `~/.neo/library/<domain>/…`，角色 `domains:` | **已交付**（Neo `894e5bf`） |
 | [N3 角色写口](neo-tickets/N3-role-write.md) | `neo role set` 写入口 | **已交付**（Neo `894e5bf`） |
 | [N4 导出合同 T1–T5](neo-tickets/N4-export-contract.md) | `envRefs` / env 校验归 run / `--no-auth` / `--agent-models` / help | **已交付并复验**（Neo `894e5bf`）；Cubicle 恒传 `--no-auth --agent-models` |
+| [N5 junction 吞内容](neo-tickets/N5-materialize-junction-eats-content.md) | 重复 materialize 不得跟进链接删内容 | **Neo 已修复**（`b0767f9`；link-safe 删除接入 materialize/launch/roots）；Cubicle 缓解保留至重钉 |
 
-**vendor 再钉**：Neo main 已恢复 01–04（`894e5bf`），vendor bundle 应重钉到该提交并复跑装配 e2e；在此之前 `4ee1dcd` 钉仍可用（提交对象永久存在，可复现）。
+**vendor 再钉**：当前钉 `894e5bf`；N5 修复在 `b0767f9`，下次重钉应 ≥ 该提交（钉后复跑 e2e:15 的「同一员工第二次派工」用例，再撤装配前自清 out 的缓解）。
 
 **消费侧注意**：`materialize` 默认与启动根同形（含 auth 凭据副本）；Cubicle **恒传 `--no-auth`**，导出目录不得出现 `auth.json`。`--out` 必须是本命令独占目录（`root.json` marker 认领），不要指向已有员工引擎根；模型由 Cubicle 自带，**恒传 `--agent-models`**。
 
