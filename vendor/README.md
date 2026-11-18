@@ -9,14 +9,15 @@ Cubicle 只读 `~/.neo` 文件、通过 **Neo CLI** 做装配计算（决策：`
 
 | 文件 | 说明 |
 |---|---|
-| 文件 | 说明 |
-|---|---|
-| `neo/bin/neo.js` | esbuild 单文件 bundle（ESM，node22 target，运行时依赖 `yaml` / `@clack` 全部内联；零 node_modules）；sha256 `fadfa65cbe8d3e2ee8becefc77b9349c3ae435e9a1068e48f94cef51a8195fc0` |
+| `neo/bin/neo.js` | esbuild 单文件 bundle（ESM，node22 target，运行时依赖 `yaml` / `@clack` 全部内联；零 node_modules）；sha256 `056e7e84301a22e91b29a594b923068acdc60abc80d9caf881823f3790bb4382` |
 
 ## 钉住的来源
 
 - 仓库：`C:\Users\Aiden\dev\aiden\neo`（github.com/Aiden-FE/neo）
-- **pin：`894e5bf38150fbf664c6703003add208b93bd084`**（main：lead 恢复并逐项复验的 Neo academy 01–04。
+- **pin：`b0767f9`**（Neo main：academy 01–04 + 票 05「递归删除不跟进链接」）。相对上一 pin `894e5bf`
+  的唯一行为变化就是票 05：`materialize` 换出/清理按 `realpath` 判链接，**重复导出同一 `--out`
+  不再跟进 electron 不可见 junction 删除学院内容**（N5）。Cubicle 装配前「自清旧 out」的缓解已随本 pin 移除。
+- 历史 pin：`894e5bf38150fbf664c6703003add208b93bd084`（lead 恢复并逐项复验的 academy 01–04。
   相对旧 pin 的导出合同变化：`materialize` 新增 `--no-auth`（不导出凭据副本；清单 `authExcluded:true`）
   与 `--agent-models`（不渲染 neo 模型配置；清单 `model:{file:null,owner:"host",reason}`）；
   清单 `mcp.envRefs` = server→配置键→变量名（**只有引用、不含值**，宿主在引擎启动时自行注入）；
@@ -35,7 +36,7 @@ Cubicle 只读 `~/.neo` 文件、通过 **Neo CLI** 做装配计算（决策：`
 ```bash
 # 1) 取固定 commit（git archive 只读，不 checkout）
 mkdir -p tmp/neo-vendor-build
-git -C /c/Users/Aiden/dev/aiden/neo archive 894e5bf | tar -x -C tmp/neo-vendor-build
+git -C /c/Users/Aiden/dev/aiden/neo archive b0767f9 | tar -x -C tmp/neo-vendor-build
 
 # 2) 装 bundle 所需运行时依赖（版本钉死自 neo 的 pnpm-lock；archived 根 package.json
 #    带 pnpm workspace: 协议 npm 吃不下，所以装到干净目录再拷 node_modules）
@@ -64,7 +65,7 @@ cp neo-bundle.mjs ../../vendor/neo/bin/neo.js
 - Cubicle **恒传 `--no-auth --agent-models --json`**：导出面没有凭据副本（`authExcluded:true`）、
   没有 neo 模型配置（模型唯一来源仍是 Cubicle 模型库）。`--out` 产物仍只准落在机器本地的
   data 目录（`CUBICLE_DATA_DIR`），永不入 git。
-- MCP 密钥合同（894e5bf）：neo 导出只给 `envRefs` 引用；密钥值由 **Cubicle 在引擎启动时**
+- MCP 密钥合同（b0767f9）：neo 导出只给 `envRefs` 引用；密钥值由 **Cubicle 在引擎启动时**
   从 AgentHost 环境解析注入（pi 的 `mcp.json` / codex 的 `config.toml` 落的是解析后的值，
   dsh 走 ACP `session/new` 内存注入）。装配期不要求密钥变量存在；启动期缺失 = 可读失败。
 - **锁 dirty 顺序（宿主合同）**：角色写入（`neo role set`）会把角色锁标 dirty；清脏只发生在

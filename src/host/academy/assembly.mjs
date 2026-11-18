@@ -32,7 +32,7 @@ import path from "node:path";
 
 import { appError } from "../../shared/apperror.mjs";
 import { enginePaths } from "../engine/paths.mjs";
-import { removeLinkOnly, removeTreeJunctionSafe } from "./link-safe-remove.mjs";
+import { removeLinkOnly } from "./link-safe-remove.mjs";
 import { runMaterialize } from "./neo-cli.mjs";
 import { readRoleMcpServers } from "./neo-mcp.mjs";
 import { resolveNeoHome } from "./neo-roles.mjs";
@@ -143,12 +143,11 @@ export function createAcademyAssembler({ dataDir, nodeBinary, cliEntry, env = pr
     const outDir = path.join(agentDir, "neo-materialized");
 
     // 1) ask Neo (the single rule owner) for the role×agent resource root.
-    //    a04 defect workaround (see link-safe-remove.mjs): materialize's own
-    //    swap-out of a previous --out follows electron-created junctions that
-    //    node cannot see and deletes their TARGETS (the academy content).
-    //    Cubicle therefore clears the old product junction-safely first, so
-    //    materialize always lands on a clean directory.
-    await removeTreeJunctionSafe(outDir);
+    //    Vendored pin b0767f9 (Neo ticket 05) makes materialize's own swap-out
+    //    link-safe: it detects electron-invisible junctions by realpath and only
+    //    removes the link, never the academy content. The a04 pre-clear workaround
+    //    is therefore gone — re-pinning BELOW b0767f9 resurrects N5 (repeat
+    //    export eats skill content).
     const manifest = await runMaterialize({
       nodeBinary,
       cliEntry,

@@ -1,7 +1,7 @@
 # N5: materialize 重复导出会经「node 看不见的 junction」吞掉学院内容（electron-as-node 场景）
 
 **Type:** bug（交接票，只含现象与期望；按 SCOPE §3 不含代码/patch）
-**Status:** fixed in Neo `b0767f9`（Cubicle 缓解保留至重钉）
+**Status:** closed（Neo `b0767f9`；vendor 已重钉、Cubicle 缓解已移除、e2e:15 复跑绿）
 **发现:** 2026-11-18 · Cubicle 票 a04（e2e:15），vendored pin `894e5bf`
 
 ## 现象
@@ -49,3 +49,10 @@ converge/update 等清理面若同样经 electron-as-node 跑，仍有同类风�
 - **Cubicle 侧**：缓解（`link-safe-remove.mjs` + 装配前自清 out）**保留**，直到 vendor 重钉到
   ≥ `b0767f9` 并复跑 e2e:15 的「同一员工第二次派工」用例；之后可撤 out 自清，
   员工槽位的 `unlinkOnly` 保护建议保留（与本缺陷无关，是装配器自身的链接安全门）。
+
+## 关闭（2026-11-18，lead）
+
+- vendor 重钉 `894e5bf` → `b0767f9`（bundle sha256 `056e7e84…`；`vendor/README.md` 已更新）。
+- 移除 Cubicle 的「装配前自清 out」缓解（`assembly.mjs`）；员工槽位的 `unlinkOnly` 保护保留。
+- 验证：electron-as-node 双跑 vendored bundle → 学院内容保留；`npm run check` 485 绿；
+  `npm run build:renderer && npm run e2e:15` 绿（该 e2e 含同一员工第二次派工，正好走重复 materialize）。

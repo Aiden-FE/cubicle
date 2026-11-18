@@ -109,17 +109,17 @@ var require_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    function visit_(key, node, visitor, path27) {
-      const ctrl = callVisitor(key, node, visitor, path27);
+    function visit_(key, node, visitor, path28) {
+      const ctrl = callVisitor(key, node, visitor, path28);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path27, ctrl);
-        return visit_(key, ctrl, visitor, path27);
+        replaceNode(key, path28, ctrl);
+        return visit_(key, ctrl, visitor, path28);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path27 = Object.freeze(path27.concat(node));
+          path28 = Object.freeze(path28.concat(node));
           for (let i2 = 0; i2 < node.items.length; ++i2) {
-            const ci = visit_(i2, node.items[i2], visitor, path27);
+            const ci = visit_(i2, node.items[i2], visitor, path28);
             if (typeof ci === "number")
               i2 = ci - 1;
             else if (ci === BREAK)
@@ -130,13 +130,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path27 = Object.freeze(path27.concat(node));
-          const ck = visit_("key", node.key, visitor, path27);
+          path28 = Object.freeze(path28.concat(node));
+          const ck = visit_("key", node.key, visitor, path28);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = visit_("value", node.value, visitor, path27);
+          const cv = visit_("value", node.value, visitor, path28);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -157,17 +157,17 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node, visitor, path27) {
-      const ctrl = await callVisitor(key, node, visitor, path27);
+    async function visitAsync_(key, node, visitor, path28) {
+      const ctrl = await callVisitor(key, node, visitor, path28);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path27, ctrl);
-        return visitAsync_(key, ctrl, visitor, path27);
+        replaceNode(key, path28, ctrl);
+        return visitAsync_(key, ctrl, visitor, path28);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path27 = Object.freeze(path27.concat(node));
+          path28 = Object.freeze(path28.concat(node));
           for (let i2 = 0; i2 < node.items.length; ++i2) {
-            const ci = await visitAsync_(i2, node.items[i2], visitor, path27);
+            const ci = await visitAsync_(i2, node.items[i2], visitor, path28);
             if (typeof ci === "number")
               i2 = ci - 1;
             else if (ci === BREAK)
@@ -178,13 +178,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path27 = Object.freeze(path27.concat(node));
-          const ck = await visitAsync_("key", node.key, visitor, path27);
+          path28 = Object.freeze(path28.concat(node));
+          const ck = await visitAsync_("key", node.key, visitor, path28);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = await visitAsync_("value", node.value, visitor, path27);
+          const cv = await visitAsync_("value", node.value, visitor, path28);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -211,23 +211,23 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node, visitor, path27) {
+    function callVisitor(key, node, visitor, path28) {
       if (typeof visitor === "function")
-        return visitor(key, node, path27);
+        return visitor(key, node, path28);
       if (identity.isMap(node))
-        return visitor.Map?.(key, node, path27);
+        return visitor.Map?.(key, node, path28);
       if (identity.isSeq(node))
-        return visitor.Seq?.(key, node, path27);
+        return visitor.Seq?.(key, node, path28);
       if (identity.isPair(node))
-        return visitor.Pair?.(key, node, path27);
+        return visitor.Pair?.(key, node, path28);
       if (identity.isScalar(node))
-        return visitor.Scalar?.(key, node, path27);
+        return visitor.Scalar?.(key, node, path28);
       if (identity.isAlias(node))
-        return visitor.Alias?.(key, node, path27);
+        return visitor.Alias?.(key, node, path28);
       return void 0;
     }
-    function replaceNode(key, path27, node) {
-      const parent = path27[path27.length - 1];
+    function replaceNode(key, path28, node) {
+      const parent = path28[path28.length - 1];
       if (identity.isCollection(parent)) {
         parent.items[key] = node;
       } else if (identity.isPair(parent)) {
@@ -839,10 +839,10 @@ var require_Collection = __commonJS({
     var createNode = require_createNode();
     var identity = require_identity();
     var Node = require_Node();
-    function collectionFromPath(schema, path27, value) {
+    function collectionFromPath(schema, path28, value) {
       let v = value;
-      for (let i2 = path27.length - 1; i2 >= 0; --i2) {
-        const k = path27[i2];
+      for (let i2 = path28.length - 1; i2 >= 0; --i2) {
+        const k = path28[i2];
         if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
           const a2 = [];
           a2[k] = v;
@@ -861,7 +861,7 @@ var require_Collection = __commonJS({
         sourceObjects: /* @__PURE__ */ new Map()
       });
     }
-    var isEmptyPath = (path27) => path27 == null || typeof path27 === "object" && !!path27[Symbol.iterator]().next().done;
+    var isEmptyPath = (path28) => path28 == null || typeof path28 === "object" && !!path28[Symbol.iterator]().next().done;
     var Collection = class extends Node.NodeBase {
       constructor(type, schema) {
         super(type);
@@ -891,11 +891,11 @@ var require_Collection = __commonJS({
        * be a Pair instance or a `{ key, value }` object, which may not have a key
        * that already exists in the map.
        */
-      addIn(path27, value) {
-        if (isEmptyPath(path27))
+      addIn(path28, value) {
+        if (isEmptyPath(path28))
           this.add(value);
         else {
-          const [key, ...rest] = path27;
+          const [key, ...rest] = path28;
           const node = this.get(key, true);
           if (identity.isCollection(node))
             node.addIn(rest, value);
@@ -909,8 +909,8 @@ var require_Collection = __commonJS({
        * Removes a value from the collection.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path27) {
-        const [key, ...rest] = path27;
+      deleteIn(path28) {
+        const [key, ...rest] = path28;
         if (rest.length === 0)
           return this.delete(key);
         const node = this.get(key, true);
@@ -924,8 +924,8 @@ var require_Collection = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path27, keepScalar) {
-        const [key, ...rest] = path27;
+      getIn(path28, keepScalar) {
+        const [key, ...rest] = path28;
         const node = this.get(key, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node) ? node.value : node;
@@ -943,8 +943,8 @@ var require_Collection = __commonJS({
       /**
        * Checks if the collection includes a value with the key `key`.
        */
-      hasIn(path27) {
-        const [key, ...rest] = path27;
+      hasIn(path28) {
+        const [key, ...rest] = path28;
         if (rest.length === 0)
           return this.has(key);
         const node = this.get(key, true);
@@ -954,8 +954,8 @@ var require_Collection = __commonJS({
        * Sets a value in this collection. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path27, value) {
-        const [key, ...rest] = path27;
+      setIn(path28, value) {
+        const [key, ...rest] = path28;
         if (rest.length === 0) {
           this.set(key, value);
         } else {
@@ -3470,9 +3470,9 @@ var require_Document = __commonJS({
           this.contents.add(value);
       }
       /** Adds a value to the document. */
-      addIn(path27, value) {
+      addIn(path28, value) {
         if (assertCollection(this.contents))
-          this.contents.addIn(path27, value);
+          this.contents.addIn(path28, value);
       }
       /**
        * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -3547,14 +3547,14 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path27) {
-        if (Collection.isEmptyPath(path27)) {
+      deleteIn(path28) {
+        if (Collection.isEmptyPath(path28)) {
           if (this.contents == null)
             return false;
           this.contents = null;
           return true;
         }
-        return assertCollection(this.contents) ? this.contents.deleteIn(path27) : false;
+        return assertCollection(this.contents) ? this.contents.deleteIn(path28) : false;
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -3569,10 +3569,10 @@ var require_Document = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path27, keepScalar) {
-        if (Collection.isEmptyPath(path27))
+      getIn(path28, keepScalar) {
+        if (Collection.isEmptyPath(path28))
           return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-        return identity.isCollection(this.contents) ? this.contents.getIn(path27, keepScalar) : void 0;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path28, keepScalar) : void 0;
       }
       /**
        * Checks if the document includes a value with the key `key`.
@@ -3583,10 +3583,10 @@ var require_Document = __commonJS({
       /**
        * Checks if the document includes a value at `path`.
        */
-      hasIn(path27) {
-        if (Collection.isEmptyPath(path27))
+      hasIn(path28) {
+        if (Collection.isEmptyPath(path28))
           return this.contents !== void 0;
-        return identity.isCollection(this.contents) ? this.contents.hasIn(path27) : false;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path28) : false;
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
@@ -3603,13 +3603,13 @@ var require_Document = __commonJS({
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path27, value) {
-        if (Collection.isEmptyPath(path27)) {
+      setIn(path28, value) {
+        if (Collection.isEmptyPath(path28)) {
           this.contents = value;
         } else if (this.contents == null) {
-          this.contents = Collection.collectionFromPath(this.schema, Array.from(path27), value);
+          this.contents = Collection.collectionFromPath(this.schema, Array.from(path28), value);
         } else if (assertCollection(this.contents)) {
-          this.contents.setIn(path27, value);
+          this.contents.setIn(path28, value);
         }
       }
       /**
@@ -5570,9 +5570,9 @@ var require_cst_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    visit.itemAtPath = (cst, path27) => {
+    visit.itemAtPath = (cst, path28) => {
       let item = cst;
-      for (const [field, index] of path27) {
+      for (const [field, index] of path28) {
         const tok = item?.[field];
         if (tok && "items" in tok) {
           item = tok.items[index];
@@ -5581,23 +5581,23 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit.parentCollection = (cst, path27) => {
-      const parent = visit.itemAtPath(cst, path27.slice(0, -1));
-      const field = path27[path27.length - 1][0];
+    visit.parentCollection = (cst, path28) => {
+      const parent = visit.itemAtPath(cst, path28.slice(0, -1));
+      const field = path28[path28.length - 1][0];
       const coll = parent?.[field];
       if (coll && "items" in coll)
         return coll;
       throw new Error("Parent collection not found");
     };
-    function _visit(path27, item, visitor) {
-      let ctrl = visitor(item, path27);
+    function _visit(path28, item, visitor) {
+      let ctrl = visitor(item, path28);
       if (typeof ctrl === "symbol")
         return ctrl;
       for (const field of ["key", "value"]) {
         const token = item[field];
         if (token && "items" in token) {
           for (let i2 = 0; i2 < token.items.length; ++i2) {
-            const ci = _visit(Object.freeze(path27.concat([[field, i2]])), token.items[i2], visitor);
+            const ci = _visit(Object.freeze(path28.concat([[field, i2]])), token.items[i2], visitor);
             if (typeof ci === "number")
               i2 = ci - 1;
             else if (ci === BREAK)
@@ -5608,10 +5608,10 @@ var require_cst_visit = __commonJS({
             }
           }
           if (typeof ctrl === "function" && field === "key")
-            ctrl = ctrl(item, path27);
+            ctrl = ctrl(item, path28);
         }
       }
-      return typeof ctrl === "function" ? ctrl(item, path27) : ctrl;
+      return typeof ctrl === "function" ? ctrl(item, path28) : ctrl;
     }
     exports.visit = visit;
   }
@@ -6913,14 +6913,14 @@ var require_parser = __commonJS({
             case "scalar":
             case "single-quoted-scalar":
             case "double-quoted-scalar": {
-              const fs29 = this.flowScalar(this.type);
+              const fs30 = this.flowScalar(this.type);
               if (atNextItem || it.value) {
-                map.items.push({ start, key: fs29, sep: [] });
+                map.items.push({ start, key: fs30, sep: [] });
                 this.onKeyLine = true;
               } else if (it.sep) {
-                this.stack.push(fs29);
+                this.stack.push(fs30);
               } else {
-                Object.assign(it, { key: fs29, sep: [] });
+                Object.assign(it, { key: fs30, sep: [] });
                 this.onKeyLine = true;
               }
               return;
@@ -7048,13 +7048,13 @@ var require_parser = __commonJS({
             case "scalar":
             case "single-quoted-scalar":
             case "double-quoted-scalar": {
-              const fs29 = this.flowScalar(this.type);
+              const fs30 = this.flowScalar(this.type);
               if (!it || it.value)
-                fc.items.push({ start: [], key: fs29, sep: [] });
+                fc.items.push({ start: [], key: fs30, sep: [] });
               else if (it.sep)
-                this.stack.push(fs29);
+                this.stack.push(fs30);
               else
-                Object.assign(it, { key: fs29, sep: [] });
+                Object.assign(it, { key: fs30, sep: [] });
               return;
             }
             case "flow-map-end":
@@ -7364,9 +7364,9 @@ var require_dist = __commonJS({
 
 // packages/cli/src/cli.ts
 import os4 from "node:os";
-import path26 from "node:path";
+import path27 from "node:path";
 import { spawn as spawn2 } from "node:child_process";
-import fs28 from "node:fs/promises";
+import fs29 from "node:fs/promises";
 
 // node_modules/@clack/core/dist/index.mjs
 import { styleText } from "node:util";
@@ -11171,30 +11171,30 @@ var isMissing = (error) => {
 function nodeLinkPort() {
   const isWindows2 = process.platform === "win32";
   return {
-    async lstat(path27) {
+    async lstat(path28) {
       try {
-        const stat = await fs15.lstat(path27);
+        const stat = await fs15.lstat(path28);
         return { symlink: stat.isSymbolicLink(), directory: stat.isDirectory(), file: stat.isFile() };
       } catch (error) {
         if (isMissing(error)) return null;
         throw error;
       }
     },
-    readlink(path27) {
-      return fs15.readlink(path27);
+    readlink(path28) {
+      return fs15.readlink(path28);
     },
     linkDir(target, linkPath) {
       return fs15.symlink(target, linkPath, isWindows2 ? "junction" : "dir");
     },
-    async unlink(path27) {
+    async unlink(path28) {
       try {
-        await fs15.unlink(path27);
+        await fs15.unlink(path28);
       } catch (error) {
         const code = error?.code;
         if (isWindows2 && (code === "EPERM" || code === "EISDIR")) {
-          const stat = await fs15.lstat(path27).catch(() => null);
+          const stat = await fs15.lstat(path28).catch(() => null);
           if (stat?.isSymbolicLink() === true) {
-            await fs15.rmdir(path27);
+            await fs15.rmdir(path28);
             return;
           }
         }
@@ -11204,10 +11204,93 @@ function nodeLinkPort() {
   };
 }
 
-// packages/core/src/mounts.ts
-import { randomUUID as randomUUID3 } from "node:crypto";
+// packages/core/src/link-safe.ts
+import { execFile } from "node:child_process";
 import fs16 from "node:fs/promises";
 import path12 from "node:path";
+import { promisify } from "node:util";
+var execFileAsync = promisify(execFile);
+var isMissing2 = (error) => {
+  const code = error?.code;
+  return code === "ENOENT" || code === "ENOTDIR";
+};
+async function removeVisibleLink(target, link, platform) {
+  if (link !== void 0) {
+    await link.unlink(target);
+    return;
+  }
+  try {
+    await fs16.unlink(target);
+    return;
+  } catch (error) {
+    if (platform === "win32") {
+      const code = error?.code;
+      if (code === "EPERM" || code === "EISDIR") {
+        await fs16.rmdir(target);
+        return;
+      }
+    }
+    throw error;
+  }
+}
+async function removeOpaqueLink(target, platform) {
+  if (platform === "win32") {
+    const comSpec = process.env.ComSpec ?? "cmd.exe";
+    await execFileAsync(comSpec, ["/c", "rmdir", target], { windowsHide: true });
+    return;
+  }
+  try {
+    await fs16.unlink(target);
+  } catch {
+    await fs16.rmdir(target);
+  }
+}
+async function removeTreeLinkSafe(root, options = {}) {
+  const platform = options.platform ?? process.platform;
+  const realpath = options.realpath ?? ((target) => fs16.realpath(target));
+  const removeOpaque = options.removeOpaque ?? ((target) => removeOpaqueLink(target, platform));
+  const info = await fs16.lstat(root).catch((error) => {
+    if (isMissing2(error)) return null;
+    throw error;
+  });
+  if (info === null) return;
+  if (info.isSymbolicLink()) {
+    await removeVisibleLink(root, options.link, platform);
+    return;
+  }
+  if (!info.isDirectory()) {
+    await fs16.unlink(root);
+    return;
+  }
+  const real = await realpath(root).catch(() => null);
+  if (real !== null && path12.resolve(real) !== path12.resolve(root)) {
+    await removeOpaque(root);
+    return;
+  }
+  let entries;
+  try {
+    entries = await fs16.readdir(root, { withFileTypes: true });
+  } catch (error) {
+    if (isMissing2(error)) {
+      await removeOpaque(root);
+      return;
+    }
+    throw error;
+  }
+  for (const entry of entries) {
+    if (entry.isSymbolicLink()) {
+      await removeVisibleLink(path12.join(root, entry.name), options.link, platform);
+      continue;
+    }
+    await removeTreeLinkSafe(path12.join(root, entry.name), options);
+  }
+  await fs16.rmdir(root);
+}
+
+// packages/core/src/mounts.ts
+import { randomUUID as randomUUID3 } from "node:crypto";
+import fs17 from "node:fs/promises";
+import path13 from "node:path";
 function emptyMounts() {
   return { version: 1, targets: {} };
 }
@@ -11217,7 +11300,7 @@ function invalid5(message) {
 async function readMounts(home) {
   let text2;
   try {
-    text2 = await fs16.readFile(mountsJsonPath(home), "utf8");
+    text2 = await fs17.readFile(mountsJsonPath(home), "utf8");
   } catch (error) {
     if (error.code === "ENOENT") return emptyMounts();
     throw error;
@@ -11255,38 +11338,38 @@ async function readMounts(home) {
 }
 async function writeMounts(home, ledger) {
   const file = mountsJsonPath(home);
-  await fs16.mkdir(stateDir(home), { recursive: true });
-  const tmp = path12.join(stateDir(home), `.${path12.basename(file)}.${randomUUID3()}.tmp`);
+  await fs17.mkdir(stateDir(home), { recursive: true });
+  const tmp = path13.join(stateDir(home), `.${path13.basename(file)}.${randomUUID3()}.tmp`);
   try {
-    await fs16.writeFile(tmp, `${JSON.stringify(ledger, null, 2)}
+    await fs17.writeFile(tmp, `${JSON.stringify(ledger, null, 2)}
 `, "utf8");
-    await fs16.rename(tmp, file);
+    await fs17.rename(tmp, file);
   } finally {
-    await fs16.rm(tmp, { recursive: true, force: true }).catch(() => void 0);
+    await fs17.rm(tmp, { recursive: true, force: true }).catch(() => void 0);
   }
 }
 
 // packages/core/src/targets.ts
-import path13 from "node:path";
+import path14 from "node:path";
 async function readRegistry(home) {
   const extension = await readAgentsExtension(home);
   return mergeRegistry(BUILTIN_AGENTS, extension?.agents ?? {});
 }
 function resolveDirValue(value, homedir, kind, what) {
   const expanded = expandTilde(value, homedir);
-  if (!path13.isAbsolute(expanded)) {
+  if (!path14.isAbsolute(expanded)) {
     throw new NeoError(
       kind,
       `${what} must resolve to an absolute path after ~ expansion, got: ${JSON.stringify(value)}`
     );
   }
-  return path13.resolve(expanded);
+  return path14.resolve(expanded);
 }
 function registrySkillDirs(registry, homedir) {
   const dirs = [];
   for (const entry of registry) {
     const expanded = expandTilde(entry.skillsDir, homedir);
-    if (path13.isAbsolute(expanded)) dirs.push(path13.resolve(expanded));
+    if (path14.isAbsolute(expanded)) dirs.push(path14.resolve(expanded));
   }
   return dirs;
 }
@@ -11380,13 +11463,13 @@ async function listConfiguredTargets(home, homedir) {
 }
 
 // packages/core/src/converge.ts
-import fs18 from "node:fs/promises";
-import path15 from "node:path";
+import fs19 from "node:fs/promises";
+import path16 from "node:path";
 
 // packages/core/src/agentsmd.ts
-import path14 from "node:path";
+import path15 from "node:path";
 import { randomUUID as randomUUID4 } from "node:crypto";
-import fs17 from "node:fs/promises";
+import fs18 from "node:fs/promises";
 var BEGIN_LINE = /^<!--\s*neo:begin\s+role=([^\s>]+)\s*-->\r?$/;
 var END_LINE = /^<!--\s*neo:end\s+role=([^\s>]+)\s*-->\r?$/;
 var PROJECT_BEGIN_LINE = /^<!--\s*neo:project:begin\s+role=([^\s>]+)\s*-->\r?$/;
@@ -11502,14 +11585,14 @@ function planAgentsMdTargets(targets, registry, homedir) {
       continue;
     }
     const expanded = expandTilde(raw, homedir);
-    if (!path14.isAbsolute(expanded)) {
+    if (!path15.isAbsolute(expanded)) {
       errors.set(
         target.agent,
         `agentsMd path for "${target.agent}" must resolve to an absolute path after ~ expansion, got: ${JSON.stringify(raw)}`
       );
       continue;
     }
-    drafts.push({ agent: target.agent, file: path14.resolve(expanded), rawPath: raw });
+    drafts.push({ agent: target.agent, file: path15.resolve(expanded), rawPath: raw });
   }
   for (const draft of drafts) {
     const key = caseFoldPath(draft.file);
@@ -11528,7 +11611,7 @@ function planAgentsMdTargets(targets, registry, homedir) {
 }
 async function readRolePrompt(home, role) {
   try {
-    return await fs17.readFile(roleAgentsMd(home, role), "utf8");
+    return await fs18.readFile(roleAgentsMd(home, role), "utf8");
   } catch (error) {
     if (error.code === "ENOENT") return null;
     throw error;
@@ -11556,7 +11639,7 @@ function asAgentsMdLedger(previous) {
 }
 function backupRelPath(agent, file) {
   const safeAgent = safeBackupAgentName(agent);
-  return path14.join("state", "backups", `${safeAgent}-${path14.basename(file)}.bak`).split(path14.sep).join("/");
+  return path15.join("state", "backups", `${safeAgent}-${path15.basename(file)}.bak`).split(path15.sep).join("/");
 }
 async function pathExists2(target) {
   return pathExists(target);
@@ -11565,19 +11648,19 @@ async function writeFileAtomic2(file, content) {
   await writeFileAtomic(file, content, { defaultMode: 420 });
 }
 async function backupFileAtomic(from, to) {
-  await fs17.mkdir(path14.dirname(to), { recursive: true });
+  await fs18.mkdir(path15.dirname(to), { recursive: true });
   const tmp = `${to}.${randomUUID4()}.tmp`;
   try {
-    await fs17.copyFile(from, tmp);
-    await fs17.rename(tmp, to);
+    await fs18.copyFile(from, tmp);
+    await fs18.rename(tmp, to);
   } finally {
-    await fs17.rm(tmp, { force: true }).catch(() => void 0);
+    await fs18.rm(tmp, { force: true }).catch(() => void 0);
   }
 }
 async function pushOverrideWarning(warnings, resolved, role) {
   if (role === null) return;
-  if (resolved.agent !== "codex" || path14.basename(resolved.file) !== "AGENTS.md") return;
-  const override = path14.join(path14.dirname(resolved.file), "AGENTS.override.md");
+  if (resolved.agent !== "codex" || path15.basename(resolved.file) !== "AGENTS.md") return;
+  const override = path15.join(path15.dirname(resolved.file), "AGENTS.override.md");
   if (!await pathExists2(override)) return;
   warnings.push(`AGENTS.override.md exists (${override}); the mounted ${resolved.file} is not read by codex`);
 }
@@ -11589,7 +11672,7 @@ async function convergeAgentsMdFile(home, resolved, role, previous) {
     const desired = await desiredPromptBlocks(home, role);
     let content;
     try {
-      content = await fs17.readFile(resolved.file, "utf8");
+      content = await fs18.readFile(resolved.file, "utf8");
     } catch (error) {
       if (error.code === "ENOENT") content = null;
       else throw error;
@@ -11601,7 +11684,7 @@ async function convergeAgentsMdFile(home, resolved, role, previous) {
     if (desired.length === 0) {
       const { content: userPart } = stripNeoBlocks(content ?? "");
       if (userPart.trim() === "" && prevEntry?.backup === void 0) {
-        await fs17.rm(resolved.file, { force: true });
+        await fs18.rm(resolved.file, { force: true });
         actions.push({ kind: "file-removed", file: resolved.file });
       } else {
         await writeFileAtomic2(resolved.file, userPart.trim() === "" ? "" : userPart);
@@ -11622,7 +11705,7 @@ async function convergeAgentsMdFile(home, resolved, role, previous) {
     let backupNote;
     if (content !== null && backupRel === void 0) {
       backupRel = backupRelPath(resolved.agent, resolved.file);
-      const bakAbs = path14.join(home, ...backupRel.split("/"));
+      const bakAbs = path15.join(home, ...backupRel.split("/"));
       if (!await pathExists2(bakAbs)) {
         await backupFileAtomic(resolved.file, bakAbs);
         backupNote = `first-touch backup -> ${backupRel}`;
@@ -11682,7 +11765,7 @@ async function convergeOneTarget(ports, home, target, desired, ledger, opts) {
   };
   const port = ports.link;
   try {
-    await fs18.mkdir(target.skillsDir, { recursive: true });
+    await fs19.mkdir(target.skillsDir, { recursive: true });
   } catch (error) {
     report.errors.push({ skill: "(target)", error: `cannot create skills dir: ${error.message}` });
     return report;
@@ -11693,7 +11776,7 @@ async function convergeOneTarget(ports, home, target, desired, ledger, opts) {
   const stuckSkills = /* @__PURE__ */ new Set();
   for (const name of recorded) {
     if (desired.skills.has(name)) continue;
-    const slot = path15.join(target.skillsDir, name);
+    const slot = path16.join(target.skillsDir, name);
     let info;
     try {
       info = await port.lstat(slot);
@@ -11733,7 +11816,7 @@ async function convergeOneTarget(ports, home, target, desired, ledger, opts) {
       });
       continue;
     }
-    const slot = path15.join(target.skillsDir, name);
+    const slot = path16.join(target.skillsDir, name);
     const source = skill.dir;
     const replace = async (note, kind) => {
       try {
@@ -11788,7 +11871,7 @@ async function convergeOneTarget(ports, home, target, desired, ledger, opts) {
         let resolved = null;
         try {
           const raw = await port.readlink(slot);
-          resolved = path15.resolve(path15.dirname(slot), normalizeLinkTarget(raw));
+          resolved = path16.resolve(path16.dirname(slot), normalizeLinkTarget(raw));
         } catch {
           resolved = null;
         }
@@ -11877,14 +11960,14 @@ async function convergeOneTarget(ports, home, target, desired, ledger, opts) {
     const keep = new Set(skills);
     let entries;
     try {
-      entries = await fs18.readdir(target.skillsDir);
+      entries = await fs19.readdir(target.skillsDir);
     } catch (error) {
       report.errors.push({ skill: "(target)", error: `orphan sweep readdir failed: ${error.message}` });
       return report;
     }
     for (const name of entries) {
       if (keep.has(name)) continue;
-      const slot = path15.join(target.skillsDir, name);
+      const slot = path16.join(target.skillsDir, name);
       const info = await port.lstat(slot);
       if (info === null || !info.symlink) continue;
       let pointsHome = false;
@@ -11940,7 +12023,7 @@ function enqueue(operation) {
 }
 async function existsDir2(target) {
   try {
-    const stat = await fs18.stat(target);
+    const stat = await fs19.stat(target);
     return stat.isDirectory();
   } catch (error) {
     if (error.code === "ENOENT") return false;
@@ -11981,8 +12064,8 @@ async function offAll(ports, home, opts) {
 }
 
 // packages/core/src/roots.ts
-import fs19 from "node:fs/promises";
-import path16 from "node:path";
+import fs20 from "node:fs/promises";
+import path17 from "node:path";
 function entryFor(registry, agent) {
   const entry = registry.find((item) => item.id === agent);
   if (entry === void 0) {
@@ -12002,7 +12085,7 @@ function isolationFor(entry) {
 }
 async function listDirOrEmpty(dir) {
   try {
-    const entries = await fs19.readdir(dir, { withFileTypes: true });
+    const entries = await fs20.readdir(dir, { withFileTypes: true });
     return entries.filter((entry) => entry.isDirectory() || entry.isSymbolicLink());
   } catch (error) {
     if (error.code === "ENOENT") return [];
@@ -12020,12 +12103,12 @@ async function desiredSkillSources(home, role) {
   return { dirs, roles };
 }
 async function convergeSkillLinks(link, skillsRoot, desired) {
-  await fs19.mkdir(skillsRoot, { recursive: true });
+  await fs20.mkdir(skillsRoot, { recursive: true });
   const notes = [];
   const counts = { added: 0, kept: 0, removed: 0, replaced: 0 };
   const present = /* @__PURE__ */ new Set();
-  for (const entry of await fs19.readdir(skillsRoot, { withFileTypes: true })) {
-    const slot = path16.join(skillsRoot, entry.name);
+  for (const entry of await fs20.readdir(skillsRoot, { withFileTypes: true })) {
+    const slot = path17.join(skillsRoot, entry.name);
     present.add(entry.name);
     const source = desired.get(entry.name);
     if (source === void 0) {
@@ -12050,7 +12133,7 @@ async function convergeSkillLinks(link, skillsRoot, desired) {
     } catch {
       raw = null;
     }
-    const resolved = raw === null ? null : path16.resolve(path16.dirname(slot), normalizeLinkTarget(raw));
+    const resolved = raw === null ? null : path17.resolve(path17.dirname(slot), normalizeLinkTarget(raw));
     if (resolved !== null && samePath(resolved, source)) {
       counts.kept++;
       continue;
@@ -12061,14 +12144,14 @@ async function convergeSkillLinks(link, skillsRoot, desired) {
   }
   for (const [name, source] of desired) {
     if (present.has(name)) continue;
-    await link.linkDir(source, path16.join(skillsRoot, name));
+    await link.linkDir(source, path17.join(skillsRoot, name));
     counts.added++;
   }
   return { ...counts, notes };
 }
 async function readTextIfExists(file) {
   try {
-    return await fs19.readFile(file, "utf8");
+    return await fs20.readFile(file, "utf8");
   } catch (error) {
     if (error.code === "ENOENT") return null;
     throw error;
@@ -12077,9 +12160,9 @@ async function readTextIfExists(file) {
 async function ensureShareDirs(link, root, realRoot, dirs, notes) {
   const shared = [];
   for (const dir of dirs) {
-    const source = path16.join(realRoot, dir);
+    const source = path17.join(realRoot, dir);
     if (!await pathExists(source)) continue;
-    const slot = path16.join(root, dir);
+    const slot = path17.join(root, dir);
     const info = await link.lstat(slot);
     if (info === null) {
       await link.linkDir(source, slot);
@@ -12088,7 +12171,7 @@ async function ensureShareDirs(link, root, realRoot, dirs, notes) {
     }
     if (info.symlink === true) {
       const raw = await link.readlink(slot).catch(() => null);
-      if (raw !== null && samePath(path16.resolve(path16.dirname(slot), normalizeLinkTarget(raw)), source)) {
+      if (raw !== null && samePath(path17.resolve(path17.dirname(slot), normalizeLinkTarget(raw)), source)) {
         shared.push(dir);
         continue;
       }
@@ -12108,31 +12191,31 @@ async function convergeRoot(ports, home, homedir, opts) {
     throw new NeoError("state", `role "${role}" not found`);
   }
   const root = opts.root ?? rootDir(home, role, opts.agent);
-  await fs19.mkdir(root, { recursive: true });
+  await fs20.mkdir(root, { recursive: true });
   const { dirs: desired, roles: sourceRoles } = await desiredSkillSources(home, role);
   const skillResult = await convergeSkillLinks(
     ports.link,
-    path16.join(root, isolate.skillsDir),
+    path17.join(root, isolate.skillsDir),
     desired
   );
   const notes = [...skillResult.notes];
   const blocks = await desiredPromptBlocks(home, role);
   const instructionText = blocks.map((block2) => block2.content.replace(/\s+$/, "")).filter((text2) => text2.length > 0).join("\n\n");
-  const instructionFile = path16.join(root, isolate.instructionFile);
+  const instructionFile = path17.join(root, isolate.instructionFile);
   if (instructionText.length > 0) {
     await writeFileAtomic(instructionFile, `${instructionText}
 `);
   } else {
-    await fs19.rm(instructionFile, { force: true });
+    await fs20.rm(instructionFile, { force: true });
   }
   const realRoot = expandTilde(isolate.homeDir, homedir);
   const auth = [];
   if (opts.skipAuth !== true) for (const file of isolate.authFiles ?? []) {
-    const source = path16.join(realRoot, file);
+    const source = path17.join(realRoot, file);
     try {
-      await fs19.copyFile(source, path16.join(root, file));
+      await fs20.copyFile(source, path17.join(root, file));
       if (process.platform !== "win32") {
-        await fs19.chmod(path16.join(root, file), 384).catch(() => void 0);
+        await fs20.chmod(path17.join(root, file), 384).catch(() => void 0);
       }
       auth.push(file);
     } catch (error) {
@@ -12162,7 +12245,7 @@ async function convergeRoot(ports, home, homedir, opts) {
   let mcpFile = null;
   let mcpWritten = false;
   if (isolate.mcp !== void 0) {
-    const file = path16.join(root, isolate.mcp.file);
+    const file = path17.join(root, isolate.mcp.file);
     mcpFile = file;
     switch (isolate.mcp.format) {
       case "codex-toml": {
@@ -12170,7 +12253,7 @@ async function convergeRoot(ports, home, homedir, opts) {
         if (opts.isolated === true && isolate.sharedSkillsDir !== void 0) {
           const sharedSkills = expandTilde(isolate.sharedSkillsDir, homedir);
           for (const entry2 of await listDirOrEmpty(sharedSkills)) {
-            if (!desired.has(entry2.name)) disabled.push(path16.join(sharedSkills, entry2.name, "SKILL.md"));
+            if (!desired.has(entry2.name)) disabled.push(path17.join(sharedSkills, entry2.name, "SKILL.md"));
           }
         }
         const codexModels = isolate.models !== void 0 && isolate.models.format === "codex-toml" && modelContent ? {
@@ -12219,7 +12302,7 @@ async function convergeRoot(ports, home, homedir, opts) {
   if (isolate.models !== void 0 && modelContent) {
     resolveModelEnv(roleModels, opts.env ?? {}, opts.strictEnv !== false);
     const providerCount = Object.keys(roleModels.providers).length;
-    const file = path16.join(root, isolate.models.file);
+    const file = path17.join(root, isolate.models.file);
     switch (isolate.models.format) {
       case "pi-models-json": {
         if (providerCount > 0) await writeFileAtomic(file, renderPiModelsJson(roleModels));
@@ -12230,7 +12313,7 @@ async function convergeRoot(ports, home, homedir, opts) {
             roleModels.default.model
           )?.model.thinkingLevel;
           const thinkingLevelsByModel = startup === void 0 ? void 0 : { [`${roleModels.default.provider}/${roleModels.default.model}`]: startup };
-          const settingsFile = path16.join(root, isolate.models.settingsFile);
+          const settingsFile = path17.join(root, isolate.models.settingsFile);
           await writeFileAtomic(
             settingsFile,
             renderPiSettingsJson(
@@ -12258,7 +12341,7 @@ async function convergeRoot(ports, home, homedir, opts) {
         break;
       }
       case "claude-settings-json": {
-        const settingsPath = path16.join(root, isolate.models.file);
+        const settingsPath = path17.join(root, isolate.models.file);
         await writeFileAtomic(
           settingsPath,
           renderClaudeSettingsJson(await readTextIfExists(settingsPath), roleModels.default?.model)
@@ -12275,7 +12358,7 @@ async function convergeRoot(ports, home, homedir, opts) {
       }
     }
   }
-  const metaFile = path16.join(root, "root.json");
+  const metaFile = path17.join(root, "root.json");
   if (!await pathExists(metaFile)) {
     const now = ports.now?.() ?? /* @__PURE__ */ new Date();
     await writeFileAtomic(
@@ -12311,24 +12394,24 @@ async function convergeRoot(ports, home, homedir, opts) {
   };
 }
 async function listRoots(home) {
-  const rootBase = path16.join(home, "roots");
+  const rootBase = path17.join(home, "roots");
   let roleDirs;
   try {
-    roleDirs = (await fs19.readdir(rootBase, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+    roleDirs = (await fs20.readdir(rootBase, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
   } catch (error) {
     if (error.code === "ENOENT") return [];
     throw error;
   }
   const out = [];
   for (const role of roleDirs) {
-    const base = path16.join(rootBase, role);
-    const agents = (await fs19.readdir(base, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+    const base = path17.join(rootBase, role);
+    const agents = (await fs20.readdir(base, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
     const roleExists = await pathExists(roleDir(home, role));
     for (const agent of agents) {
-      const dir = path16.join(base, agent);
+      const dir = path17.join(base, agent);
       let meta = false;
       try {
-        const raw = JSON.parse(await fs19.readFile(path16.join(dir, "root.json"), "utf8"));
+        const raw = JSON.parse(await fs20.readFile(path17.join(dir, "root.json"), "utf8"));
         meta = typeof raw === "object" && raw !== null && raw.version === 1 && raw.role === role && raw.agent === agent;
       } catch {
         meta = false;
@@ -12339,11 +12422,11 @@ async function listRoots(home) {
   return out.sort((a2, b) => a2.role === b.role ? a2.agent < b.agent ? -1 : 1 : a2.role < b.role ? -1 : 1);
 }
 async function cleanRoleRoots(home, role) {
-  const base = path16.join(rootsDir(home), role);
+  const base = path17.join(rootsDir(home), role);
   const summary = await listRoots(home).then((all) => all.filter((item) => item.role === role));
   if (summary.length === 0) return [];
   if (!await pathExists(base)) return [];
-  await fs19.rm(base, { recursive: true, force: true });
+  await removeTreeLinkSafe(base);
   return summary.map((item) => item.dir);
 }
 async function rootSnapshot(home) {
@@ -12353,19 +12436,19 @@ async function rootSnapshot(home) {
 
 // packages/core/src/materialize.ts
 import { createHash as createHash2, randomUUID as randomUUID6 } from "node:crypto";
-import fs21 from "node:fs/promises";
-import path18 from "node:path";
+import fs22 from "node:fs/promises";
+import path19 from "node:path";
 
 // packages/core/src/migrate.ts
 import { createHash, randomUUID as randomUUID5 } from "node:crypto";
-import fs20 from "node:fs/promises";
-import path17 from "node:path";
+import fs21 from "node:fs/promises";
+import path18 from "node:path";
 var MIGRATE_STRATEGIES = ["first", "newest", "skip"];
 async function readV3Lock(homedir) {
-  const file = path17.join(homedir, ".agents", ".skill-lock.json");
+  const file = path18.join(homedir, ".agents", ".skill-lock.json");
   let text2;
   try {
-    text2 = await fs20.readFile(file, "utf8");
+    text2 = await fs21.readFile(file, "utf8");
   } catch (error) {
     if (error.code === "ENOENT") {
       return { present: false, path: file, entries: {} };
@@ -12393,12 +12476,12 @@ async function readV3Lock(homedir) {
 }
 var HASH_IGNORED_NAMES = /* @__PURE__ */ new Set([".git", "node_modules"]);
 async function collectFiles(dir, prefix, out) {
-  const entries = await fs20.readdir(dir, { withFileTypes: true });
+  const entries = await fs21.readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
     if (HASH_IGNORED_NAMES.has(entry.name)) continue;
     const rel = prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`;
     if (entry.isDirectory()) {
-      await collectFiles(path17.join(dir, entry.name), rel, out);
+      await collectFiles(path18.join(dir, entry.name), rel, out);
     } else if (entry.isFile()) {
       out.push(rel);
     }
@@ -12411,7 +12494,7 @@ async function computeSkillFolderHash(dir) {
   const hash = createHash("sha256");
   for (const rel of files) {
     hash.update(rel, "utf8");
-    hash.update(await fs20.readFile(path17.join(dir, ...rel.split("/"))));
+    hash.update(await fs21.readFile(path18.join(dir, ...rel.split("/"))));
   }
   return hash.digest("hex");
 }
@@ -12460,11 +12543,11 @@ function parseTime(value) {
   return typeof value === "string" ? Date.parse(value) : Number.NaN;
 }
 function buildScanSet(homedir, registry, withAgents) {
-  const dirs = [{ agent: null, dir: path17.resolve(path17.join(homedir, ".agents", "skills")) }];
+  const dirs = [{ agent: null, dir: path18.resolve(path18.join(homedir, ".agents", "skills")) }];
   if (withAgents) {
     for (const entry of registry) {
       const expanded = expandTilde(entry.skillsDir, homedir);
-      if (path17.isAbsolute(expanded)) dirs.push({ agent: entry.id, dir: path17.resolve(expanded) });
+      if (path18.isAbsolute(expanded)) dirs.push({ agent: entry.id, dir: path18.resolve(expanded) });
     }
   }
   const seen = /* @__PURE__ */ new Set();
@@ -12477,7 +12560,7 @@ function buildScanSet(homedir, registry, withAgents) {
 }
 async function hasSkillMd(dir) {
   try {
-    const stat = await fs20.stat(path17.join(dir, "SKILL.md"));
+    const stat = await fs21.stat(path18.join(dir, "SKILL.md"));
     return stat.isFile();
   } catch {
     return false;
@@ -12485,7 +12568,7 @@ async function hasSkillMd(dir) {
 }
 async function mtimeMs(target) {
   try {
-    return (await fs20.stat(target)).mtimeMs;
+    return (await fs21.stat(target)).mtimeMs;
   } catch {
     return 0;
   }
@@ -12499,7 +12582,7 @@ async function candidateTime(origin, v3) {
 }
 async function readDirEntries(dir) {
   try {
-    return await fs20.readdir(dir, { withFileTypes: true });
+    return await fs21.readdir(dir, { withFileTypes: true });
   } catch (error) {
     if (error.code === "ENOENT") return [];
     throw error;
@@ -12507,7 +12590,7 @@ async function readDirEntries(dir) {
 }
 async function pathExists3(target) {
   try {
-    await fs20.lstat(target);
+    await fs21.lstat(target);
     return true;
   } catch (error) {
     if (error.code === "ENOENT") return false;
@@ -12545,7 +12628,7 @@ async function runMigrate(ports, home, opts) {
     const anchored = scan.agent === null;
     for (const entry of await readDirEntries(scan.dir)) {
       if (!SKILL_NAME_PATTERN2.test(entry.name)) continue;
-      const origin = path17.join(scan.dir, entry.name);
+      const origin = path18.join(scan.dir, entry.name);
       const v3Entry = scan.agent === null ? v3.entries[entry.name] : void 0;
       if (entry.isSymbolicLink()) {
         if (opts.absorbLinks !== true) {
@@ -12637,7 +12720,7 @@ async function runMigrate(ports, home, opts) {
     const lockEntry = existingLock?.skills[name];
     const all = [];
     if (lockEntry !== void 0) {
-      const dest = path17.join(roleSkillsDir(home, role), name);
+      const dest = path18.join(roleSkillsDir(home, role), name);
       if (await pathExists3(dest)) {
         all.push({
           name,
@@ -12720,7 +12803,7 @@ async function runMigrate(ports, home, opts) {
       }
     }
   }
-  const quarantineDir = apply ? quarantineRunDir : plannedQuarantine ? path17.join(stateDir(home), "backups", "migrate", compactTimestamp(now)) : null;
+  const quarantineDir = apply ? quarantineRunDir : plannedQuarantine ? path18.join(stateDir(home), "backups", "migrate", compactTimestamp(now)) : null;
   const notes = [];
   if (v3.present && items.some((item) => item.disposition === "absorb")) {
     notes.push(
@@ -12747,19 +12830,19 @@ async function runMigrate(ports, home, opts) {
   };
 }
 async function reserveRunDir(stateRoot, now) {
-  const runDir = path17.join(stateRoot, "backups", "migrate", compactTimestamp(now));
-  await fs20.mkdir(runDir, { recursive: true });
+  const runDir = path18.join(stateRoot, "backups", "migrate", compactTimestamp(now));
+  await fs21.mkdir(runDir, { recursive: true });
   return runDir;
 }
 async function persistManifest(runDir, manifest) {
-  const file = path17.join(runDir, "manifest.json");
+  const file = path18.join(runDir, "manifest.json");
   const tmp = `${file}.${randomUUID5()}.tmp`;
   try {
-    await fs20.writeFile(tmp, `${JSON.stringify(manifest, null, 2)}
+    await fs21.writeFile(tmp, `${JSON.stringify(manifest, null, 2)}
 `, "utf8");
-    await fs20.rename(tmp, file);
+    await fs21.rename(tmp, file);
   } finally {
-    await fs20.rm(tmp, { force: true }).catch(() => void 0);
+    await fs21.rm(tmp, { force: true }).catch(() => void 0);
   }
 }
 async function relocateInto(from, to) {
@@ -12767,16 +12850,16 @@ async function relocateInto(from, to) {
     throw new Error(`relocate target already exists (refusing to overwrite): ${to}`);
   }
   try {
-    await fs20.rename(from, to);
+    await fs21.rename(from, to);
   } catch (error) {
     if (error.code !== "EXDEV") throw error;
-    await fs20.cp(from, to, { recursive: true });
-    await fs20.rm(from, { recursive: true, force: true });
+    await fs21.cp(from, to, { recursive: true });
+    await fs21.rm(from, { recursive: true, force: true });
   }
 }
 async function quarantineSide(ctx, side, reason) {
   const runDir = await ctx.ensureRunDir();
-  const stored = path17.join(runDir, ctx.nextSlot(side.name));
+  const stored = path18.join(runDir, ctx.nextSlot(side.name));
   const row = {
     skill: side.name,
     kind: side.kind === "link" ? "link" : "dir",
@@ -12818,7 +12901,7 @@ function loserReason(loser, winnerHash) {
 async function applyOne(ctx) {
   const { plan } = ctx;
   const winner = plan.winner;
-  const dest = path17.join(roleSkillsDir(ctx.home, ctx.role), winner.name);
+  const dest = path18.join(roleSkillsDir(ctx.home, ctx.role), winner.name);
   const undo = [];
   const rowsStart = ctx.manifest.length;
   const rollback = async (cause) => {
@@ -12831,7 +12914,7 @@ async function applyOne(ctx) {
       }
     }
     if (ctx.manifest.length > rowsStart) {
-      const runDir = path17.dirname(ctx.manifest[rowsStart].storedPath);
+      const runDir = path18.dirname(ctx.manifest[rowsStart].storedPath);
       ctx.manifest.splice(rowsStart);
       try {
         await persistManifest(runDir, ctx.manifest);
@@ -12869,8 +12952,8 @@ async function applyOne(ctx) {
       if (await pathExists3(dest)) {
         throw new Error(`absorb target already exists (refusing to merge/overwrite): ${dest}`);
       }
-      await fs20.cp(winner.linkTarget, dest, { recursive: true });
-      undo.push(() => fs20.rm(dest, { recursive: true, force: true }));
+      await fs21.cp(winner.linkTarget, dest, { recursive: true });
+      undo.push(() => fs21.rm(dest, { recursive: true, force: true }));
       await quarantineWithUndo(winner, "absorbed-link");
     }
     for (const loser of plan.losers) {
@@ -12894,7 +12977,7 @@ async function applyOne(ctx) {
 // packages/core/src/materialize.ts
 async function readMarker(dir) {
   try {
-    const raw = JSON.parse(await fs21.readFile(path18.join(dir, "root.json"), "utf8"));
+    const raw = JSON.parse(await fs22.readFile(path19.join(dir, "root.json"), "utf8"));
     if (typeof raw === "object" && raw !== null && raw.version === 1 && typeof raw.role === "string" && typeof raw.agent === "string") {
       return raw;
     }
@@ -12904,29 +12987,15 @@ async function readMarker(dir) {
   }
 }
 function stagingFor(out) {
-  return path18.join(
-    path18.dirname(out),
-    `.${path18.basename(out)}.materialize-${randomUUID6()}.tmp`
+  return path19.join(
+    path19.dirname(out),
+    `.${path19.basename(out)}.materialize-${randomUUID6()}.tmp`
   );
-}
-async function removeMaterializedTree(link, dir) {
-  for (const entry of await fs21.readdir(dir, { withFileTypes: true })) {
-    const abs = path18.join(dir, entry.name);
-    const info = await fs21.lstat(abs);
-    if (info.isSymbolicLink()) {
-      await link.unlink(abs);
-    } else if (info.isDirectory()) {
-      await removeMaterializedTree(link, abs);
-      await fs21.rmdir(abs);
-    } else {
-      await fs21.unlink(abs);
-    }
-  }
 }
 async function assertOutUsable(out, role, agent) {
   let info;
   try {
-    info = await fs21.lstat(out);
+    info = await fs22.lstat(out);
   } catch (error) {
     if (error.code === "ENOENT") return { kind: "new" };
     throw error;
@@ -12934,7 +13003,7 @@ async function assertOutUsable(out, role, agent) {
   if (!info.isDirectory()) {
     throw new NeoError("state", `--out is not a directory: ${out}`);
   }
-  const contents = await fs21.readdir(out);
+  const contents = await fs22.readdir(out);
   if (contents.length === 0) return { kind: "empty" };
   const marker = await readMarker(out);
   if (marker === null) {
@@ -12963,22 +13032,21 @@ function manifestHash(manifest) {
   return createHash2("sha256").update(canonical, "utf8").digest("hex");
 }
 async function swapOutOwned(link, out, staging) {
-  const backup = path18.join(
-    path18.dirname(out),
-    `.${path18.basename(out)}.old-${randomUUID6()}.tmp`
+  const backup = path19.join(
+    path19.dirname(out),
+    `.${path19.basename(out)}.old-${randomUUID6()}.tmp`
   );
-  await fs21.rename(out, backup);
+  await fs22.rename(out, backup);
   try {
-    await fs21.rename(staging, out);
+    await fs22.rename(staging, out);
   } catch (error) {
-    await fs21.rename(backup, out).catch(() => void 0);
+    await fs22.rename(backup, out).catch(() => void 0);
     throw new NeoError(
       "failure",
       `materialize: swap into ${out} failed (${error.message}); old root restored (or preserved at ${backup}), nothing half-written`
     );
   }
-  await removeMaterializedTree(link, backup).catch(() => void 0);
-  await fs21.rm(backup, { recursive: true, force: true }).catch(() => void 0);
+  await removeTreeLinkSafe(backup, { link }).catch(() => void 0);
 }
 async function materializeRoot(ports, home, homedir, opts) {
   validateRoleName(opts.role);
@@ -12999,21 +13067,19 @@ async function materializeRoot(ports, home, homedir, opts) {
       ...opts.skipModels === true ? { skipModels: true } : {}
     });
   } catch (error) {
-    await removeMaterializedTree(ports.link, staging).catch(() => void 0);
-    await fs21.rm(staging, { recursive: true, force: true }).catch(() => void 0);
+    await removeTreeLinkSafe(staging, { link: ports.link }).catch(() => void 0);
     throw error;
   }
   try {
     if (outState.kind === "owned") {
       await swapOutOwned(ports.link, opts.out, staging);
     } else {
-      if (outState.kind === "empty") await fs21.rmdir(opts.out);
-      await fs21.rename(staging, opts.out);
+      if (outState.kind === "empty") await fs22.rmdir(opts.out);
+      await fs22.rename(staging, opts.out);
     }
   } catch (error) {
     if (error instanceof NeoError) throw error;
-    await removeMaterializedTree(ports.link, staging).catch(() => void 0);
-    await fs21.rm(staging, { recursive: true, force: true }).catch(() => void 0);
+    await removeTreeLinkSafe(staging, { link: ports.link }).catch(() => void 0);
     throw new NeoError(
       "failure",
       `materialize: rename into ${opts.out} failed (${error.message}); staging cleaned, out unchanged`
@@ -13032,7 +13098,7 @@ async function materializeRoot(ports, home, homedir, opts) {
     agent: opts.agent,
     skills,
     mcp: {
-      file: report.mcp.file === null ? null : path18.relative(staging, report.mcp.file),
+      file: report.mcp.file === null ? null : path19.relative(staging, report.mcp.file),
       servers: report.mcp.servers,
       // T1:导出根不自足的 env 绑定以引用形式进清单(与 convergeRoot 同一份 merge,不开第二份装配)。
       envRefs: collectMcpEnvRefs(
@@ -13040,7 +13106,7 @@ async function materializeRoot(ports, home, homedir, opts) {
       )
     },
     model: {
-      file: report.models.file === null ? null : path18.relative(staging, report.models.file),
+      file: report.models.file === null ? null : path19.relative(staging, report.models.file),
       providers: report.models.providers,
       default: report.models.default,
       // T4:模型配置归属方;宿主自带(`--agent-models`)时为 host。
@@ -13316,16 +13382,16 @@ function modelReferencedByDefault(loaded, providerId, modelId) {
 }
 
 // packages/core/src/launch.ts
-import fs22 from "node:fs/promises";
+import fs23 from "node:fs/promises";
 import { constants as fsConstants2 } from "node:fs";
 import net from "node:net";
 import os2 from "node:os";
-import path19 from "node:path";
+import path20 from "node:path";
 var isWindows = process.platform === "win32";
 var PI_SUBCOMMANDS = /* @__PURE__ */ new Set(["install", "remove", "uninstall", "update", "list", "config", "auth", "mcp"]);
 async function isFile(target) {
   try {
-    const stat = await fs22.stat(target);
+    const stat = await fs23.stat(target);
     return stat.isFile();
   } catch (error) {
     const code = error.code;
@@ -13337,15 +13403,15 @@ async function isExecutableFile(target) {
   if (!await isFile(target)) return false;
   if (isWindows) return true;
   try {
-    await fs22.access(target, fsConstants2.X_OK);
+    await fs23.access(target, fsConstants2.X_OK);
     return true;
   } catch {
     return false;
   }
 }
 async function findOnPath(command, env, cwd) {
-  if (path19.isAbsolute(command) || command.includes("/") || command.includes("\\")) {
-    const target = path19.isAbsolute(command) ? command : path19.resolve(cwd, command);
+  if (path20.isAbsolute(command) || command.includes("/") || command.includes("\\")) {
+    const target = path20.isAbsolute(command) ? command : path20.resolve(cwd, command);
     return await isExecutableFile(target) ? target : null;
   }
   const pathVar = env.PATH ?? env.Path ?? "";
@@ -13354,14 +13420,14 @@ async function findOnPath(command, env, cwd) {
   for (const dir of pathVar.split(delimiter)) {
     if (dir.length === 0) continue;
     for (const ext of exts) {
-      const candidate = path19.join(dir, `${command}${ext.toLowerCase()}`);
+      const candidate = path20.join(dir, `${command}${ext.toLowerCase()}`);
       if (await isExecutableFile(candidate)) return candidate;
       if (isWindows) {
-        const upper = path19.join(dir, `${command}${ext.toUpperCase()}`);
+        const upper = path20.join(dir, `${command}${ext.toUpperCase()}`);
         if (await isExecutableFile(upper)) return upper;
       }
     }
-    const bare = path19.join(dir, command);
+    const bare = path20.join(dir, command);
     if (await isExecutableFile(bare)) return bare;
   }
   return null;
@@ -13369,24 +13435,24 @@ async function findOnPath(command, env, cwd) {
 async function resolveDsh(entry, homedir, env, cwd) {
   const layouts = [];
   if (isWindows) {
-    const local = env.LOCALAPPDATA ?? path19.join(homedir, "AppData", "Local");
+    const local = env.LOCALAPPDATA ?? path20.join(homedir, "AppData", "Local");
     for (const install of [
-      path19.join(local, "Programs", "DeepSeek Harness"),
-      path19.join(env.ProgramFiles ?? "C:\\Program Files", "DeepSeek Harness")
+      path20.join(local, "Programs", "DeepSeek Harness"),
+      path20.join(env.ProgramFiles ?? "C:\\Program Files", "DeepSeek Harness")
     ]) {
       layouts.push({ install, exe: "DeepSeek Harness.exe", resources: "resources" });
     }
   } else if (process.platform === "darwin") {
     layouts.push({
       install: "/Applications/DeepSeek Harness.app/Contents",
-      exe: path19.join("MacOS", "DeepSeek Harness"),
+      exe: path20.join("MacOS", "DeepSeek Harness"),
       resources: "Resources"
     });
   }
   for (const layout of layouts) {
-    const exe = path19.join(layout.install, layout.exe);
-    const resources = path19.join(layout.install, layout.resources);
-    const cli = path19.join(
+    const exe = path20.join(layout.install, layout.exe);
+    const resources = path20.join(layout.install, layout.resources);
+    const cli = path20.join(
       resources,
       "app.asar",
       "dsh",
@@ -13396,7 +13462,7 @@ async function resolveDsh(entry, homedir, env, cwd) {
       "lib",
       "cli.js"
     );
-    if (await isFile(exe) && await isFile(path19.join(resources, "app.asar"))) {
+    if (await isFile(exe) && await isFile(path20.join(resources, "app.asar"))) {
       return {
         command: exe,
         baseArgs: ["--expose-internals", cli],
@@ -13465,7 +13531,7 @@ async function planLaunch(ports, home, homedir, opts) {
   }
   const env = opts.env ?? {};
   const ephemeral = opts.ephemeral === true;
-  const root = ephemeral ? await fs22.mkdtemp(path19.join(os2.tmpdir(), `neo-run-${opts.role}-${opts.agent}-`)) : void 0;
+  const root = ephemeral ? await fs23.mkdtemp(path20.join(os2.tmpdir(), `neo-run-${opts.role}-${opts.agent}-`)) : void 0;
   const isolated = opts.isolated === true;
   const report = await convergeRoot(ports, home, homedir, {
     role: opts.role,
@@ -13480,8 +13546,8 @@ async function planLaunch(ports, home, homedir, opts) {
   const args = [...resolvedCommand.baseArgs];
   const childEnv = { ...resolvedCommand.env, [isolate.homeEnv]: report.root };
   if (isolate.agentsEnv !== void 0) {
-    const agentsHome = path19.join(report.root, "agents");
-    await fs22.mkdir(agentsHome, { recursive: true });
+    const agentsHome = path20.join(report.root, "agents");
+    await fs23.mkdir(agentsHome, { recursive: true });
     childEnv[isolate.agentsEnv] = agentsHome;
   }
   const servers = mergeMcpServers(await readRoleMcp(home, "default"), await readRoleMcp(home, opts.role));
@@ -13505,7 +13571,7 @@ async function planLaunch(ports, home, homedir, opts) {
       args.push(...isolate.isolatedFlags);
       if (entry.id === "pi") {
         for (const skill of report.desiredSkills) {
-          args.push("--skill", path19.join(report.root, isolate.skillsDir, skill));
+          args.push("--skill", path20.join(report.root, isolate.skillsDir, skill));
         }
       }
     }
@@ -13529,15 +13595,15 @@ async function planLaunch(ports, home, homedir, opts) {
 }
 async function disposeLaunch(plan) {
   if (!plan.ephemeral) return;
-  await fs22.rm(plan.root, { recursive: true, force: true });
+  await removeTreeLinkSafe(plan.root);
 }
 
 // packages/core/src/status.ts
-import fs23 from "node:fs/promises";
-import path20 from "node:path";
+import fs24 from "node:fs/promises";
+import path21 from "node:path";
 async function fileExists(target) {
   try {
-    await fs23.stat(target);
+    await fs24.stat(target);
     return true;
   } catch (error) {
     if (error.code === "ENOENT") return false;
@@ -13546,14 +13612,14 @@ async function fileExists(target) {
 }
 function parseNeoSource(home, target) {
   if (isInsidePath(rolesDir(home), target)) {
-    const rel = path20.relative(rolesDir(home), target).split(path20.sep);
+    const rel = path21.relative(rolesDir(home), target).split(path21.sep);
     if (rel.length >= 3 && rel[1] === "skills") {
       return { layer: "role", container: rel[0], name: rel[2] };
     }
     return null;
   }
   if (isInsidePath(libraryDir(home), target)) {
-    const rel = path20.relative(libraryDir(home), target).split(path20.sep);
+    const rel = path21.relative(libraryDir(home), target).split(path21.sep);
     if (rel.length >= 2 && rel[0] !== "" && rel[1] !== void 0) {
       return { layer: "domain", container: rel[0], name: rel[1] };
     }
@@ -13573,7 +13639,7 @@ function parseAgentsMdAccounting(previous) {
 }
 async function readTextOrNull2(file) {
   try {
-    return await fs23.readFile(file, "utf8");
+    return await fs24.readFile(file, "utf8");
   } catch (error) {
     if (error.code === "ENOENT") return null;
     throw error;
@@ -13593,7 +13659,7 @@ async function auditAgentsMd(report, opts) {
   };
   try {
     if (planError !== void 0) {
-      finding("plan", planned?.file ?? path20.join(target.skillsDir, "(agents-md)"), planError);
+      finding("plan", planned?.file ?? path21.join(target.skillsDir, "(agents-md)"), planError);
       return "invalid opt-in";
     }
     if (planned !== void 0) {
@@ -13647,7 +13713,7 @@ async function auditAgentsMd(report, opts) {
     }
     const accounting = parseAgentsMdAccounting(entry?.agentsMd);
     if (accounting !== void 0) {
-      const file = path20.resolve(expandTilde(accounting.file, homedir));
+      const file = path21.resolve(expandTilde(accounting.file, homedir));
       const content = await readTextOrNull2(file);
       if (content !== null && containsNeoBlocks(content)) {
         finding(
@@ -13667,8 +13733,8 @@ async function auditAgentsMd(report, opts) {
     const raw = registry.find((candidate) => candidate.id === target.agent)?.agentsMd;
     if (raw !== void 0) {
       const expanded = expandTilde(raw, homedir);
-      if (path20.isAbsolute(expanded)) {
-        const file = path20.resolve(expanded);
+      if (path21.isAbsolute(expanded)) {
+        const file = path21.resolve(expanded);
         const content = await readTextOrNull2(file);
         if (content !== null && containsNeoBlocks(content)) {
           finding(
@@ -13709,12 +13775,12 @@ async function checkOverrideShadow(report, opts) {
   const accounting = parseAgentsMdAccounting(opts.entry?.agentsMd);
   if (accounting === void 0) return;
   if (opts.target.agent !== "codex") return;
-  const file = opts.planned?.file ?? path20.resolve(expandTilde(accounting.file, opts.homedir));
-  if (path20.basename(file) !== "AGENTS.md") return;
-  const override = path20.join(path20.dirname(file), "AGENTS.override.md");
+  const file = opts.planned?.file ?? path21.resolve(expandTilde(accounting.file, opts.homedir));
+  if (path21.basename(file) !== "AGENTS.md") return;
+  const override = path21.join(path21.dirname(file), "AGENTS.override.md");
   let shadowed = false;
   try {
-    await fs23.lstat(override);
+    await fs24.lstat(override);
     shadowed = true;
   } catch {
     shadowed = false;
@@ -13740,7 +13806,7 @@ async function auditRecordedSlots(report, ports, opts) {
   };
   let verified = 0;
   for (const name of recorded) {
-    const slot = path20.join(target.skillsDir, name);
+    const slot = path21.join(target.skillsDir, name);
     try {
       const info = await ports.link.lstat(slot);
       if (info === null) {
@@ -13760,7 +13826,7 @@ async function auditRecordedSlots(report, ports, opts) {
       const adjudication = assembly?.resolutions.get(name);
       const expectedPath = adjudication !== void 0 ? adjudication.winner.dir : activeRole === null ? null : (
         // 不在装配集内(旧账):期望沿用 default 来源(与既有语义一致)
-        path20.join(roleSkillsDir(home, "default"), name)
+        path21.join(roleSkillsDir(home, "default"), name)
       );
       if (expectedPath !== null && resolution.exists && samePath(resolution.final, expectedPath)) {
         verified++;
@@ -13824,7 +13890,7 @@ async function auditUnrecordedEntries(report, ports, opts) {
   };
   let entries;
   try {
-    entries = (await fs23.readdir(target.skillsDir)).sort();
+    entries = (await fs24.readdir(target.skillsDir)).sort();
   } catch (error) {
     if (error.code !== "ENOENT") {
       report.errors.push(`cannot scan target dir ${target.skillsDir}: ${error.message}`);
@@ -13834,7 +13900,7 @@ async function auditUnrecordedEntries(report, ports, opts) {
   }
   for (const name of entries) {
     if (recordedSet.has(name)) continue;
-    const slot = path20.join(target.skillsDir, name);
+    const slot = path21.join(target.skillsDir, name);
     try {
       const info = await ports.link.lstat(slot);
       if (info === null) continue;
@@ -13957,8 +14023,8 @@ async function statusAudit(ports, home, opts) {
       );
     }
   }
-  const legacyHome = path20.join(opts.homedir, "neo");
-  if (!samePath(home, legacyHome) && await fileExists(path20.join(legacyHome, "config.yaml"))) {
+  const legacyHome = path21.join(opts.homedir, "neo");
+  if (!samePath(home, legacyHome) && await fileExists(path21.join(legacyHome, "config.yaml"))) {
     report.notes.push(
       "legacy neo home found at ~/neo; move it to ~/.neo (or set NEO_HOME=~/neo to keep using it)"
     );
@@ -14015,9 +14081,9 @@ async function statusAudit(ports, home, opts) {
 }
 
 // packages/core/src/update.ts
-import fs24 from "node:fs/promises";
+import fs25 from "node:fs/promises";
 import os3 from "node:os";
-import path21 from "node:path";
+import path22 from "node:path";
 function groupLockSources(skills) {
   const groups = /* @__PURE__ */ new Map();
   const orphans = [];
@@ -14055,7 +14121,7 @@ async function classifyItems(home, role, group, stagedNames, upstreamLock) {
     }
     const meta = upstreamLock?.skills?.[name];
     const newHash = typeof meta?.computedHash === "string" ? meta.computedHash : "";
-    const dirExists = await pathExists(path21.join(roleSkillsDir(home, role), name));
+    const dirExists = await pathExists(path22.join(roleSkillsDir(home, role), name));
     if (newHash !== "" && newHash === entry.hash && dirExists) {
       items.push({ name, state: "unchanged", oldHash: entry.hash, newHash });
     } else {
@@ -14150,7 +14216,7 @@ async function updateOneRole(ports, home, role, opts, now) {
       outcome.sources.push(sourceOutcome);
       continue;
     }
-    const staging = await fs24.mkdtemp(path21.join(ports.stagingRoot ?? os3.tmpdir(), "neo-staging-"));
+    const staging = await fs25.mkdtemp(path22.join(ports.stagingRoot ?? os3.tmpdir(), "neo-staging-"));
     try {
       const listed = await ports.exec.run(
         buildUpstreamAddArgs({ skillsRef: opts.skillsRef, source: group.source, listOnly: true }),
@@ -14228,7 +14294,7 @@ async function updateOneRole(ports, home, role, opts, now) {
               );
             }
             const replaced = await relocateSkill(
-              path21.join(staging, ".agents", "skills", item.name),
+              path22.join(staging, ".agents", "skills", item.name),
               home,
               role,
               item.name,
@@ -14248,7 +14314,7 @@ async function updateOneRole(ports, home, role, opts, now) {
         }
       }
     } finally {
-      await fs24.rm(staging, { recursive: true, force: true }).catch(() => void 0);
+      await fs25.rm(staging, { recursive: true, force: true }).catch(() => void 0);
     }
     outcome.sources.push(sourceOutcome);
   }
@@ -14265,8 +14331,8 @@ async function updateOneRole(ports, home, role, opts, now) {
 }
 
 // packages/core/src/remove.ts
-import fs25 from "node:fs/promises";
-import path22 from "node:path";
+import fs26 from "node:fs/promises";
+import path23 from "node:path";
 function normalizeSkills(skills) {
   return [...new Set(skills)];
 }
@@ -14277,7 +14343,7 @@ async function planRemove(home, opts) {
   const items = [];
   const missing = [];
   for (const name of normalizeSkills(opts.skills)) {
-    const hasDir = await pathExists(path22.join(roleSkillsDir(home, opts.role), name));
+    const hasDir = await pathExists(path23.join(roleSkillsDir(home, opts.role), name));
     const hasLockEntry = lock?.skills[name] !== void 0;
     if (hasDir || hasLockEntry) items.push({ name, hasDir, hasLockEntry });
     else missing.push(name);
@@ -14292,7 +14358,7 @@ async function removeSkills(ports, home, opts) {
   const skills = { ...lock?.skills ?? {} };
   let lockDirty = false;
   for (const name of normalizeSkills(opts.skills)) {
-    const dir = path22.join(roleSkillsDir(home, opts.role), name);
+    const dir = path23.join(roleSkillsDir(home, opts.role), name);
     const hasDir = await pathExists(dir);
     const hasLockEntry = Object.prototype.hasOwnProperty.call(skills, name);
     if (!hasDir && !hasLockEntry) {
@@ -14300,7 +14366,7 @@ async function removeSkills(ports, home, opts) {
       continue;
     }
     try {
-      if (hasDir) await fs25.rm(dir, { recursive: true, force: true });
+      if (hasDir) await fs26.rm(dir, { recursive: true, force: true });
     } catch (error) {
       report.failed.push({ name, error: error.message });
       continue;
@@ -14333,10 +14399,10 @@ async function removeSkills(ports, home, opts) {
 // packages/core/src/project.ts
 var import_yaml7 = __toESM(require_dist(), 1);
 import { randomUUID as randomUUID7 } from "node:crypto";
-import fs26 from "node:fs/promises";
-import path23 from "node:path";
+import fs27 from "node:fs/promises";
+import path24 from "node:path";
 function projectManifestPath(root) {
-  return path23.join(root, ".agents", "neo.yaml");
+  return path24.join(root, ".agents", "neo.yaml");
 }
 function invalid6(message) {
   return new NeoError("state", `.agents/neo.yaml: ${message}`);
@@ -14345,7 +14411,7 @@ async function readProjectManifest(root) {
   const file = projectManifestPath(root);
   let text2;
   try {
-    text2 = await fs26.readFile(file, "utf8");
+    text2 = await fs27.readFile(file, "utf8");
   } catch (error) {
     if (error.code === "ENOENT") return null;
     throw error;
@@ -14431,26 +14497,26 @@ async function writeProjectManifest(root, loaded) {
     skills: sortedSkills
   };
   const file = projectManifestPath(root);
-  await fs26.mkdir(path23.dirname(file), { recursive: true });
-  const tmp = path23.join(path23.dirname(file), `.${path23.basename(file)}.${randomUUID7()}.tmp`);
+  await fs27.mkdir(path24.dirname(file), { recursive: true });
+  const tmp = path24.join(path24.dirname(file), `.${path24.basename(file)}.${randomUUID7()}.tmp`);
   try {
-    await fs26.writeFile(tmp, (0, import_yaml7.stringify)(out), "utf8");
-    await fs26.rename(tmp, file);
+    await fs27.writeFile(tmp, (0, import_yaml7.stringify)(out), "utf8");
+    await fs27.rename(tmp, file);
   } finally {
-    await fs26.rm(tmp, { recursive: true, force: true }).catch(() => void 0);
+    await fs27.rm(tmp, { recursive: true, force: true }).catch(() => void 0);
   }
 }
 async function discoverProjectManifest(cwd) {
-  let current = path23.resolve(cwd);
+  let current = path24.resolve(cwd);
   for (; ; ) {
     const file = projectManifestPath(current);
     try {
-      const stat = await fs26.stat(file);
+      const stat = await fs27.stat(file);
       if (stat.isFile()) return { root: current, file };
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
-    const parent = path23.dirname(current);
+    const parent = path24.dirname(current);
     if (parent === current) return null;
     current = parent;
   }
@@ -14479,7 +14545,7 @@ async function desiredSet(home, roles) {
     }
     const names = await skillDirNames(roleSkillsDir(home, role));
     for (const name of names) {
-      const sourcePath = path23.join(roleSkillsDir(home, role), name);
+      const sourcePath = path24.join(roleSkillsDir(home, role), name);
       desired.set(name, { name, sourceRole: role, sourcePath, sourceHash: await computeSkillFolderHash(sourcePath) });
     }
   }
@@ -14487,7 +14553,7 @@ async function desiredSet(home, roles) {
 }
 async function skillDirNames(dir) {
   try {
-    const entries = await fs26.readdir(dir, { withFileTypes: true });
+    const entries = await fs27.readdir(dir, { withFileTypes: true });
     return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
   } catch (error) {
     if (error.code === "ENOENT") return [];
@@ -14533,10 +14599,10 @@ async function projectShadowingWarnings(home, homedir, skills) {
     const entry = registry.find((candidate) => candidate.id === agentId);
     if (entry === void 0) continue;
     const expanded = expandTilde(entry.skillsDir, homedir);
-    if (!path23.isAbsolute(expanded)) continue;
-    const dir = path23.resolve(expanded);
+    if (!path24.isAbsolute(expanded)) continue;
+    const dir = path24.resolve(expanded);
     for (const skill of skills) {
-      if (!await pathExists(path23.join(dir, skill))) continue;
+      if (!await pathExists(path24.join(dir, skill))) continue;
       warnings.push(
         `skill "${skill}" in this project is shadowed by the global layer under ${agentId} (user level wins over workspace); fix: unmount it globally or remove it from the project binding`
       );
@@ -14555,7 +14621,7 @@ async function desiredProjectBlocks(home, roles) {
   for (const role of roles) {
     let content = null;
     try {
-      content = await fs26.readFile(roleAgentsMd(home, role), "utf8");
+      content = await fs27.readFile(roleAgentsMd(home, role), "utf8");
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
@@ -14569,9 +14635,9 @@ async function desiredProjectBlocks(home, roles) {
 var writeTextAtomic = (file, content) => writeFileAtomic(file, content, { defaultMode: 420 });
 async function convergeProjectAgentsMd(root, home, roles, opts) {
   const desired = opts.agentsMd ? await desiredProjectBlocks(home, roles) : [];
-  const targets = [path23.join(root, "AGENTS.md")];
+  const targets = [path24.join(root, "AGENTS.md")];
   for (const rel of PROJECT_EXTRA_MD) {
-    const file = path23.join(root, ...rel.split("/"));
+    const file = path24.join(root, ...rel.split("/"));
     if (await pathExists(file)) targets.push(file);
   }
   const actions = [];
@@ -14580,7 +14646,7 @@ async function convergeProjectAgentsMd(root, home, roles, opts) {
     try {
       let content = null;
       try {
-        content = await fs26.readFile(file, "utf8");
+        content = await fs27.readFile(file, "utf8");
       } catch (error) {
         if (error.code !== "ENOENT") throw error;
       }
@@ -14627,9 +14693,9 @@ async function syncProject(ports, home, homedir, opts) {
   const notes = [];
   const errors = [];
   const slots = (skill) => MATERIALIZE_DIRS.map((base) => {
-    const dir = path23.join(loaded.root, ...base.split("/"));
-    const slot = path23.join(dir, skill);
-    if (path23.dirname(slot) !== dir || !isInsidePath(dir, slot)) {
+    const dir = path24.join(loaded.root, ...base.split("/"));
+    const slot = path24.join(dir, skill);
+    if (path24.dirname(slot) !== dir || !isInsidePath(dir, slot)) {
       throw new NeoError(
         "state",
         `refusing to touch ${JSON.stringify(skill)} outside materialize dir ${dir}`
@@ -14801,7 +14867,7 @@ async function useProject(ports, home, homedir, opts) {
       },
       raw: {},
       file: projectManifestPath(opts.cwd),
-      root: path23.resolve(opts.cwd)
+      root: path24.resolve(opts.cwd)
     };
     await writeProjectManifest(loaded.root, loaded);
     created = true;
@@ -14869,7 +14935,7 @@ async function offProject(ports, home, homedir, opts) {
   else await writeProjectManifest(loaded.root, loaded);
   const sync = await syncProject(ports, home, homedir, { root: loaded.root, apply: true, loaded });
   if (cleared && sync.ok) {
-    await fs26.rm(loaded.file, { force: true });
+    await fs27.rm(loaded.file, { force: true });
   } else if (cleared) {
     sync.warnings.push(
       `project manifest kept at ${loaded.file}: sync did not fully succeed; fix the skipped items and rerun "neo off --project"`
@@ -14883,7 +14949,7 @@ async function removeSlots(ports, slots, facts) {
     try {
       const info = await ports.link.lstat(slot);
       if (info !== null && info.symlink) await ports.link.unlink(slot);
-      else await fs26.rm(slot, { recursive: true, force: true });
+      else await fs27.rm(slot, { recursive: true, force: true });
     } catch (error) {
       return `remove failed at ${slot}: ${error.message}`;
     }
@@ -14897,17 +14963,17 @@ async function convergeSlots(ports, mode, slots, facts, sourcePath, sourceHash) 
     const fact = facts[index];
     if (slotAligned(mode, fact, sourcePath, sourceHash)) continue;
     try {
-      await fs26.mkdir(path23.dirname(slot), { recursive: true });
+      await fs27.mkdir(path24.dirname(slot), { recursive: true });
       if (fact.exists) {
         const info = await ports.link.lstat(slot);
         if (info !== null && info.symlink) await ports.link.unlink(slot);
-        else await fs26.rm(slot, { recursive: true, force: true });
+        else await fs27.rm(slot, { recursive: true, force: true });
       }
       if (await pathExists(slot)) {
         return `materialize target still occupied (refusing to overwrite): ${slot}`;
       }
       if (mode === "link") await ports.link.linkDir(sourcePath, slot);
-      else await fs26.cp(sourcePath, slot, { recursive: true });
+      else await fs27.cp(sourcePath, slot, { recursive: true });
     } catch (error) {
       return `materialize failed at ${slot}: ${error.message}`;
     }
@@ -14918,7 +14984,7 @@ async function gitignoreHint(root) {
   const wanted = [".agents/skills", ".claude/skills"];
   let text2 = null;
   try {
-    text2 = await fs26.readFile(path23.join(root, ".gitignore"), "utf8");
+    text2 = await fs27.readFile(path24.join(root, ".gitignore"), "utf8");
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
@@ -14932,13 +14998,13 @@ async function gitignoreHint(root) {
 }
 
 // packages/core/src/detect.ts
-import path24 from "node:path";
+import path25 from "node:path";
 async function detectAgent(entry, homedir, port) {
   const signals = [];
   if (entry.detect !== void 0) {
     if (entry.detect.dir !== void 0) {
       const expanded = expandTilde(entry.detect.dir, homedir);
-      if (path24.isAbsolute(expanded) && await port.exists(expanded)) signals.push("dir");
+      if (path25.isAbsolute(expanded) && await port.exists(expanded)) signals.push("dir");
     }
     if (entry.detect.binary !== void 0 && await port.binaryOnPath(entry.detect.binary)) {
       signals.push("binary");
@@ -14951,28 +15017,28 @@ async function detectAgents(entries, homedir, port) {
 }
 
 // packages/core/src/detect-node.ts
-import fs27 from "node:fs/promises";
+import fs28 from "node:fs/promises";
 import { constants as fsConstants3 } from "node:fs";
-import path25 from "node:path";
+import path26 from "node:path";
 function nodeDetectPort() {
   return {
     async exists(absPath) {
       try {
-        await fs27.access(absPath);
+        await fs28.access(absPath);
         return true;
       } catch {
         return false;
       }
     },
     async binaryOnPath(binary) {
-      const dirs = (process.env.PATH ?? "").split(path25.delimiter).filter((dir) => dir.length > 0);
+      const dirs = (process.env.PATH ?? "").split(path26.delimiter).filter((dir) => dir.length > 0);
       const candidates = process.platform === "win32" ? [binary, `${binary}.exe`, `${binary}.cmd`, `${binary}.bat`] : [binary];
       for (const dir of dirs) {
         for (const candidate of candidates) {
           try {
-            await fs27.access(path25.join(dir, candidate), fsConstants3.F_OK);
+            await fs28.access(path26.join(dir, candidate), fsConstants3.F_OK);
             if (process.platform !== "win32") {
-              await fs27.access(path25.join(dir, candidate), fsConstants3.X_OK);
+              await fs28.access(path26.join(dir, candidate), fsConstants3.X_OK);
             }
             return true;
           } catch {
@@ -16355,9 +16421,9 @@ async function cmdInit(args, io, deps) {
   const detected = detections.filter((detection) => detection.signals.length > 0);
   io.stdout(`neo init: ${home}
 `);
-  if (home !== path26.join(deps.homedir, "neo")) {
+  if (home !== path27.join(deps.homedir, "neo")) {
     try {
-      await fs28.stat(path26.join(deps.homedir, "neo", "config.yaml"));
+      await fs29.stat(path27.join(deps.homedir, "neo", "config.yaml"));
       io.stderr(
         "hint: legacy home ~/neo still exists; this version uses ~/.neo \u2014 move it (mv ~/neo ~/.neo) or set NEO_HOME=~/neo\n"
       );
@@ -16643,7 +16709,7 @@ async function cmdAdd(args, io, deps) {
 }
 async function listDomainSkillNames(home, domain) {
   try {
-    return await fs28.readdir(path26.join(libraryDir(home), domain));
+    return await fs29.readdir(path27.join(libraryDir(home), domain));
   } catch {
     return [];
   }
@@ -16708,7 +16774,7 @@ async function cmdRoleSet(args, io, deps) {
   const readInputText = async (value, flag) => {
     if (value === "-") return (deps.readStdin ?? readStdinAll)();
     try {
-      return await fs28.readFile(path26.resolve(cwd, value), "utf8");
+      return await fs29.readFile(path27.resolve(cwd, value), "utf8");
     } catch (error) {
       throw new NeoError(
         "failure",
@@ -17120,16 +17186,16 @@ var isWindowsShim = (command) => process.platform === "win32" && /\.(cmd|bat)$/i
 async function resolveShimTarget(shim) {
   let text2;
   try {
-    text2 = await fs28.readFile(shim, "utf8");
+    text2 = await fs29.readFile(shim, "utf8");
   } catch {
     return null;
   }
   const match = /%dp0%[\\/](node_modules[\\/][^"%\r\n]+?\.(?:js|exe))/i.exec(text2);
   const relative = match?.[1];
   if (relative === void 0) return null;
-  const target = path26.join(path26.dirname(shim), relative);
+  const target = path27.join(path27.dirname(shim), relative);
   try {
-    const stat = await fs28.stat(target);
+    const stat = await fs29.stat(target);
     if (!stat.isFile()) return null;
   } catch {
     return null;
@@ -17202,7 +17268,7 @@ async function cmdMaterialize(args, io, deps) {
     {
       role,
       agent,
-      out: path26.resolve(cwd, out),
+      out: path27.resolve(cwd, out),
       env: deps.env,
       ...parsed.bools.has("agent-models") ? { skipModels: true } : {},
       ...parsed.bools.has("no-auth") ? { noAuth: true } : {}
@@ -17395,7 +17461,7 @@ function printMigrateReport(io, report) {
     switch (item.disposition) {
       case "absorb": {
         const dest = roleSkillsDir(report.home, report.role);
-        io.stdout(`  absorb ${item.skill}:${hashTag(item.winner?.hash)} ${item.winner?.origin ?? ""} -> ${path26.join(dest, item.skill)}
+        io.stdout(`  absorb ${item.skill}:${hashTag(item.winner?.hash)} ${item.winner?.origin ?? ""} -> ${path27.join(dest, item.skill)}
 `);
         for (const loser of item.losers ?? []) {
           io.stdout(`    quarantine ${loser.origin}${hashTag(loser.hash)} -> ${report.quarantineDir ?? "(none)"}
