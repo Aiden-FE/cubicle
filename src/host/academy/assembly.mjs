@@ -13,9 +13,10 @@
  *                              exported with --no-auth --agent-models: no
  *                              credentials, no neo model config — never in git)
  *     skills/<name>            junction/symlink → the role skill content
- *     academy-mcp.json         canonical MCP in env:VAR REFERENCE shape (票 a04;
- *                              secret values stay in the host env and are
- *                              injected by the engine adapters at open)
+ *     academy-mcp.json         canonical MCP in env:VAR REFERENCE shape (票 a04)
+ *     mcp.json / config.toml   adapters resolve the refs at open into the
+ *                              employee's engine config — machine-local files
+ *                              that DO carry resolved values (0600 on POSIX)
  *
  * Timing: assembly runs per dispatch, right before an engine session opens
  * (run-manager calls `assemble`), so every run reflects the academy's current
@@ -212,11 +213,12 @@ export function createAcademyAssembler({ dataDir, nodeBinary, cliEntry, env = pr
     //    the manifest lists `mcp.envRefs` (server → key → variable NAME, no
     //    values), and the export no longer requires those variables to exist
     //    (the old T2 hard-fail is gone at this pin). Cubicle keeps only
-    //    REFERENCES on disk (academy-mcp.json holds `env:VAR` shapes; secret
-    //    values never sit in the employee root), and the engine adapters
-    //    resolve + inject the values at engine open (pi mcp.json / codex
-    //    config.toml / dsh session/new) — missing values fail there, readably,
-    //    before the model is asked anything. The literal-secret gate stays on
+    //    REFERENCES on disk (academy-mcp.json holds `env:VAR` shapes; assembly
+    //    writes no values), and the engine adapters resolve them at engine open
+    //    — pi mirrors values into <agentDir>/mcp.json, codex into config.toml
+    //    (both machine-local, 0600 on POSIX), dsh keeps them in memory
+    //    (session/new). Missing values fail there, readably, before the model
+    //    is asked anything. The literal-secret gate stays on
     //    the mcp.yaml reader (readRoleMcpServers). Emergency opt-out that
     //    behaves exactly like "no academy MCP": CUBICLE_ACADEMY_MCP=0.
     const mcpEnabled = env.CUBICLE_ACADEMY_MCP !== "0";

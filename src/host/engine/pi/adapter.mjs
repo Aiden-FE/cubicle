@@ -27,7 +27,7 @@
  * session file) is re-opened after a host restart, so a conversation can
  * continue (票 04: 可续).
  */
-import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { appError } from "../../../shared/apperror.mjs";
@@ -179,7 +179,10 @@ export function createPiAdapter({ dataDir, moduleImporter }) {
     let mcpReady = false;
     if (academyServers !== null) {
       const resolvedServers = resolveMcpEnv(academyServers, process.env);
-      writeFileSync(path.join(session.agentDir, "mcp.json"), renderPiMcpJson(resolvedServers), "utf8");
+      const mcpFile = path.join(session.agentDir, "mcp.json");
+      writeFileSync(mcpFile, renderPiMcpJson(resolvedServers), "utf8");
+      // resolved secret values live here (machine-local): keep them owner-only on POSIX
+      if (process.platform !== "win32") chmodSync(mcpFile, 0o600);
       mcpReady = typeof pi.createMcpExtension === "function";
     } else {
       rmSync(path.join(session.agentDir, "mcp.json"), { force: true });

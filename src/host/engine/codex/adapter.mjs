@@ -27,7 +27,7 @@
  * instructions), and the policy hook is injected through CODEX_HOME config.
  */
 import { spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -222,7 +222,10 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
     // posture as models.json). No file → exactly today's config.
     const academy = readAcademyMcp(home);
     const withMcp = academy === null ? toml : `${toml}\n${renderCodexMcpToml(resolveMcpEnv(academy, process.env))}\n`;
-    writeFileSync(path.join(home, "config.toml"), withMcp, "utf8");
+    const configFile = path.join(home, "config.toml");
+    writeFileSync(configFile, withMcp, "utf8");
+    // resolved MCP secret values land here (machine-local): owner-only on POSIX
+    if (process.platform !== "win32") chmodSync(configFile, 0o600);
     writeFileSync(
       path.join(home, "models.json"),
       `${JSON.stringify(

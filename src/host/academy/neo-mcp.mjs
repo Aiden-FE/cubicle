@@ -213,9 +213,9 @@ export function resolveMcpEnv(servers, env) {
 /**
  * Read the academy assembler's engine-agnostic canonical MCP file
  * (`<agentDir>/academy-mcp.json`). Since 票 a04 the stored `servers` keep
- * `env:VAR` **references** (secret values never sit on disk); each adapter
- * resolves them with `resolveMcpEnv` at engine open — that's where Cubicle
- * injects the values. Missing file / empty servers → null (engine behaves
+ * `env:VAR` **references** (assembly writes no values); each adapter resolves
+ * them with `resolveMcpEnv` at engine open and hands the values to that engine
+ * (pi/codex machine-local config files 0600 on POSIX; dsh memory only). Missing file / empty servers → null (engine behaves
  * exactly as an employee with no MCP). Malformed JSON → a readable failure,
  * never a silently half-configured engine.
  *
