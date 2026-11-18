@@ -65,7 +65,8 @@ async function linkDir(target, linkPath) {
  * a04 hardening: on this machine a junction CREATED INSIDE ELECTRON carries
  * `\??\Global\` reparse data and node's lstat/readlink report it as a plain
  * directory (EINVAL on readlink). fs.rmdir on such a link FOLLOWS it and would
- * delete the TARGET — never use it here. `cmd /c rmdir` (no /s) removes only
+ * delete the TARGET — never use it here. The link-safe door (.NET
+ * Directory.Delete via powershell) removes only
  * the junction itself, which is the safe last door for links node can't see.
  *
  * @param {string} linkPath
@@ -86,7 +87,7 @@ async function unlinkOnly(linkPath) {
       const real = await fs.realpath(linkPath).catch(() => null);
       if (real !== null && path.resolve(real) !== path.resolve(linkPath)) {
         // electron-created junction invisible to node: the shared link-safe
-        // door (cmd rmdir — plain fs.rmdir would FOLLOW it into the target).
+        // door (.NET Directory.Delete — plain fs.rmdir would FOLLOW it into the target).
         await removeLinkOnly(linkPath);
         return;
       }

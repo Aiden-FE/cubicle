@@ -14,6 +14,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createAcademyAssembler } from "../src/host/academy/assembly.mjs";
+import { removeLinkOnly } from "../src/host/academy/link-safe-remove.mjs";
 import { enginePaths } from "../src/host/engine/paths.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -459,7 +460,10 @@ test("a04 hardening: slot junction re-pointed when the winner moves; real dir st
     assert.equal(await readlink(slot), before, "second assembly keeps the link");
 
     // (c) a REAL directory in the slot: refuse loudly, never destroy.
-    await rm(slot, { recursive: true, force: true });
+    // Teardown of OUR junction goes through the module's link-safe door —
+    // fs.rm's behavior on junctions varies across Node/libuv versions (runner
+    // finding: it followed the link), and a test must not depend on that.
+    await removeLinkOnly(slot);
     await mkdir(slot, { recursive: true });
     await writeFile(path.join(slot, "user-data.txt"), "mine", "utf8");
     await assert.rejects(

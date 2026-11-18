@@ -9,15 +9,17 @@ Cubicle 只读 `~/.neo` 文件、通过 **Neo CLI** 做装配计算（决策：`
 
 | 文件 | 说明 |
 |---|---|
-| `neo/bin/neo.js` | esbuild 单文件 bundle（ESM，node22 target，运行时依赖 `yaml` / `@clack` 全部内联；零 node_modules）；sha256 `056e7e84301a22e91b29a594b923068acdc60abc80d9caf881823f3790bb4382` |
+| `neo/bin/neo.js` | esbuild 单文件 bundle（ESM，node22 target，运行时依赖 `yaml` / `@clack` 全部内联；零 node_modules）；sha256 `fe62d5d8861fbb966107385653521cba329c76d39ba0eadc31d4649444ec4aa2` |
 
 ## 钉住的来源
 
 - 仓库：`C:\Users\Aiden\dev\aiden\neo`（github.com/Aiden-FE/neo）
-- **pin：`b0767f9`**（Neo main：academy 01–04 + 票 05「递归删除不跟进链接」）。相对上一 pin `894e5bf`
-  的唯一行为变化就是票 05：`materialize` 换出/清理按 `realpath` 判链接，**重复导出同一 `--out`
-  不再跟进 electron 不可见 junction 删除学院内容**（N5）。Cubicle 装配前「自清旧 out」的缓解已随本 pin 移除。
-- 历史 pin：`894e5bf38150fbf664c6703003add208b93bd084`（lead 恢复并逐项复验的 academy 01–04。
+- **pin：`30bf083`**（Neo main：academy 01–04 + 票 05「递归删除不跟进链接」+ 不可见链接的 win 删除门改 .NET）。相对 `894e5bf`
+  的行为变化：票 05 `materialize` 换出/清理按 `realpath` 判链接，**重复导出同一 `--out`
+  不再跟进 electron 不可见 junction 删除学院内容**（N5）；Cubicle 装配前「自清旧 out」的缓解已随该 pin 移除。
+  `30bf083` 增量：win 删除门 `cmd /c rmdir` → .NET `Directory.Delete`（新版 Windows/Server 的 cmd
+  会把这类 junction 报成「目录非空」，`/s` 又跟进目标——GH runner 实录）。
+- 历史 pin：`b0767f9`（cmd 门版本，新 Windows 镜像上 rmdir 假失败——作废）；`894e5bf38150fbf664c6703003add208b93bd084`（lead 恢复并逐项复验的 academy 01–04。
   相对旧 pin 的导出合同变化：`materialize` 新增 `--no-auth`（不导出凭据副本；清单 `authExcluded:true`）
   与 `--agent-models`（不渲染 neo 模型配置；清单 `model:{file:null,owner:"host",reason}`）；
   清单 `mcp.envRefs` = server→配置键→变量名（**只有引用、不含值**，宿主在引擎启动时自行注入）；

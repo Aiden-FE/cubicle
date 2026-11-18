@@ -11235,8 +11235,12 @@ async function removeVisibleLink(target, link, platform) {
 }
 async function removeOpaqueLink(target, platform) {
   if (platform === "win32") {
-    const comSpec = process.env.ComSpec ?? "cmd.exe";
-    await execFileAsync(comSpec, ["/c", "rmdir", target], { windowsHide: true });
+    const escaped = target.replace(/'/g, "''");
+    await execFileAsync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", `[System.IO.Directory]::Delete('${escaped}')`],
+      { windowsHide: true }
+    );
     return;
   }
   try {

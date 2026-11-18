@@ -14,8 +14,12 @@
  *  - node-visible links (dirent symlink): unlink; EPERM (junction) → rmdir
  *    (safe: node-visible junctions delete as links).
  *  - node-INVISIBLE links (stat says dir but realpath resolves elsewhere — or
- *    realpath fails: dangling): `cmd /c rmdir` — Windows deletes the reparse
- *    link only; plain fs.rmdir would follow it into the target.
+ *    realpath fails: dangling): the .NET door — `[IO.Directory]::Delete(path)`
+ *    removes a reparse point WITHOUT following it, and REFUSES (throws) a real
+ *    non-empty directory. The old `cmd /c rmdir` door is gone: on newer
+ *    Windows/Server images (GH runner, Node 22.21 class) cmd reports such
+ *    junctions as "The directory is not empty" and cmd /s would follow the
+ *    target — exactly what this module exists to prevent.
  *  - real directories: recurse, then rmdir (empty by then).
  */
 import fs from "node:fs/promises";
@@ -24,6 +28,24 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Remove one reparse-point link WITHOUT following it, on Windows: .NET's
+ * Directory.Delete deletes junctions/symlinks as links and throws for real
+ * non-empty directories (safe-by-construction). PowerShell 5.1 ships with
+ * every Windows install; the path is passed as a literal single-quoted
+ * argument (only `'` needs doubling; callers pass fs temp/product paths).
+ *
+ * @param {string} p
+ */
+async function removeReparseLinkWindows(p) {
+  const escaped = p.replace(/'/g, "''");
+  await execFileAsync(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", `[System.IO.Directory]::Delete('${escaped}')`],
+    { windowsHide: true },
+  );
+}
 
 /**
  * @param {string} p a link node (junction/symlink), possibly invisible to node
@@ -40,9 +62,16 @@ export async function removeLinkOnly(p) {
     await fs.rmdir(p);
     return;
   }
-  // Invisible (or dangling) junction: the cmd door — never fs.rmdir here.
-  const comSpec = process.env.ComSpec ?? "cmd.exe";
-  await execFileAsync(comSpec, ["/c", "rmdir", p], { windowsHide: true });
+  // Invisible (or dangling) junction: the .NET door — never fs.rmdir here.
+  if (process.platform === "win32") {
+    await removeReparseLinkWindows(p);
+    return;
+  }
+  try {
+    await fs.unlink(p);
+  } catch {
+    await fs.rmdir(p);
+  }
 }
 
 /**
@@ -62,8 +91,11 @@ export async function removeTreeJunctionSafe(root) {
     const real = await fs.realpath(root).catch(() => null);
     if (real === null || path.resolve(real) !== path.resolve(root)) {
       // root itself is an invisible link: remove the link, never the target.
-      const comSpec = process.env.ComSpec ?? "cmd.exe";
-      await execFileAsync(comSpec, ["/c", "rmdir", root], { windowsHide: true });
+      if (process.platform === "win32") {
+        await removeReparseLinkWindows(root);
+        return;
+      }
+      await removeLinkOnly(root);
       return;
     }
     for (const entry of await fs.readdir(root, { withFileTypes: true })) {
