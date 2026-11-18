@@ -42,3 +42,23 @@
   全绿；skills source=domain:demo；pi MCP 扩展对秒退 stdio 服务器容错（ready.catch），e2e 可带真实 MCP 条目。
 - `npm run check`：typecheck×2 + **481 测试全绿**。
 
+## STEP 4 e2e:15 —— PASS（并挖出一个 Neo 缺陷 N5 + 一个本机 junction 大坑）
+
+- 新增 `scripts/e2e-15.mjs`（fixture 装/下发 + mock 原始请求正反断言 + ~/.neo 指纹）
+  + `scripts/e2e-15-runner.mjs`（招聘×2 → 派活×3(含第二张工单) → 文件层/MCP 断言）
+  + package.json `e2e:15`；共享 mock server 增 `raw`（请求体全文留档）。
+- **本机坑（实录）**：electron 内创建的 junction 带 `\??\Global\` 重解析数据，node 的
+  lstat/readlink 把它报成普通目录、readlink EINVAL、`fs.rmdir` 会**跟进目标删数据**。
+  → 装配器 `resolveFirstHop`（readlink→realpath 双门）+ `unlinkOnly` 对不可见链接改走
+  `cmd /c rmdir`（只删链接）；重派同一员工不再炸 `academy_slot_not_link`（e2e 派活×2 钉死）。
+- **Neo 缺陷 N5**（vendored 894e5bf，electron-as-node）：同一 `--out` 第二次 materialize，
+  neo 换出旧 out 的删除路径按普通目录递归钻进 staged junction，**清空学院内容**
+  （实测 `library/demo/academy-marker/SKILL.md` 第二次后消失；e2e 首轮抓到「上下文(正)」红）。
+  交接票 `.scratch/academy/neo-tickets/N5-materialize-junction-eats-content.md`（只含现象/复现/期望/影响）。
+- **Cubicle 侧缓解**（neo 根治前不可撤）：`src/host/academy/link-safe-remove.mjs`——
+  装配每次 materialize 前先按链接安全门自清旧 out（node 可见链接 unlink/rmdir；
+  不可见 junction 走 cmd rmdir），neo 永远不会再经它的危险删除面。单测 `test/link-safe-remove.test.mjs`。
+- e2e:15 输出全绿（招聘/派活×3/文件层正反+卫/MCP 正反/上下文正反+卫/~/.neo 隔离指纹），报告在
+  `tmp/e2e-15/{flow,summary}.json`。
+
+

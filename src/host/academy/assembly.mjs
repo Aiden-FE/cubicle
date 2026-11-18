@@ -26,11 +26,16 @@
  * to null — their behavior stays exactly as before this ticket.
  */
 import fs from "node:fs/promises";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 import { appError } from "../../shared/apperror.mjs";
 import { enginePaths } from "../engine/paths.mjs";
+import { removeTreeJunctionSafe } from "./link-safe-remove.mjs";
 import { runMaterialize } from "./neo-cli.mjs";
 import { readRoleMcpServers } from "./neo-mcp.mjs";
 import { resolveNeoHome } from "./neo-roles.mjs";
@@ -60,22 +65,77 @@ async function linkDir(target, linkPath) {
  * Remove a link itself (junction/symlink). Never recurses, never touches the
  * target. Mirrors neo nodeLinkPort.unlink (older Windows junctions need rmdir).
  *
+ * a04 hardening: on this machine a junction CREATED INSIDE ELECTRON carries
+ * `\??\Global\` reparse data and node's lstat/readlink report it as a plain
+ * directory (EINVAL on readlink). fs.rmdir on such a link FOLLOWS it and would
+ * delete the TARGET — never use it here. `cmd /c rmdir` (no /s) removes only
+ * the junction itself, which is the safe last door for links node can't see.
+ *
  * @param {string} linkPath
  */
 async function unlinkOnly(linkPath) {
   try {
     await fs.unlink(linkPath);
+    return;
   } catch (err) {
     const code = /** @type {NodeJS.ErrnoException} */ (err).code;
     if (process.platform === "win32" && (code === "EPERM" || code === "EISDIR")) {
       const stat = await fs.lstat(linkPath).catch(() => null);
       if (stat?.isSymbolicLink() === true) {
+        // node-visible junction: rmdir removes only the reparse link.
         await fs.rmdir(linkPath);
+        return;
+      }
+      const real = await fs.realpath(linkPath).catch(() => null);
+      if (real !== null && path.resolve(real) !== path.resolve(linkPath)) {
+        // electron-created junction invisible to node: cmd rmdir removes the
+        // link only (plain fs.rmdir would FOLLOW it into the target).
+        await removeJunctionViaCmd(linkPath);
         return;
       }
     }
     throw err;
   }
+}
+
+/**
+ * `cmd /c rmdir "<path>"` — Windows' own door for deleting a junction/mount
+ * point without following it. cmd.exe spawns fine from the app (ticket 05
+ * spike; powershell.exe is used the same way by the e2e harness).
+ *
+ * @param {string} linkPath
+ */
+async function removeJunctionViaCmd(linkPath) {
+  try {
+    await execFileAsync(process.env.ComSpec ?? "cmd.exe", ["/c", "rmdir", linkPath], { windowsHide: true });
+  } catch (error) {
+    throw appError(
+      "academy_slot_unlink_failed",
+      `解链 ${linkPath} 失败（junction 删除命令报错）：${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/**
+ * Resolve a link's first hop. readlink is the primary door; on Windows it is
+ * complemented by realpath, which also sees through junctions node's lstat
+ * cannot identify (electron-created `\??\Global\` reparse data, see unlinkOnly).
+ *
+ * @param {string} p
+ * @returns {Promise<string | null>} resolved target, null when p is not a link
+ */
+async function resolveFirstHop(p) {
+  try {
+    const raw = await fs.readlink(p);
+    return path.resolve(path.dirname(p), raw);
+  } catch {
+    // not readable as a link — try the realpath door
+  }
+  if (process.platform === "win32") {
+    const real = await fs.realpath(p).catch(() => null);
+    if (real !== null && path.resolve(real) !== path.resolve(p)) return path.resolve(real);
+  }
+  return null;
 }
 
 /**
@@ -104,6 +164,12 @@ export function createAcademyAssembler({ dataDir, nodeBinary, cliEntry, env = pr
     const outDir = path.join(agentDir, "neo-materialized");
 
     // 1) ask Neo (the single rule owner) for the role×agent resource root.
+    //    a04 defect workaround (see link-safe-remove.mjs): materialize's own
+    //    swap-out of a previous --out follows electron-created junctions that
+    //    node cannot see and deletes their TARGETS (the academy content).
+    //    Cubicle therefore clears the old product junction-safely first, so
+    //    materialize always lands on a clean directory.
+    await removeTreeJunctionSafe(outDir);
     const manifest = await runMaterialize({
       nodeBinary,
       cliEntry,
@@ -120,27 +186,34 @@ export function createAcademyAssembler({ dataDir, nodeBinary, cliEntry, env = pr
       const slot = path.join(skillsRoot, skill.name);
       const staged = path.join(outDir, "skills", skill.name);
       // The staged entry is neo's own link into the winner's content dir;
-      // resolve its first hop so the employee links straight to real content.
-      let target = staged;
-      try {
-        const raw = await fs.readlink(staged);
-        target = path.resolve(path.dirname(staged), raw);
-      } catch {
-        // not a link (future neo shape) — linking the staged entry still works.
-      }
+      // resolve its first hop so the employee links straight to real content
+      // (readlink primary, realpath fallback — see resolveFirstHop).
+      const target = (await resolveFirstHop(staged)) ?? staged;
       const info = await fs.lstat(slot).catch(() => null);
       if (info === null) {
         await linkDir(target, slot);
         continue;
       }
-      if (!info.isSymbolicLink()) {
+      if (info.isSymbolicLink()) {
+        const current = path.resolve(path.dirname(slot), await fs.readlink(slot));
+        if (current !== target) {
+          await unlinkOnly(slot);
+          await linkDir(target, slot);
+        }
+        continue;
+      }
+      // lstat says "real directory". That is either the user's data (refuse)
+      // or OUR OWN electron-created junction that this machine's node cannot
+      // identify through stat/readlink (a04 field finding). realpath tells
+      // them apart: it still sees through the junction to the content dir.
+      const current = await resolveFirstHop(slot);
+      if (current === null) {
         // A real directory where a link belongs: never silently destroy it.
         throw appError(
           "academy_slot_not_link",
           `${slot} 是一个真实目录而不是链接；为避免吞掉数据，装配中止（请手工移除后重试）`,
         );
       }
-      const current = path.resolve(path.dirname(slot), await fs.readlink(slot));
       if (current !== target) {
         await unlinkOnly(slot);
         await linkDir(target, slot);
@@ -153,7 +226,7 @@ export function createAcademyAssembler({ dataDir, nodeBinary, cliEntry, env = pr
       if (desired.has(entry.name)) continue;
       const slot = path.join(skillsRoot, entry.name);
       const info = await fs.lstat(slot);
-      if (info.isSymbolicLink()) await unlinkOnly(slot);
+      if (info.isSymbolicLink() || (await resolveFirstHop(slot)) !== null) await unlinkOnly(slot);
       // non-link leftovers are Cubicle's or the user's: left in place, never used.
     }
 

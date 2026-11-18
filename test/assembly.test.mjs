@@ -8,7 +8,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync } from "node:fs";
-import { mkdtemp, mkdir, writeFile, readFile, rm, lstat, readlink, readdir } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, rm, lstat, readlink, readdir, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -422,6 +422,51 @@ test("codex employee: skills land under $CODEX_HOME (the employee's agent dir) â
     // lives under the employee root, not in ~/.neo.
     const neoEntries = await readdir(path.join(neoHome, "roles", "dev"));
     assert.deepEqual(neoEntries.sort(), ["skills"], "no materialize side effects inside the Neo home");
+  } finally {
+    await dispose();
+  }
+});
+
+test("a04 hardening: slot junction re-pointed when the winner moves; real dir still refuses (never eats data)", async () => {
+  const { dir, dispose } = await withTempDir("slot-repoint");
+  try {
+    const neoHome = path.join(dir, "neo-home");
+    const dataDir = path.join(dir, "data");
+    const skillDir = await seedSkill(neoHome, "dev", "alpha", "ALPHA");
+    const agentDir = enginePaths(dataDir, "pi", 1).agentDir;
+    const skillsRoot = path.join(agentDir, "skills");
+    const slot = path.join(skillsRoot, "alpha");
+    await mkdir(skillsRoot, { recursive: true });
+
+    // (a) a stale junction from a previous winner â†’ re-assemble re-points it.
+    const decoy = path.join(dir, "decoy");
+    await mkdir(decoy, { recursive: true });
+    await symlink(decoy, slot, process.platform === "win32" ? "junction" : "dir");
+    const assembler = createAcademyAssembler({
+      dataDir,
+      nodeBinary: process.execPath,
+      cliEntry: VENDOR_CLI,
+      env: { ...process.env, NEO_HOME: neoHome },
+    });
+    const first = await assembler.assemble({ employee: neoEmployee(1, "A", "dev", "pi"), engine: "pi" });
+    assert.ok(first);
+    assert.equal(path.resolve(await readlink(slot)), path.resolve(skillDir), "stale junction re-pointed to the current winner");
+
+    // (b) same employee again: idempotent, the link stays untouched.
+    const before = await readlink(slot);
+    const second = await assembler.assemble({ employee: neoEmployee(1, "A", "dev", "pi"), engine: "pi" });
+    assert.ok(second);
+    assert.equal(await readlink(slot), before, "second assembly keeps the link");
+
+    // (c) a REAL directory in the slot: refuse loudly, never destroy.
+    await rm(slot, { recursive: true, force: true });
+    await mkdir(slot, { recursive: true });
+    await writeFile(path.join(slot, "user-data.txt"), "mine", "utf8");
+    await assert.rejects(
+      () => assembler.assemble({ employee: neoEmployee(1, "A", "dev", "pi"), engine: "pi" }),
+      (/** @type {{ code?: string }} */ err) => err.code === "academy_slot_not_link",
+    );
+    assert.equal(await readFile(path.join(slot, "user-data.txt"), "utf8"), "mine", "user data untouched");
   } finally {
     await dispose();
   }
