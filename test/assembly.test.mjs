@@ -7,6 +7,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync } from "node:fs";
 import { mkdtemp, mkdir, writeFile, readFile, rm, lstat, readlink, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -176,33 +177,85 @@ const MCP_YAML = [
   "",
 ].join("\n");
 
-test("MCP env:VAR (flag-enabled): pi employee gets a rendered <agentDir>/mcp.json (resolved values)", async () => {
-  const { dir, dispose } = await withTempDir("mcp-pi");
+test("MCP env:VAR (default ON): canonical file stores REFERENCES only, no env presence needed at assembly (旧 T2 gone at 894e5bf)", async () => {
+  const { dir, dispose } = await withTempDir("mcp-refs");
   try {
     const neoHome = path.join(dir, "neo-home");
     const dataDir = path.join(dir, "data");
     await seedSkill(neoHome, "dev", "alpha", "ALPHA");
     await seedMcpYaml(neoHome, "dev", MCP_YAML);
 
+    /** @type {Record<string, string | undefined>} */
+    const env = { ...process.env, NEO_HOME: neoHome };
+    delete env.GITHUB_TOKEN; // 装配期不再要求密钥变量存在（neo@894e5bf 导出面不查）
     const assembler = createAcademyAssembler({
       dataDir,
       nodeBinary: process.execPath,
       cliEntry: VENDOR_CLI,
-      // TODO(T1-T4): engine-side academy MCP is HELD by default (lead review
-      // neo/.scratch/academy/reviews/2026-11-17-lead-review.md); these unit
-      // tests pin the wiring behind its opt-in flag, not the default behavior.
-      env: { ...process.env, NEO_HOME: neoHome, GITHUB_TOKEN: "tok-42", CUBICLE_ACADEMY_MCP: "1" },
+      env,
     });
     const outcome = await assembler.assemble({ employee: neoEmployee(1, "A", "dev", "pi"), engine: "pi" });
-    assert.ok(outcome);
+    assert.ok(outcome, "assembly succeeds even though GITHUB_TOKEN is not set");
     assert.deepEqual(outcome.mcp, [{ name: "github", transport: "stdio" }]);
 
     const agentDir = enginePaths(dataDir, "pi", 1).agentDir;
-    const doc = JSON.parse(await readFile(path.join(agentDir, "mcp.json"), "utf8"));
-    assert.deepEqual(doc.mcpServers.github, { command: "npx", args: ["-y", "srv"], env: { GITHUB_TOKEN: "tok-42" } });
-    // The engine-agnostic canonical file feeds the codex/dsh adapters too.
+    // Canonical file: reference shape only — the secret VALUE never sits on disk.
     const canon = JSON.parse(await readFile(path.join(agentDir, "academy-mcp.json"), "utf8"));
-    assert.equal(canon.servers.github.env.GITHUB_TOKEN, "tok-42");
+    assert.equal(canon.version, 2);
+    assert.deepEqual(canon.envRefs, { github: { GITHUB_TOKEN: "GITHUB_TOKEN" } });
+    assert.equal(canon.servers.github.env.GITHUB_TOKEN, "env:GITHUB_TOKEN");
+    assert.notEqual(canon.servers.github.env.GITHUB_TOKEN, "tok-42");
+    // pi's engine-native mcp.json is an OPEN-time render (adapter), not assembly's job.
+    assert.equal(await readFile(path.join(agentDir, "mcp.json"), "utf8").catch(() => null), null);
+  } finally {
+    await dispose();
+  }
+});
+
+test("materialize flags --no-auth --agent-models: no auth.json under the employee root, no neo model files", async () => {
+  const { dir, dispose } = await withTempDir("no-auth-models");
+  try {
+    const neoHome = path.join(dir, "neo-home");
+    const dataDir = path.join(dir, "data");
+    await seedSkill(neoHome, "dev", "alpha", "ALPHA");
+    // A neo model declaration would normally render models.json/settings.json into
+    // the export; --agent-models must keep them out (Cubicle's library is the only
+    // model source). Seed config.yaml with one provider so the failure mode is real.
+    await mkdir(path.join(neoHome), { recursive: true });
+    await writeFile(
+      path.join(neoHome, "config.yaml"),
+      ["version: 1", "providers:", "  acme:", "    name: Acme", "    baseUrl: https://example.invalid/v1", "    apiKey: env:ACME_KEY", "    models:", "      - id: acme-max", "        name: Acme Max", "        input: [text]", "        cost: {input: 1, output: 1, cacheRead: 0, cacheWrite: 0}", "        contextWindow: 100000", "        maxTokens: 8192", "defaultModel: acme/acme-max", ""].join("\n"),
+      "utf8",
+    );
+
+    /** @type {Record<string, string | undefined>} */
+    const env = { ...process.env, NEO_HOME: neoHome };
+    delete env.ACME_KEY;
+    const assembler = createAcademyAssembler({
+      dataDir,
+      nodeBinary: process.execPath,
+      cliEntry: VENDOR_CLI,
+      env,
+    });
+    const outcome = await assembler.assemble({ employee: neoEmployee(1, "A", "dev", "pi"), engine: "pi" });
+    assert.ok(outcome);
+
+    const agentDir = enginePaths(dataDir, "pi", 1).agentDir;
+    /** @param {string} root @returns {string[]} every file name below root */
+    const walk = (root) => {
+      const found = readdirSync(root, { withFileTypes: true });
+      const names = [];
+      for (const entry of found) {
+        if (entry.isDirectory()) names.push(...walk(path.join(root, entry.name)));
+        else names.push(entry.name);
+      }
+      return names;
+    };
+    const files = walk(agentDir);
+    assert.equal(files.includes("auth.json"), false, "凭据副本绝不进员工根（--no-auth）");
+    assert.equal(files.includes("models.json"), false, "neo 不渲染模型件（--agent-models）");
+    assert.equal(files.includes("settings.json"), false);
+    assert.ok(files.includes("root.json"), "materialize 产物本身在位（root.json marker）");
   } finally {
     await dispose();
   }
@@ -219,7 +272,7 @@ test("MCP literal secret: assembly refuses the role (readable error), run never 
       dataDir,
       nodeBinary: process.execPath,
       cliEntry: VENDOR_CLI,
-      env: { ...process.env, NEO_HOME: neoHome, CUBICLE_ACADEMY_MCP: "1" },
+      env: { ...process.env, NEO_HOME: neoHome },
     });
     await assert.rejects(
       () => assembler.assemble({ employee: neoEmployee(1, "A", "dev", "pi"), engine: "pi" }),
@@ -234,27 +287,23 @@ test("MCP literal secret: assembly refuses the role (readable error), run never 
   }
 });
 
-test("MCP gate OFF (default): role skills assemble; the MCP part behaves like no MCP", async () => {
-  const { dir, dispose } = await withTempDir("mcp-gate-off");
+test("MCP opt-out (CUBICLE_ACADEMY_MCP=0): role skills assemble; the MCP part behaves like no MCP", async () => {
+  const { dir, dispose } = await withTempDir("mcp-off");
   try {
     const neoHome = path.join(dir, "neo-home");
     const dataDir = path.join(dir, "data");
     await seedSkill(neoHome, "dev", "alpha", "ALPHA");
     await seedMcpYaml(neoHome, "dev", MCP_YAML);
 
-    // GITHUB_TOKEN is set ONLY because the vendored materialize itself checks
-    // env:VAR references (Neo-side T2, see lead review) — with the gate off,
-    // Cubicle must never read/render mcp.yaml itself. A role whose MCP env
-    // vars are NOT in the environment fails inside materialize (T2 until
-    // neo@T1-T4 land); that is recorded in the a03 Answer, not asserted here.
+    // 紧急关闭阀（a04）：行为与「未配置 MCP」逐字节一致 —— mcp.yaml 连读都不读。
     const assembler = createAcademyAssembler({
       dataDir,
       nodeBinary: process.execPath,
       cliEntry: VENDOR_CLI,
-      env: { ...process.env, NEO_HOME: neoHome, GITHUB_TOKEN: "tok-42" },
+      env: { ...process.env, NEO_HOME: neoHome, CUBICLE_ACADEMY_MCP: "0" },
     });
     const outcome = await assembler.assemble({ employee: neoEmployee(1, "A", "dev", "pi"), engine: "pi" });
-    assert.ok(outcome, "assembly succeeds with the MCP gate off");
+    assert.ok(outcome, "assembly succeeds with the MCP valve off");
     assert.deepEqual(outcome.mcp, []);
     assert.deepEqual(outcome.skills.map((s) => s.name), ["alpha"]);
     const agentDir = enginePaths(dataDir, "pi", 1).agentDir;

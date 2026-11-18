@@ -13,7 +13,14 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { readRoleMcpServers, resolveMcpEnv, renderPiMcpJson, renderCodexMcpToml, toAcpMcpServers } from "../src/host/academy/neo-mcp.mjs";
+import {
+  readRoleMcpServers,
+  resolveMcpEnv,
+  readAcademyMcpDocSync,
+  renderPiMcpJson,
+  renderCodexMcpToml,
+  toAcpMcpServers,
+} from "../src/host/academy/neo-mcp.mjs";
 
 /** @param {string} name */
 async function withTempDir(name) {
@@ -167,4 +174,57 @@ test("dsh render: ACP session mcpServers entries (ordered name/value pairs)", ()
     { name: "github", command: "npx", args: ["-y", "srv"], env: [{ name: "GITHUB_TOKEN", value: "tok" }] },
     { type: "http", name: "remote", url: "https://x/mcp", headers: [{ name: "Authorization", value: "hdr" }] },
   ]);
+});
+
+// ── 票 a04: the canonical academy-mcp.json reader (reference shape) ──
+
+test("academy-mcp.json reader: missing file → null (engine behaves as no MCP)", () => {
+  assert.equal(readAcademyMcpDocSync(path.join(tmpdir(), "cubicle-definitely-absent", "academy-mcp.json")), null);
+});
+
+test("academy-mcp.json reader: empty servers → null even when the file exists", async () => {
+  const { dir, dispose } = await withTempDir("doc-empty");
+  try {
+    const file = path.join(dir, "academy-mcp.json");
+    await writeFile(file, JSON.stringify({ version: 2, roleKey: "dev", envRefs: {}, servers: {} }), "utf8");
+    assert.equal(readAcademyMcpDocSync(file), null);
+  } finally {
+    await dispose();
+  }
+});
+
+test("academy-mcp.json reader: malformed JSON → readable academy_mcp_invalid, never a silent half-config", async () => {
+  const { dir, dispose } = await withTempDir("doc-bad");
+  try {
+    const file = path.join(dir, "academy-mcp.json");
+    await writeFile(file, "{version: 2, oops", "utf8");
+    assert.throws(
+      () => readAcademyMcpDocSync(file),
+      (/** @type {{ code?: string }} */ err) => err.code === "academy_mcp_invalid",
+    );
+  } finally {
+    await dispose();
+  }
+});
+
+test("academy-mcp.json reader: v2 reference shape passes through untouched (values stay in the host env)", async () => {
+  const { dir, dispose } = await withTempDir("doc-refs");
+  try {
+    const file = path.join(dir, "academy-mcp.json");
+    const doc = {
+      version: 2,
+      roleKey: "dev",
+      envRefs: { github: { GITHUB_TOKEN: "GITHUB_TOKEN" } },
+      servers: { github: { transport: "stdio", command: "npx", args: [], env: { GITHUB_TOKEN: "env:GITHUB_TOKEN" } } },
+    };
+    await writeFile(file, JSON.stringify(doc), "utf8");
+    const servers = readAcademyMcpDocSync(file);
+    assert.deepEqual(servers, doc.servers);
+    // …and the OPEN-side resolver is what turns the reference into a value.
+    const resolved = resolveMcpEnv(servers, { GITHUB_TOKEN: "tok-7" });
+    if (resolved.github.transport !== "stdio") throw new Error("expected a stdio server");
+    assert.equal(resolved.github.env?.GITHUB_TOKEN, "tok-7");
+  } finally {
+    await dispose();
+  }
 });

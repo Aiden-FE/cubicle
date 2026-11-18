@@ -32,7 +32,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { appError } from "../../../shared/apperror.mjs";
-import { renderCodexMcpToml } from "../../academy/neo-mcp.mjs";
+import { readAcademyMcpDocSync, renderCodexMcpToml, resolveMcpEnv } from "../../academy/neo-mcp.mjs";
 import { readModelLibrary, resolveModelForManifest } from "../../models/library.mjs";
 import { decideToolAccess } from "../policy.mjs";
 import { startPolicyBridge } from "./bridge.mjs";
@@ -140,33 +140,17 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
   }
 
   /**
-   * The academy assembler's engine-agnostic MCP render for this employee
-   * (票 a02). Missing or empty → null (today's behavior). Malformed → a
-   * readable failure, never a silently half-configured engine.
+   * The academy assembler's engine-agnostic canonical MCP file for this
+   * employee (票 a02, reference shape since a04): env:VAR references resolved
+   * HERE, at engine open — Cubicle-side launch injection; missing secrets fail
+   * with a readable academy_mcp_env_missing before codex ever starts. Missing
+   * or empty file → null (today's behavior).
    *
    * @param {string} home
    * @returns {import("../../academy/neo-mcp.mjs").McpServers | null}
    */
   function readAcademyMcp(home) {
-    const file = path.join(home, "academy-mcp.json");
-    let text;
-    try {
-      text = readFileSync(file, "utf8");
-    } catch {
-      return null;
-    }
-    let doc;
-    try {
-      doc = JSON.parse(text);
-    } catch (err) {
-      throw appError(
-        "academy_mcp_invalid",
-        `${file} 不是合法 JSON（academy 装配的产物）：${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    const servers = doc?.servers;
-    if (typeof servers !== "object" || servers === null || Array.isArray(servers)) return null;
-    return Object.keys(servers).length > 0 ? /** @type {import("../../academy/neo-mcp.mjs").McpServers} */ (servers) : null;
+    return readAcademyMcpDocSync(path.join(home, "academy-mcp.json"));
   }
 
   /** @param {EmployeeSessionRow} session */
@@ -231,12 +215,13 @@ export function createCodexAdapter({ dataDir, codexBinary = "codex", spawnProces
       "",
     ].join("\n");
     mkdirSync(home, { recursive: true });
-    // 票 a02 MCP: the academy assembler renders the role's servers into this
-    // employee's academy-mcp.json (values already env:VAR-resolved); codex's
-    // native shape is [mcp_servers.*] in this same config.toml. No file →
-    // exactly today's config (nothing configured, nothing passed).
+    // 票 a04 (launch injection): the assembler leaves the canonical
+    // academy-mcp.json in env:VAR REFERENCE shape; codex's [mcp_servers.*]
+    // only eats literal values, so we resolve the references right here (this
+    // employee's private config.toml is the only place a value lands, same
+    // posture as models.json). No file → exactly today's config.
     const academy = readAcademyMcp(home);
-    const withMcp = academy === null ? toml : `${toml}\n${renderCodexMcpToml(academy)}\n`;
+    const withMcp = academy === null ? toml : `${toml}\n${renderCodexMcpToml(resolveMcpEnv(academy, process.env))}\n`;
     writeFileSync(path.join(home, "config.toml"), withMcp, "utf8");
     writeFileSync(
       path.join(home, "models.json"),

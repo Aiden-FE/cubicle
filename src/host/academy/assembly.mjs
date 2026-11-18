@@ -10,9 +10,12 @@
  *
  *   <dataDir>/engines/<engine>/employee-<id>/agent/
  *     neo-materialized/        the `neo materialize --out` product (machine-local;
- *                              carries credential copies — never in git)
+ *                              exported with --no-auth --agent-models: no
+ *                              credentials, no neo model config — never in git)
  *     skills/<name>            junction/symlink → the role skill content
- *     mcp.json / academy-mcp.json   rendered per-engine MCP (ticket 02's MCP part)
+ *     academy-mcp.json         canonical MCP in env:VAR REFERENCE shape (票 a04;
+ *                              secret values stay in the host env and are
+ *                              injected by the engine adapters at open)
  *
  * Timing: assembly runs per dispatch, right before an engine session opens
  * (run-manager calls `assemble`), so every run reflects the academy's current
@@ -29,7 +32,7 @@ import path from "node:path";
 import { appError } from "../../shared/apperror.mjs";
 import { enginePaths } from "../engine/paths.mjs";
 import { runMaterialize } from "./neo-cli.mjs";
-import { readRoleMcpServers, resolveMcpEnv, renderPiMcpJson } from "./neo-mcp.mjs";
+import { readRoleMcpServers } from "./neo-mcp.mjs";
 import { resolveNeoHome } from "./neo-roles.mjs";
 
 /**
@@ -154,33 +157,37 @@ export function createAcademyAssembler({ dataDir, nodeBinary, cliEntry, env = pr
       // non-link leftovers are Cubicle's or the user's: left in place, never used.
     }
 
-    // 3) MCP wiring — HELD (TODO(T1-T4)): the vendored materialize export
-    //    still loses `env:VAR` bindings (T1), hard-fails when referenced env
-    //    vars are absent (T2), copies credentials into --out (T3) and renders
-    //    model config we must ignore (T4) — see the Neo-side review
-    //    neo/.scratch/academy/reviews/2026-11-17-lead-review.md. Until those
-    //    land, the DEFAULT behavior must equal "no academy MCP configured"
-    //    (a02 acceptance wording): we never even read the role's mcp.yaml —
-    //    that also keeps T2 out of every run. Opt-in for unit tests / manual
-    //    experiments: CUBICLE_ACADEMY_MCP=1 in the assembler env.
-    const mcpEnabled = env.CUBICLE_ACADEMY_MCP === "1";
+    // 3) MCP wiring (票 a04 contract, vendored pin 894e5bf):
+    //    the manifest lists `mcp.envRefs` (server → key → variable NAME, no
+    //    values), and the export no longer requires those variables to exist
+    //    (the old T2 hard-fail is gone at this pin). Cubicle keeps only
+    //    REFERENCES on disk (academy-mcp.json holds `env:VAR` shapes; secret
+    //    values never sit in the employee root), and the engine adapters
+    //    resolve + inject the values at engine open (pi mcp.json / codex
+    //    config.toml / dsh session/new) — missing values fail there, readably,
+    //    before the model is asked anything. The literal-secret gate stays on
+    //    the mcp.yaml reader (readRoleMcpServers). Emergency opt-out that
+    //    behaves exactly like "no academy MCP": CUBICLE_ACADEMY_MCP=0.
+    const mcpEnabled = env.CUBICLE_ACADEMY_MCP !== "0";
     const rawServers = mcpEnabled ? await readRoleMcpServers(neoHome, roleKey) : {};
-    const resolvedServers = mcpEnabled ? resolveMcpEnv(rawServers, env) : {};
+    if (mcpEnabled) crossCheckEnvRefs(roleKey, rawServers, manifest.mcp.envRefs ?? {});
     const canonPath = path.join(agentDir, "academy-mcp.json");
     const piMcpPath = path.join(agentDir, "mcp.json");
-    const serverNames = Object.keys(resolvedServers).sort();
+    const serverNames = Object.keys(rawServers).sort();
     if (serverNames.length > 0) {
       await fs.writeFile(
         canonPath,
-        `${JSON.stringify({ version: 1, roleKey, servers: resolvedServers }, null, 2)}\n`,
+        `${JSON.stringify(
+          { version: 2, roleKey, manifestHash: manifest.hash, envRefs: manifest.mcp.envRefs ?? {}, servers: rawServers },
+          null,
+          2,
+        )}\n`,
         "utf8",
       );
-      if (engine === "pi") {
-        // pi's built-in MCP extension reads exactly <agentDir>/mcp.json.
-        await fs.writeFile(piMcpPath, renderPiMcpJson(resolvedServers), "utf8");
-      }
     } else {
       await fs.rm(canonPath, { force: true });
+      // stale pi render from an older assembly (engine adapters also clear it
+      // at open; clearing here keeps the file layer honest between runs)
       await fs.rm(piMcpPath, { force: true });
     }
 
@@ -200,11 +207,49 @@ export function createAcademyAssembler({ dataDir, nodeBinary, cliEntry, env = pr
       fingerprint: `${roleKey}|${engine}|${manifest.hash}|${hashOf(mcpShape)}`,
       roleKey,
       skills: manifest.skills.map((skill) => ({ name: skill.name, hash: skill.hash, source: skill.source })),
-      mcp: serverNames.map((name) => ({ name, transport: resolvedServers[name].transport })),
+      mcp: serverNames.map((name) => ({ name, transport: rawServers[name].transport })),
     };
   }
 
   return { assemble };
+}
+
+/**
+ * Cross-check the two views of the same truth: the mcp.yaml Cubicle reads
+ * (literal secrets already rejected there) and the manifest's `mcp.envRefs`
+ * computed by Neo's own merge at export time. A mismatch means the role was
+ * edited between materialize and this read (or one door reads the shape
+ * wrong) — refusing beats rendering a half-truth.
+ *
+ * @param {string} roleKey
+ * @param {import("./neo-mcp.mjs").McpServers} servers   reference-shape (env values are `env:VAR`)
+ * @param {Record<string, Record<string, string>>} envRefs
+ */
+function crossCheckEnvRefs(roleKey, servers, envRefs) {
+  /** @type {Record<string, Record<string, string>>} */
+  const yamlRefs = {};
+  for (const [name, server] of Object.entries(servers)) {
+    const map = server.transport === "stdio" ? server.env : server.headers;
+    /** @type {Record<string, string>} */
+    const refs = {};
+    for (const [key, value] of Object.entries(map ?? {})) {
+      const match = /^env:([A-Za-z_][A-Za-z0-9_]*)$/.exec(value);
+      if (match !== null) refs[key] = match[1];
+    }
+    if (Object.keys(refs).length > 0) yamlRefs[name] = refs;
+  }
+  const norm = (/** @type {Record<string, Record<string, string>>} */ m) =>
+    JSON.stringify(
+      Object.keys(m)
+        .sort()
+        .map((name) => [name, Object.keys(m[name]).sort().map((k) => [k, m[name][k]])]),
+    );
+  if (norm(yamlRefs) !== norm(envRefs)) {
+    throw appError(
+      "academy_mcp_refs_mismatch",
+      `角色「${roleKey}」的 mcp.yaml 引用与 materialize 清单的 mcp.envRefs 不一致（装配前后角色被改过或导出形状变了）；本次派工中止，重派即可收敛`,
+    );
+  }
 }
 
 /** @param {string} text @returns {string} */

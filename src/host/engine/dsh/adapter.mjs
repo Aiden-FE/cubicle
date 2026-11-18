@@ -25,7 +25,7 @@ import path from "node:path";
 import readline from "node:readline";
 
 import { appError } from "../../../shared/apperror.mjs";
-import { toAcpMcpServers } from "../../academy/neo-mcp.mjs";
+import { readAcademyMcpDocSync, resolveMcpEnv, toAcpMcpServers } from "../../academy/neo-mcp.mjs";
 import { readModelLibrary, ensureDshProfile, resolveModelForManifest } from "../../models/library.mjs";
 
 /**
@@ -324,33 +324,18 @@ export function createDshAdapter({ dataDir, dshExe, dshEntry }) {
   }
 
   /**
-   * 票 a02 MCP: the academy assembler renders the role's servers into the
-   * employee's academy-mcp.json (values already env:VAR-resolved); ACP takes
-   * them per session. No file / empty → [] exactly as today.
+   * 票 a04 (launch injection): the academy assembler's canonical file keeps
+   * env:VAR references; ACP takes concrete values per session, so we resolve
+   * here at session open (missing secret = readable academy_mcp_env_missing).
+   * No file / empty → [] exactly as today.
    *
    * @param {string} agentDir
    * @returns {unknown[]}
    */
   function acpMcpServersFor(agentDir) {
-    const file = path.join(agentDir, "academy-mcp.json");
-    let text;
-    try {
-      text = readFileSync(file, "utf8");
-    } catch {
-      return [];
-    }
-    let doc;
-    try {
-      doc = JSON.parse(text);
-    } catch (err) {
-      throw appError(
-        "academy_mcp_invalid",
-        `${file} 不是合法 JSON（academy 装配的产物）：${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    const serversDoc = doc?.servers;
-    if (typeof serversDoc !== "object" || serversDoc === null || Array.isArray(serversDoc)) return [];
-    return toAcpMcpServers(/** @type {import("../../academy/neo-mcp.mjs").McpServers} */ (serversDoc));
+    const servers = readAcademyMcpDocSync(path.join(agentDir, "academy-mcp.json"));
+    if (servers === null) return [];
+    return toAcpMcpServers(resolveMcpEnv(servers, process.env));
   }
 
   /**

@@ -16,6 +16,7 @@
  * (same posture as the BYOK models.json files).
  */
 import fs from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 
@@ -207,6 +208,39 @@ export function resolveMcpEnv(servers, env) {
     out[name] = { transport: "http", url: server.url, ...(Object.keys(resolvedHeaders).length > 0 ? { headers: resolvedHeaders } : {}) };
   }
   return out;
+}
+
+/**
+ * Read the academy assembler's engine-agnostic canonical MCP file
+ * (`<agentDir>/academy-mcp.json`). Since 票 a04 the stored `servers` keep
+ * `env:VAR` **references** (secret values never sit on disk); each adapter
+ * resolves them with `resolveMcpEnv` at engine open — that's where Cubicle
+ * injects the values. Missing file / empty servers → null (engine behaves
+ * exactly as an employee with no MCP). Malformed JSON → a readable failure,
+ * never a silently half-configured engine.
+ *
+ * @param {string} file
+ * @returns {McpServers | null}
+ */
+export function readAcademyMcpDocSync(file) {
+  let text;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
+  let doc;
+  try {
+    doc = JSON.parse(text);
+  } catch (err) {
+    throw appError(
+      "academy_mcp_invalid",
+      `${file} 不是合法 JSON（academy 装配的产物）：${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  const servers = doc?.servers;
+  if (typeof servers !== "object" || servers === null || Array.isArray(servers)) return null;
+  return Object.keys(servers).length > 0 ? /** @type {McpServers} */ (servers) : null;
 }
 
 /**

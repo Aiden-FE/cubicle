@@ -29,8 +29,11 @@ import { appError } from "../../shared/apperror.mjs";
  * @property {string} agent
  * @property {string} outDir
  * @property {MaterializeSkillEntry[]} skills
- * @property {{ file: string | null, servers: number }} mcp
- * @property {{ file: string | null, providers: number, default: string | null }} model
+ * @property {{ file: string | null, servers: number, envRefs: Record<string, Record<string, string>> }} mcp
+ *   envRefs = server → 配置键 → 变量名（`env:VAR` 引用清单，**不含值**；值由 Cubicle 在引擎启动时注入）
+ * @property {{ file: string | null, providers: number, default: string | null, owner: "neo" | "host", reason?: string }} model
+ *   `--agent-models` 下 file=null / owner="host"：模型唯一来源是 Cubicle 模型库，导出件一律忽略
+ * @property {boolean} authExcluded  `--no-auth` 下恒 true：导出面没有凭据副本
  * @property {string} hash      sha256 over the normalized resource set (timestamp/outDir-free)
  */
 
@@ -99,13 +102,18 @@ export function runNeoCli({ nodeBinary, cliEntry, args, env = process.env, timeo
 }
 
 /**
- * `neo materialize --role <r> --agent <a> --out <dir> --json` — the export of
- * the role×agent launch root (resources part), computed by Neo's own render
- * path (never a second copy of the rules). Never launches a process.
+ * `neo materialize --role <r> --agent <a> --out <dir> --no-auth --agent-models --json`
+ * — the export of the role×agent launch root (resources part), computed by
+ * Neo's own render path (never a second copy of the rules). Never launches a
+ * process. The two standing flags (vendor/README.md, pin 894e5bf):
  *
- * NOTE(machine-local): the --out product carries auth-credential copies
- * (convergeRoot native behaviour) — it must live inside the app's private
- * data dir and never in git.
+ *  - `--no-auth` — no credential copies in the export (manifest `authExcluded:true`);
+ *    Cubicle manages its own credentials, the employee root must never hold auth.json.
+ *  - `--agent-models` — neo model config is not rendered (manifest `model.file:null,
+ *    owner:"host"`); the Cubicle model library stays the ONLY model source.
+ *
+ * MCP secrets: the manifest carries `mcp.envRefs` (server→key→variable NAME, no
+ * values), and the export does NOT require those variables to exist (old T2).
  *
  * @param {{ nodeBinary: string, cliEntry: string, role: string, agent: string, out: string, env?: Record<string, string | undefined>, timeoutMs?: number }} input
  * @returns {Promise<import("./assembly.mjs").MaterializeManifest>}
@@ -114,7 +122,7 @@ export async function runMaterialize({ nodeBinary, cliEntry, role, agent, out, e
   const { stdout } = await runNeoCli({
     nodeBinary,
     cliEntry,
-    args: ["materialize", "--role", role, "--agent", agent, "--out", out, "--json"],
+    args: ["materialize", "--role", role, "--agent", agent, "--out", out, "--no-auth", "--agent-models", "--json"],
     ...(env !== undefined ? { env } : {}),
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
   });

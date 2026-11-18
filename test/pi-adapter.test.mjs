@@ -2,14 +2,15 @@
  * 票 a02: the pi adapter's skill/MCP wiring at the SDK seam —
  * `noSkills: true` + `additionalSkillPaths = [that employee's skills dir]`
  * (otherwise the SDK also reads ~/.agents/skills — 串味), and the built-in MCP
- * extension only when the employee actually has an assembled mcp.json.
+ * extension only when the employee's canonical academy-mcp.json resolves to
+ * servers — env:VAR references are resolved AT OPEN (票 a04 launch injection).
  *
  * The pi module itself is faked: this test asserts the OPTIONS the adapter
  * hands the SDK, not pi's internals.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -137,7 +138,7 @@ test("pi adapter isolates skills: noSkills + only this employee's skills dir", a
   }
 });
 
-test("pi adapter: assembled mcp.json activates the built-in MCP extension; absent stays as today", async () => {
+test("pi adapter open(): 票 a04 launch injection — env:VAR refs resolve at open, stale renders cleared, missing secret fails fast", async () => {
   const { dir, dispose } = withDir("mcp");
   try {
     seedModels(dir);
@@ -151,15 +152,54 @@ test("pi adapter: assembled mcp.json activates the built-in MCP extension; absen
       role: { key: "dev", name: "dev", source: "neo", manifest: {} },
     };
     const session = sessionRow(dir, 1);
+    const agentDir = session.agentDir;
+    const mcpFile = path.join(agentDir, "mcp.json");
+    const academyFile = path.join(agentDir, "academy-mcp.json");
+    const open = () => adapter.open({ employee, session, onEvent: () => {} });
 
-    // no assembled MCP → today's behavior: no MCP extension in the factories.
-    await adapter.open({ employee, session, onEvent: () => {} });
+    // 1) No academy MCP at all → today's behavior: no MCP extension.
+    await open();
     assert.equal(mcpFactories(captured.loaderOptions), 0, "no MCP today means no MCP extension today");
 
-    // Assembly wrote the employee-native MCP config → the extension is on.
-    writeFileSync(path.join(session.agentDir, "mcp.json"), JSON.stringify({ mcpServers: { x: { command: "npx" } } }), "utf8");
-    await adapter.open({ employee, session, onEvent: () => {} });
-    assert.equal(mcpFactories(captured.loaderOptions), 1);
+    // 2) A stale pi render from an older run + an EMPTY academy doc → the
+    //    adapter removes the stale mcp.json at open and opens without MCP.
+    writeFileSync(mcpFile, JSON.stringify({ mcpServers: { ghost: { command: "npx" } } }), "utf8");
+    writeFileSync(academyFile, JSON.stringify({ version: 2, roleKey: "dev", envRefs: {}, servers: {} }), "utf8");
+    await open();
+    assert.equal(existsSync(mcpFile), false, "stale mcp.json removed at open when no academy servers");
+    assert.equal(mcpFactories(captured.loaderOptions), 0);
+
+    // 3) Canonical REFERENCE shape (the assembler's job since a04): the secret
+    //    VALUE never sits on disk; open() resolves it against the host env
+    //    (Cubicle-side launch injection) and only then renders + activates.
+    writeFileSync(
+      academyFile,
+      JSON.stringify({
+        version: 2,
+        roleKey: "dev",
+        envRefs: { github: { GITHUB_TOKEN: "A04_PI_TOKEN" } },
+        servers: {
+          github: { transport: "stdio", command: "npx", args: ["-y", "srv"], env: { GITHUB_TOKEN: "env:A04_PI_TOKEN" } },
+        },
+      }),
+      "utf8",
+    );
+    process.env.A04_PI_TOKEN = "tok-9";
+    try {
+      await open();
+      assert.equal(mcpFactories(captured.loaderOptions), 1, "extension on once servers resolve");
+      const doc = JSON.parse(readFileSync(mcpFile, "utf8"));
+      assert.deepEqual(doc.mcpServers.github, { command: "npx", args: ["-y", "srv"], env: { GITHUB_TOKEN: "tok-9" } });
+
+      // 4) Missing secret → readable failure at open; pi is never launched
+      //    half-configured, and no engine-native render is left behind.
+      delete process.env.A04_PI_TOKEN;
+      rmSync(mcpFile, { force: true });
+      await assert.rejects(open, (/** @type {{ code?: string }} */ err) => err.code === "academy_mcp_env_missing");
+      assert.equal(existsSync(mcpFile), false);
+    } finally {
+      delete process.env.A04_PI_TOKEN;
+    }
   } finally {
     dispose();
   }
