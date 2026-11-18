@@ -1,7 +1,7 @@
 # 员工学院 · 决策地图
 
 > 用 `/wayfinder` 维护。目的地是一份能直接开工的蓝图，不是代码。
-> **状态：设计与共识完成（2026-11-17）** —— 5 张决策票全部关闭；实现票未开。
+> **状态：设计与共识完成（2026-11-17）；Cubicle 侧施工完成（2026-11-18）** —— impl 四票 a01–a04 全部 done，`npm run build:renderer && npm run e2e:15` 一条命令全绿（正反双向断言）；Neo 侧 01–04 由 Neo 项目自行恢复复验（`894e5bf`，vendor 已重钉）；未决：N5（materialize 重复导出经 electron junction 吞学院内容）已按 SCOPE §3 交接 Neo 项目，Cubicle 侧 link-safe-remove 已缓解。
 > 前情：`.scratch/cubicle/map.md`（v1 蓝图，已关闭）把「能力插件市场」留在雾区，这个 effort 把它兑现。
 
 ## Destination
