@@ -8668,7 +8668,7 @@ function promptSkillSelection(options, context) {
 }
 
 // packages/core/src/version.ts
-var NEO_VERSION = "0.2.8";
+var NEO_VERSION = "0.2.9";
 
 // packages/core/src/error.ts
 var NeoError = class extends Error {
@@ -11216,6 +11216,10 @@ var isMissing2 = (error) => {
   const code = error?.code;
   return code === "ENOENT" || code === "ENOTDIR";
 };
+async function visibleInParent(target) {
+  const entries = await fs16.readdir(path12.dirname(target)).catch(() => null);
+  return entries !== null && entries.includes(path12.basename(target));
+}
 async function removeVisibleLink(target, link, platform) {
   if (link !== void 0) {
     await link.unlink(target);
@@ -11227,7 +11231,7 @@ async function removeVisibleLink(target, link, platform) {
   } catch (error) {
     if (platform === "win32") {
       const code = error?.code;
-      if (code === "EPERM" || code === "EISDIR") {
+      if (code === "EPERM" || code === "EISDIR" || code === "ENOENT") {
         await fs16.rmdir(target);
         return;
       }
@@ -11255,9 +11259,14 @@ async function renameAsideLink(target) {
   }
 }
 async function removeOpaqueLink(target, platform) {
+  if (await renameAsideLink(target)) {
+    return;
+  }
   if (platform === "win32") {
-    if (await renameAsideLink(target)) {
-      return;
+    try {
+      await fs16.rmdir(target);
+      if (!await visibleInParent(target)) return;
+    } catch {
     }
     const escaped = target.replace(/'/g, "''");
     const doors = [
@@ -11282,6 +11291,7 @@ async function removeOpaqueLink(target, platform) {
         lastError = error;
       }
     }
+    if (!await visibleInParent(target)) return;
     throw lastError;
   }
   try {
@@ -11298,7 +11308,12 @@ async function removeTreeLinkSafe(root, options = {}) {
     if (isMissing2(error)) return null;
     throw error;
   });
-  if (info === null) return;
+  if (info === null) {
+    if (await visibleInParent(root)) {
+      await removeOpaque(root);
+    }
+    return;
+  }
   if (info.isSymbolicLink()) {
     await removeVisibleLink(root, options.link, platform);
     return;
@@ -11308,9 +11323,13 @@ async function removeTreeLinkSafe(root, options = {}) {
     return;
   }
   const real = await realpath(root).catch(() => null);
-  if (real !== null && path12.resolve(real) !== path12.resolve(root)) {
-    await removeOpaque(root);
-    return;
+  if (real !== null) {
+    const parentReal = await realpath(path12.dirname(root)).catch(() => null);
+    const expected = parentReal === null ? path12.resolve(root) : path12.join(parentReal, path12.basename(root));
+    if (path12.resolve(real) !== path12.resolve(expected)) {
+      await removeOpaque(root);
+      return;
+    }
   }
   let entries;
   try {
@@ -11323,11 +11342,19 @@ async function removeTreeLinkSafe(root, options = {}) {
     throw error;
   }
   for (const entry of entries) {
+    const child = path12.join(root, entry.name);
     if (entry.isSymbolicLink()) {
-      await removeVisibleLink(path12.join(root, entry.name), options.link, platform);
+      try {
+        await removeVisibleLink(child, options.link, platform);
+      } catch (error) {
+        if (platform !== "win32" || !isMissing2(error)) throw error;
+      }
+      if (await visibleInParent(child)) {
+        await removeOpaque(child);
+      }
       continue;
     }
-    await removeTreeLinkSafe(path12.join(root, entry.name), options);
+    await removeTreeLinkSafe(child, options);
   }
   await fs16.rmdir(root);
 }

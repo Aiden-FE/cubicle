@@ -84,10 +84,21 @@ async function unlinkOnly(linkPath) {
         await fs.rmdir(linkPath);
         return;
       }
+      // Alias-safe identity, same rule as resolveFirstHop (no ps spawn here):
+      // real dir ⇔ realpath is a direct child of the canonical parent.
       const real = await fs.realpath(linkPath).catch(() => null);
-      if (real !== null && path.resolve(real) !== path.resolve(linkPath)) {
-        // electron-created junction invisible to node: the shared link-safe
-        // door (.NET Directory.Delete — plain fs.rmdir would FOLLOW it into the target).
+      if (real !== null) {
+        const realParent = path.resolve(path.dirname(real));
+        const canonParent = await fs.realpath(path.dirname(linkPath)).catch(() => null);
+        const inOwnParent = canonParent !== null && sameDir(realParent, canonParent);
+        if (!inOwnParent) {
+          // junction invisible to node: the shared link-safe door
+          // (classify + rename-aside — plain fs.rmdir would FOLLOW it).
+          await removeLinkOnly(linkPath);
+          return;
+        }
+      } else if (await existsInDir(linkPath)) {
+        // phantom dangling reparse (lstat lied): link-safe door handles it.
         await removeLinkOnly(linkPath);
         return;
       }
@@ -112,10 +123,40 @@ async function resolveFirstHop(p) {
     // not readable as a link — try the realpath door
   }
   if (process.platform === "win32") {
+    // No PowerShell probe here: this runs on the DISPATCH hot path inside
+    // utilityProcess, and spawning ps per slot costs seconds (and PS cannot
+    // read electron-created junctions anyway — they report GONE).
+    // Alias-safe identity: a REAL directory's realpath is a DIRECT CHILD of
+    // its canonical parent — dirname(realpath(p)) === realpath(dirname(p)) —
+    // which survives 8.3 short aliases on every component (GH-runner TEMP).
+    // A link's realpath resolves OUTSIDE that parent (junctions here always
+    // point into the library tree, never to a same-directory sibling; a
+    // same-parent target would be misjudged as a real dir — a SAFE reject,
+    // never a data eat).
     const real = await fs.realpath(p).catch(() => null);
-    if (real !== null && path.resolve(real) !== path.resolve(p)) return path.resolve(real);
+    if (real !== null) {
+      const realParent = path.resolve(path.dirname(real));
+      const canonParent = await fs.realpath(path.dirname(p)).catch(() => null);
+      if (canonParent !== null && sameDir(realParent, canonParent)) return null; // real dir in own parent
+      return path.resolve(real); // link: first hop is the resolved position
+    }
+    if (await existsInDir(p)) {
+      // phantom dangling reparse: sentinel forces relink (never eats data).
+      return `${path.resolve(p)}\u0000dangling`;
+    }
   }
   return null;
+}
+
+/** case-insensitive dir identity (win32) @param {string} a @param {string} b */
+function sameDir(a, b) {
+  return a.replace(/\/+$/, "").toLowerCase() === b.replace(/\/+$/, "").toLowerCase();
+}
+
+/** readdir visibility (lstat lies on phantom reparse points). @param {string} p */
+async function existsInDir(p) {
+  const entries = await fs.readdir(path.dirname(p)).catch(() => null);
+  return entries !== null && entries.includes(path.basename(p));
 }
 
 /**

@@ -9,24 +9,24 @@ Cubicle 只读 `~/.neo` 文件、通过 **Neo CLI** 做装配计算（决策：`
 
 | 文件 | 说明 |
 |---|---|
-| `neo/bin/neo.js` | esbuild 单文件 bundle（ESM，node22 target，运行时依赖 `yaml` / `@clack` 全部内联；零 node_modules）；sha256 `08d29b0e9f7c569a89b66f161f27cd4347279790cc6f6a4cbaf82c0e5358722d` |
+| `neo/bin/neo.js` | esbuild 单文件 bundle（ESM，node22 target，运行时依赖 `yaml` / `@clack` 全部内联；零 node_modules）；sha256 `1bce8294bd014b6c2801d91e030c05ce1f02b25aa8ca5783deddf1fc7b7c1e00` |
 
 ## 钉住的来源
 
 - 仓库：`C:\Users\Aiden\dev\aiden\neo`（github.com/Aiden-FE/neo）
-- **pin：`0ce6156`**（Neo main：academy 01–04 + 票 05「递归删除不跟进链接」+ 不可见链接删除改 rename-aside）。相对 `894e5bf`
-  的行为变化：票 05 `materialize` 换出/清理按 `realpath` 判链接，**重复导出同一 `--out`
-  不再跟进 electron 不可见 junction 删除学院内容**（N5）；Cubicle 装配前「自清旧 out」的缓解已随该 pin 移除。
-  `30bf083` 增量：win 删除门 `cmd /c rmdir` → .NET `Directory.Delete`（新版 Windows/Server 的 cmd
-  会把这类 junction 报成「目录非空」，`/s` 又跟进目标——GH runner 实录）。
-- 历史 pin：`30bf083`（单一 .NET 门版本——GH runner 上穿过活 junction，作废）；`b0767f9`（cmd 门版本，新 Windows 镜像上 rmdir 假失败——作废）；`894e5bf38150fbf664c6703003add208b93bd084`（lead 恢复并逐项复验的 academy 01–04。
+- 规则：**vendor 只准钉 neo 的已发布 release tag**（与 npm 同步发布；桥接钉 main 仅限发版前窗口，必须记作废条件）。
+- **pin：`v0.2.9`**（Neo 已发布，npm `@compass-aiden/neo@0.2.9`；academy 01–04 + 票 05 链接安全 + rename-aside/readdir 可见性重构）。相对 `894e5bf` 的行为变化：
+  `materialize` 换出/清理不再跟进 electron 不可见 junction（N5），Cubicle 装配前「自清旧 out」缓解已随该链移除；
+  链接删除终态设计：改名隔离为主（免 spawn、平台保证、目标零接触）+ readdir 可见性判据（幽灵重解析点 lstat 谎报不存在）+ 经典门兜底（绝不 /s、-Recurse）。
+  三轮 GH-runner 实录证明没有任何单一删除门在所有 Windows 镜像上可靠（cmd 拒断链 / .NET 穿过活 junction / Remove-Item 弹提示与 NullRef——失败均安全不删）。
+- 历史 pin（全部作废）：`0ce6156`/`30bf083`/`b0767f9`（门枚举时代的 main 桥接）；`894e5bf38150fbf664c6703003add208b93bd084`（lead 恢复并逐项复验的 academy 01–04。
   相对旧 pin 的导出合同变化：`materialize` 新增 `--no-auth`（不导出凭据副本；清单 `authExcluded:true`）
   与 `--agent-models`（不渲染 neo 模型配置；清单 `model:{file:null,owner:"host",reason}`）；
   清单 `mcp.envRefs` = server→配置键→变量名（**只有引用、不含值**，宿主在引擎启动时自行注入）；
   **导出不再要求被引用的 env 变量存在**（旧 T2 硬失败已修）。已知能力闸：stdio env 引用可导出，
   http headers 的 `env:VAR` 引用对 pi/codex/dsh 在导出面直接报错（neo 判定这些 agent 不会展引
   用；claude-code 例外走 `${VAR}`）——Cubicle 渲染自家引擎配置时自行解析这些引用。
-- 版本：0.2.8
+- 版本：0.2.9
 - 历史 pin：`4ee1dcd68d4692d5f299fa7dc0a048c985d1776b`（票 01 materialize `fa37a6c` + 票 02 library/domain
   `447ee80` + 票 03 role set 的 squash；无 `--no-auth`/`--agent-models`，引用 env 缺失时导出硬失败 —— a04 re-pin 后作废）；
   `4aebbde`（只含 materialize，不认 domain 层 —— N2 落地前使用，已作废）

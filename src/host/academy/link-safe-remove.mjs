@@ -48,9 +48,21 @@ const execFileAsync = promisify(execFile);
 
 const QUARANTINE_PREFIX = ".link-quarantined-";
 
-/** @param {string} p */
+/**
+ * Existence that survives the phantom-junction lie: on some Windows images
+ * lstat() of a DANGLING reparse point fails (ENOENT — reparse resolution at
+ * open), while readdir/rmdir of the parent still see the entry and rmdir
+ * refuses until it is gone. On win32 fall back to the provider probe.
+ *
+ * @param {string} p
+ */
 async function exists(p) {
-  return (await fs.lstat(p).catch(() => null)) !== null;
+  if ((await fs.lstat(p).catch(() => null)) !== null) return true;
+  // Phantom reparse point: lstat lies (ENOENT) but readdir sees it and
+  // rmdir refuses until it is gone. readdir visibility is spawn-free and
+  // platform-uniform — cheaper than the PS probe for this yes/no question.
+  const entries = await fs.readdir(path.dirname(p)).catch(() => null);
+  return entries !== null && entries.includes(path.basename(p));
 }
 
 /**
@@ -59,16 +71,34 @@ async function exists(p) {
  */
 async function classify(p) {
   const info = await fs.lstat(p).catch(() => null);
-  if (info === null) return "missing";
+  if (info === null) {
+    // Phantom reparse point: lstat lies (ENOENT) but readdir sees the entry
+    // and the parent's rmdir refuses until it is gone.
+    if (await exists(p)) return "link-like";
+    return "missing";
+  }
   if (info.isSymbolicLink()) return "symlink";
   if (!info.isDirectory()) return "link-like";
+  // Alias-safe canonical identity (also used on POSIX): a REAL directory's
+  // realpath is a DIRECT CHILD of its canonical parent. Survives 8.3 short
+  // aliases on every path component; no spawns. Links resolve outside the
+  // parent (a same-parent junction target is misjudged real-dir — a safe
+  // refuse, never a data eat).
+  //
+  // parent-relative canonical identity — fs.realpath returns long-form, and
+  // caller paths may be 8.3 SHORT aliases (GH-runner TEMP: RUNNER~1\...).
   const real = await fs.realpath(p).catch(() => null);
-  if (real !== null && path.resolve(real) === path.resolve(p)) {
-    const readable = await fs.readdir(p).then(
-      () => true,
-      () => false,
-    );
-    if (readable) return "real-dir";
+  if (real === null) return "link-like"; // dangling reparse point
+  const parentReal = await fs.realpath(path.dirname(p)).catch(() => null);
+  if (parentReal !== null) {
+    const norm = (/** @type {string} */ x) => x.replace(/\/+$/, "").toLowerCase();
+    if (norm(path.dirname(real)) === norm(parentReal)) {
+      const readable = await fs.readdir(p).then(
+        () => true,
+        () => false,
+      );
+      if (readable) return "real-dir";
+    }
   }
   return "link-like";
 }
@@ -210,14 +240,21 @@ async function sweepQuarantineSiblings(dir) {
 export async function removeLinkOnly(p) {
   try {
     await fs.unlink(p);
-    return;
+    if (!(await exists(p))) return;
+    // unlink "succeeded" but the entry is still visible (phantom dangling
+    // reparse): fall through to the authoritative doors.
   } catch {
     // EPERM on junctions: node-visible ones delete via plain rmdir.
   }
   const info = await fs.lstat(p).catch(() => null);
   if (info !== null && info.isSymbolicLink()) {
     await fs.rmdir(p);
-    return;
+    if (!(await exists(p))) return;
+    if (process.platform === "win32") {
+      await removeReparseLinkWindows(p);
+      return;
+    }
+    throw new Error(`link removal failed for ${p}`);
   }
   if (process.platform === "win32") {
     await removeReparseLinkWindows(p);

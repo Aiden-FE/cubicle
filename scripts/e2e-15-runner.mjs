@@ -73,9 +73,13 @@ const openChatAt = async (contents, deskId) => {
  * @param {string} message
  */
 async function sendAndWaitEnd(contents, message) {
+  const before = (await evalIn(contents, EVENT_COUNT_JS("agent_end"))) ?? 0;
   await typeInto(contents, '[data-testid="chat-input"]', message);
   await click(contents, '[data-testid="chat-send"]');
-  const ended = await waitFor(async () => (await evalIn(contents, EVENT_COUNT_JS("agent_end"))) >= 1, {
+  // wait for THIS run's end — a global ">=1" would pass on an earlier run's
+  // agent_end and mask a hung run (found 2026-11-18: second ticket's run
+  // never reached the model yet the check reported ok).
+  const ended = await waitFor(async () => (await evalIn(contents, EVENT_COUNT_JS("agent_end"))) >= before + 1, {
     timeoutMs: 90_000,
     intervalMs: 200,
   });
