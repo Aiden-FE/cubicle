@@ -26,16 +26,12 @@
  * to null — their behavior stays exactly as before this ticket.
  */
 import fs from "node:fs/promises";
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
 
 import { appError } from "../../shared/apperror.mjs";
 import { enginePaths } from "../engine/paths.mjs";
-import { removeTreeJunctionSafe } from "./link-safe-remove.mjs";
+import { removeLinkOnly, removeTreeJunctionSafe } from "./link-safe-remove.mjs";
 import { runMaterialize } from "./neo-cli.mjs";
 import { readRoleMcpServers } from "./neo-mcp.mjs";
 import { resolveNeoHome } from "./neo-roles.mjs";
@@ -88,31 +84,13 @@ async function unlinkOnly(linkPath) {
       }
       const real = await fs.realpath(linkPath).catch(() => null);
       if (real !== null && path.resolve(real) !== path.resolve(linkPath)) {
-        // electron-created junction invisible to node: cmd rmdir removes the
-        // link only (plain fs.rmdir would FOLLOW it into the target).
-        await removeJunctionViaCmd(linkPath);
+        // electron-created junction invisible to node: the shared link-safe
+        // door (cmd rmdir — plain fs.rmdir would FOLLOW it into the target).
+        await removeLinkOnly(linkPath);
         return;
       }
     }
     throw err;
-  }
-}
-
-/**
- * `cmd /c rmdir "<path>"` — Windows' own door for deleting a junction/mount
- * point without following it. cmd.exe spawns fine from the app (ticket 05
- * spike; powershell.exe is used the same way by the e2e harness).
- *
- * @param {string} linkPath
- */
-async function removeJunctionViaCmd(linkPath) {
-  try {
-    await execFileAsync(process.env.ComSpec ?? "cmd.exe", ["/c", "rmdir", linkPath], { windowsHide: true });
-  } catch (error) {
-    throw appError(
-      "academy_slot_unlink_failed",
-      `解链 ${linkPath} 失败（junction 删除命令报错）：${error instanceof Error ? error.message : String(error)}`,
-    );
   }
 }
 

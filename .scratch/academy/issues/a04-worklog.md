@@ -61,4 +61,19 @@
 - e2e:15 输出全绿（招聘/派活×3/文件层正反+卫/MCP 正反/上下文正反+卫/~/.neo 隔离指纹），报告在
   `tmp/e2e-15/{flow,summary}.json`。
 
+## 门（gates）与一个门环境坑
+
+- 首轮门跑：e2e:15/03/04/08/academy + build 全绿；check 484/485 —— 唯一红是
+  `test/git-reader.test.mjs`「plain 目录不是 git 工作区」：**我的门脚本把 TMP 三连指进仓库**，
+  `os.tmpdir()` 落进 cubicle worktree 内，`git rev-parse` 向上走父目录撞进本仓 → 假红。
+  去掉 TMP 覆盖后 check 485/485 全绿（TMP 三连只是 vite/esbuild 的构建补丁，check 不需要）。
+  教训：以后门批跑 TMP 只包 `build:renderer`。
+
+- 复跑（去掉 TMP 罩 check 后）：**全部 GATE PASS**（check 485/485、build:renderer、e2e:15、
+  e2e:03、e2e:04、e2e:08、e2e:academy），日志 `tmp/gate2-*.log`。
+- 收尾：内联两轴评审（Spec=票面+lead 指令逐条 / Standards=AGENTS 边界与坑）；票勾 8/8、
+  Status done、## Answer 落票。分支 `ticket/a04-e2e-15`，未 merge 未 push（按指令）。
+
+
+
 

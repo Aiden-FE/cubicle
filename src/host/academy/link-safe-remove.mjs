@@ -28,7 +28,7 @@ const execFileAsync = promisify(execFile);
 /**
  * @param {string} p a link node (junction/symlink), possibly invisible to node
  */
-async function removeLinkOnly(p) {
+export async function removeLinkOnly(p) {
   try {
     await fs.unlink(p);
     return;
