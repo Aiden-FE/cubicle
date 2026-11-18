@@ -1,7 +1,7 @@
 # N5: materialize 重复导出会经「node 看不见的 junction」吞掉学院内容（electron-as-node 场景）
 
 **Type:** bug（交接票，只含现象与期望；按 SCOPE §3 不含代码/patch）
-**Status:** open
+**Status:** fixed in Neo `b0767f9`（Cubicle 缓解保留至重钉）
 **发现:** 2026-11-18 · Cubicle 票 a04（e2e:15），vendored pin `894e5bf`
 
 ## 现象
@@ -38,3 +38,14 @@ converge/update 等清理面若同样经 electron-as-node 跑，仍有同类风�
   员工后续 run 丢技能（e2e:15 的上下文正断言当场抓到过一次）。
 - Cubicle 侧已落缓解（`src/host/academy/link-safe-remove.mjs` + 装配前先清旧 out），
   e2e:15 全绿；neo 侧根治前该缓解不可撤。
+
+## Neo 侧处置（2026-11-18，lead）
+
+- **已复现**：普通 node 跑同一序列不复现；`ELECTRON_RUN_AS_NODE=1 electron.exe` 双跑必现
+  （`library/demo/academy-marker/SKILL.md` 第二次导出后消失）。
+- **已修复**（Neo `b0767f9`）：新增 `removeTreeLinkSafe`（`realpath(p) !== resolve(p)` 即链接节点，
+  只做链接级删除；win 不可见重解析点走 `cmd /c rmdir`），接入 materialize 换出/暂存清理、
+  launch ephemeral 清理、`roots --clean`；Neo 单测 5 例 + `pnpm verify` 655 绿。
+- **Cubicle 侧**：缓解（`link-safe-remove.mjs` + 装配前自清 out）**保留**，直到 vendor 重钉到
+  ≥ `b0767f9` 并复跑 e2e:15 的「同一员工第二次派工」用例；之后可撤 out 自清，
+  员工槽位的 `unlinkOnly` 保护建议保留（与本缺陷无关，是装配器自身的链接安全门）。
