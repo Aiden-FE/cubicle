@@ -12,6 +12,10 @@
 
 ## 发一次版
 
+发布前置还包括 **vendored neo CLI**：`vendor/neo/bin/neo.js` 只准钉 neo 的**已发布
+release tag**（npm `@compass-aiden/neo` 同步发布；见 `vendor/README.md` 的重钉配方与
+sha256 登记）。钉 main 桥接只允许出现在发版前窗口，且必须在 vendor README 记作废条件。
+
 ```bash
 # 1) 改版本（单独提交）
 npm version patch --no-git-tag-version   # 或手工改 package.json
