@@ -86,5 +86,5 @@ cat tmp/e2e-15/summary.json   # 若有
 
 | 仓 | 提交 | 内容 |
 |---|---|---|
-| Cubicle | `3cb183d`（tag `academy-2026-11-18`） | 学院 a01–a04 + MCP 加固 + vendor 重钉 `b0767f9` |
+| Cubicle | 功能提交 `3cb183d`；tag `academy-2026-11-18` 指向其后包含本说明的提交 | 学院 a01–a04 + MCP 加固 + vendor 重钉 `b0767f9` |
 | Neo | `b0767f9`（tag `academy-2026-11-18`） | academy 01–05（materialize / library+domain / role set / 导出合同 / 链接安全删除） |
