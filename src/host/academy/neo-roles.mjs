@@ -6,7 +6,7 @@
  * the upstream computedHash). Cubicle reads — never writes — those files and
  * projects them into the local `role` table (see store.mjs). Formats follow
  * the Neo source of truth: docs/schema/neo-home.md + packages/core
- * (paths.ts / locks.ts / roles.ts / mcp.ts, @compass-aiden/neo 0.2.8).
+ * (paths.ts / locks.ts / roles.ts / mcp.ts, @compass-aiden/neo 0.2.10).
  *
  * Nothing here may throw on a missing / empty / corrupt ~/.neo: the academy
  * shows an empty state and the app boots anyway.
@@ -42,7 +42,9 @@ import { parse as parseYaml } from "yaml";
  * @property {string[]} domains       role.yaml domains (Neo 02 shape); [] when no file
  * @property {NeoSkillProjection[]} skills
  * @property {NeoMcpSummary[]} mcp
- * @property {string} persona         AGENTS.md body; the create-stub comment reads as ""
+ * @property {string} persona         the **Role prompt**(角色提示词): `roles/<role>/AGENTS.md` body; the create-stub
+ *   comment reads as "". Neo 的词表把它与 Prompt(提示词, `~/.neo/prompts/` 剪贴板库)分开——`persona` 是本仓库的历史字段名，
+ *   指角色提示词，不是用户级提示词库。
  */
 
 /** Neo's role-name rule (schema §1 / core names.ts). */

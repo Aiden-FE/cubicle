@@ -109,17 +109,17 @@ var require_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    function visit_(key, node, visitor, path28) {
-      const ctrl = callVisitor(key, node, visitor, path28);
+    function visit_(key, node, visitor, path30) {
+      const ctrl = callVisitor(key, node, visitor, path30);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path28, ctrl);
-        return visit_(key, ctrl, visitor, path28);
+        replaceNode(key, path30, ctrl);
+        return visit_(key, ctrl, visitor, path30);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path28 = Object.freeze(path28.concat(node));
+          path30 = Object.freeze(path30.concat(node));
           for (let i2 = 0; i2 < node.items.length; ++i2) {
-            const ci = visit_(i2, node.items[i2], visitor, path28);
+            const ci = visit_(i2, node.items[i2], visitor, path30);
             if (typeof ci === "number")
               i2 = ci - 1;
             else if (ci === BREAK)
@@ -130,13 +130,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path28 = Object.freeze(path28.concat(node));
-          const ck = visit_("key", node.key, visitor, path28);
+          path30 = Object.freeze(path30.concat(node));
+          const ck = visit_("key", node.key, visitor, path30);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = visit_("value", node.value, visitor, path28);
+          const cv = visit_("value", node.value, visitor, path30);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -157,17 +157,17 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node, visitor, path28) {
-      const ctrl = await callVisitor(key, node, visitor, path28);
+    async function visitAsync_(key, node, visitor, path30) {
+      const ctrl = await callVisitor(key, node, visitor, path30);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path28, ctrl);
-        return visitAsync_(key, ctrl, visitor, path28);
+        replaceNode(key, path30, ctrl);
+        return visitAsync_(key, ctrl, visitor, path30);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path28 = Object.freeze(path28.concat(node));
+          path30 = Object.freeze(path30.concat(node));
           for (let i2 = 0; i2 < node.items.length; ++i2) {
-            const ci = await visitAsync_(i2, node.items[i2], visitor, path28);
+            const ci = await visitAsync_(i2, node.items[i2], visitor, path30);
             if (typeof ci === "number")
               i2 = ci - 1;
             else if (ci === BREAK)
@@ -178,13 +178,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path28 = Object.freeze(path28.concat(node));
-          const ck = await visitAsync_("key", node.key, visitor, path28);
+          path30 = Object.freeze(path30.concat(node));
+          const ck = await visitAsync_("key", node.key, visitor, path30);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = await visitAsync_("value", node.value, visitor, path28);
+          const cv = await visitAsync_("value", node.value, visitor, path30);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -211,23 +211,23 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node, visitor, path28) {
+    function callVisitor(key, node, visitor, path30) {
       if (typeof visitor === "function")
-        return visitor(key, node, path28);
+        return visitor(key, node, path30);
       if (identity.isMap(node))
-        return visitor.Map?.(key, node, path28);
+        return visitor.Map?.(key, node, path30);
       if (identity.isSeq(node))
-        return visitor.Seq?.(key, node, path28);
+        return visitor.Seq?.(key, node, path30);
       if (identity.isPair(node))
-        return visitor.Pair?.(key, node, path28);
+        return visitor.Pair?.(key, node, path30);
       if (identity.isScalar(node))
-        return visitor.Scalar?.(key, node, path28);
+        return visitor.Scalar?.(key, node, path30);
       if (identity.isAlias(node))
-        return visitor.Alias?.(key, node, path28);
+        return visitor.Alias?.(key, node, path30);
       return void 0;
     }
-    function replaceNode(key, path28, node) {
-      const parent = path28[path28.length - 1];
+    function replaceNode(key, path30, node) {
+      const parent = path30[path30.length - 1];
       if (identity.isCollection(parent)) {
         parent.items[key] = node;
       } else if (identity.isPair(parent)) {
@@ -839,10 +839,10 @@ var require_Collection = __commonJS({
     var createNode = require_createNode();
     var identity = require_identity();
     var Node = require_Node();
-    function collectionFromPath(schema, path28, value) {
+    function collectionFromPath(schema, path30, value) {
       let v = value;
-      for (let i2 = path28.length - 1; i2 >= 0; --i2) {
-        const k = path28[i2];
+      for (let i2 = path30.length - 1; i2 >= 0; --i2) {
+        const k = path30[i2];
         if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
           const a2 = [];
           a2[k] = v;
@@ -861,7 +861,7 @@ var require_Collection = __commonJS({
         sourceObjects: /* @__PURE__ */ new Map()
       });
     }
-    var isEmptyPath = (path28) => path28 == null || typeof path28 === "object" && !!path28[Symbol.iterator]().next().done;
+    var isEmptyPath = (path30) => path30 == null || typeof path30 === "object" && !!path30[Symbol.iterator]().next().done;
     var Collection = class extends Node.NodeBase {
       constructor(type, schema) {
         super(type);
@@ -891,11 +891,11 @@ var require_Collection = __commonJS({
        * be a Pair instance or a `{ key, value }` object, which may not have a key
        * that already exists in the map.
        */
-      addIn(path28, value) {
-        if (isEmptyPath(path28))
+      addIn(path30, value) {
+        if (isEmptyPath(path30))
           this.add(value);
         else {
-          const [key, ...rest] = path28;
+          const [key, ...rest] = path30;
           const node = this.get(key, true);
           if (identity.isCollection(node))
             node.addIn(rest, value);
@@ -909,8 +909,8 @@ var require_Collection = __commonJS({
        * Removes a value from the collection.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path28) {
-        const [key, ...rest] = path28;
+      deleteIn(path30) {
+        const [key, ...rest] = path30;
         if (rest.length === 0)
           return this.delete(key);
         const node = this.get(key, true);
@@ -924,8 +924,8 @@ var require_Collection = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path28, keepScalar) {
-        const [key, ...rest] = path28;
+      getIn(path30, keepScalar) {
+        const [key, ...rest] = path30;
         const node = this.get(key, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node) ? node.value : node;
@@ -943,8 +943,8 @@ var require_Collection = __commonJS({
       /**
        * Checks if the collection includes a value with the key `key`.
        */
-      hasIn(path28) {
-        const [key, ...rest] = path28;
+      hasIn(path30) {
+        const [key, ...rest] = path30;
         if (rest.length === 0)
           return this.has(key);
         const node = this.get(key, true);
@@ -954,8 +954,8 @@ var require_Collection = __commonJS({
        * Sets a value in this collection. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path28, value) {
-        const [key, ...rest] = path28;
+      setIn(path30, value) {
+        const [key, ...rest] = path30;
         if (rest.length === 0) {
           this.set(key, value);
         } else {
@@ -1519,7 +1519,7 @@ var require_stringify = __commonJS({
         }
       }
       let tagObj = void 0;
-      const node = identity.isNode(item) ? item : ctx.doc.createNode(item, { onTagObj: (o) => tagObj = o });
+      const node = identity.isNode(item) ? item : ctx.doc.createNode(item, { onTagObj: (o2) => tagObj = o2 });
       tagObj ?? (tagObj = getTagObject(ctx.doc.schema.tags, node));
       const props = stringifyProps(node, tagObj, ctx);
       if (props.length > 0)
@@ -2637,8 +2637,8 @@ var require_binary = __commonJS({
           const lineWidth = Math.max(ctx.options.lineWidth - ctx.indent.length, ctx.options.minContentWidth);
           const n3 = Math.ceil(str.length / lineWidth);
           const lines = new Array(n3);
-          for (let i2 = 0, o = 0; i2 < n3; ++i2, o += lineWidth) {
-            lines[i2] = str.substr(o, lineWidth);
+          for (let i2 = 0, o2 = 0; i2 < n3; ++i2, o2 += lineWidth) {
+            lines[i2] = str.substr(o2, lineWidth);
           }
           str = lines.join(type === Scalar.Scalar.BLOCK_LITERAL ? "\n" : " ");
         }
@@ -3470,9 +3470,9 @@ var require_Document = __commonJS({
           this.contents.add(value);
       }
       /** Adds a value to the document. */
-      addIn(path28, value) {
+      addIn(path30, value) {
         if (assertCollection(this.contents))
-          this.contents.addIn(path28, value);
+          this.contents.addIn(path30, value);
       }
       /**
        * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -3547,14 +3547,14 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path28) {
-        if (Collection.isEmptyPath(path28)) {
+      deleteIn(path30) {
+        if (Collection.isEmptyPath(path30)) {
           if (this.contents == null)
             return false;
           this.contents = null;
           return true;
         }
-        return assertCollection(this.contents) ? this.contents.deleteIn(path28) : false;
+        return assertCollection(this.contents) ? this.contents.deleteIn(path30) : false;
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -3569,10 +3569,10 @@ var require_Document = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path28, keepScalar) {
-        if (Collection.isEmptyPath(path28))
+      getIn(path30, keepScalar) {
+        if (Collection.isEmptyPath(path30))
           return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-        return identity.isCollection(this.contents) ? this.contents.getIn(path28, keepScalar) : void 0;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path30, keepScalar) : void 0;
       }
       /**
        * Checks if the document includes a value with the key `key`.
@@ -3583,10 +3583,10 @@ var require_Document = __commonJS({
       /**
        * Checks if the document includes a value at `path`.
        */
-      hasIn(path28) {
-        if (Collection.isEmptyPath(path28))
+      hasIn(path30) {
+        if (Collection.isEmptyPath(path30))
           return this.contents !== void 0;
-        return identity.isCollection(this.contents) ? this.contents.hasIn(path28) : false;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path30) : false;
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
@@ -3603,13 +3603,13 @@ var require_Document = __commonJS({
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path28, value) {
-        if (Collection.isEmptyPath(path28)) {
+      setIn(path30, value) {
+        if (Collection.isEmptyPath(path30)) {
           this.contents = value;
         } else if (this.contents == null) {
-          this.contents = Collection.collectionFromPath(this.schema, Array.from(path28), value);
+          this.contents = Collection.collectionFromPath(this.schema, Array.from(path30), value);
         } else if (assertCollection(this.contents)) {
-          this.contents.setIn(path28, value);
+          this.contents.setIn(path30, value);
         }
       }
       /**
@@ -5570,9 +5570,9 @@ var require_cst_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    visit.itemAtPath = (cst, path28) => {
+    visit.itemAtPath = (cst, path30) => {
       let item = cst;
-      for (const [field, index] of path28) {
+      for (const [field, index] of path30) {
         const tok = item?.[field];
         if (tok && "items" in tok) {
           item = tok.items[index];
@@ -5581,23 +5581,23 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit.parentCollection = (cst, path28) => {
-      const parent = visit.itemAtPath(cst, path28.slice(0, -1));
-      const field = path28[path28.length - 1][0];
+    visit.parentCollection = (cst, path30) => {
+      const parent = visit.itemAtPath(cst, path30.slice(0, -1));
+      const field = path30[path30.length - 1][0];
       const coll = parent?.[field];
       if (coll && "items" in coll)
         return coll;
       throw new Error("Parent collection not found");
     };
-    function _visit(path28, item, visitor) {
-      let ctrl = visitor(item, path28);
+    function _visit(path30, item, visitor) {
+      let ctrl = visitor(item, path30);
       if (typeof ctrl === "symbol")
         return ctrl;
       for (const field of ["key", "value"]) {
         const token = item[field];
         if (token && "items" in token) {
           for (let i2 = 0; i2 < token.items.length; ++i2) {
-            const ci = _visit(Object.freeze(path28.concat([[field, i2]])), token.items[i2], visitor);
+            const ci = _visit(Object.freeze(path30.concat([[field, i2]])), token.items[i2], visitor);
             if (typeof ci === "number")
               i2 = ci - 1;
             else if (ci === BREAK)
@@ -5608,10 +5608,10 @@ var require_cst_visit = __commonJS({
             }
           }
           if (typeof ctrl === "function" && field === "key")
-            ctrl = ctrl(item, path28);
+            ctrl = ctrl(item, path30);
         }
       }
-      return typeof ctrl === "function" ? ctrl(item, path28) : ctrl;
+      return typeof ctrl === "function" ? ctrl(item, path30) : ctrl;
     }
     exports.visit = visit;
   }
@@ -6913,14 +6913,14 @@ var require_parser = __commonJS({
             case "scalar":
             case "single-quoted-scalar":
             case "double-quoted-scalar": {
-              const fs30 = this.flowScalar(this.type);
+              const fs32 = this.flowScalar(this.type);
               if (atNextItem || it.value) {
-                map.items.push({ start, key: fs30, sep: [] });
+                map.items.push({ start, key: fs32, sep: [] });
                 this.onKeyLine = true;
               } else if (it.sep) {
-                this.stack.push(fs30);
+                this.stack.push(fs32);
               } else {
-                Object.assign(it, { key: fs30, sep: [] });
+                Object.assign(it, { key: fs32, sep: [] });
                 this.onKeyLine = true;
               }
               return;
@@ -7048,13 +7048,13 @@ var require_parser = __commonJS({
             case "scalar":
             case "single-quoted-scalar":
             case "double-quoted-scalar": {
-              const fs30 = this.flowScalar(this.type);
+              const fs32 = this.flowScalar(this.type);
               if (!it || it.value)
-                fc.items.push({ start: [], key: fs30, sep: [] });
+                fc.items.push({ start: [], key: fs32, sep: [] });
               else if (it.sep)
-                this.stack.push(fs30);
+                this.stack.push(fs32);
               else
-                Object.assign(it, { key: fs30, sep: [] });
+                Object.assign(it, { key: fs32, sep: [] });
               return;
             }
             case "flow-map-end":
@@ -7364,9 +7364,9 @@ var require_dist = __commonJS({
 
 // packages/cli/src/cli.ts
 import os5 from "node:os";
-import path27 from "node:path";
-import { spawn as spawn2 } from "node:child_process";
-import fs29 from "node:fs/promises";
+import path29 from "node:path";
+import { spawn as spawn3 } from "node:child_process";
+import fs31 from "node:fs/promises";
 
 // node_modules/@clack/core/dist/index.mjs
 import { styleText } from "node:util";
@@ -7763,11 +7763,30 @@ var clear = {
 };
 
 // node_modules/@clack/core/dist/index.mjs
-function findCursor(o, s, l) {
+function findCursor(o2, s, l) {
   if (!l.some((r2) => !r2.disabled))
-    return o;
-  const t2 = o + s, n3 = Math.max(l.length - 1, 0), e = t2 < 0 ? n3 : t2 > n3 ? 0 : t2;
+    return o2;
+  const t2 = o2 + s, n3 = Math.max(l.length - 1, 0), e = t2 < 0 ? n3 : t2 > n3 ? 0 : t2;
   return l[e]?.disabled ? findCursor(e, s < 0 ? -1 : 1, l) : e;
+}
+function findTextCursor(o2, s, l, i2) {
+  const t2 = i2.split(`
+`);
+  let n3 = 0, e = o2;
+  for (const r2 of t2) {
+    if (e <= r2.length)
+      break;
+    e -= r2.length + 1, n3++;
+  }
+  for (n3 = Math.max(0, Math.min(t2.length - 1, n3 + l)), e = Math.min(e, t2[n3].length) + s; e < 0 && n3 > 0; )
+    n3--, e += t2[n3].length + 1;
+  for (; e > t2[n3].length && n3 < t2.length - 1; )
+    e -= t2[n3].length + 1, n3++;
+  e = Math.max(0, Math.min(t2[n3].length, e));
+  let h2 = 0;
+  for (let r2 = 0; r2 < n3; r2++)
+    h2 += t2[r2].length + 1;
+  return h2 + e;
 }
 var a$1 = ["up", "down", "left", "right", "space", "enter", "cancel"];
 var t = [
@@ -7847,20 +7866,20 @@ function isCancel(e) {
   return e === CANCEL_SYMBOL;
 }
 function setRawMode(e, r2) {
-  const o = e;
-  o.isTTY && o.setRawMode(r2);
+  const o2 = e;
+  o2.isTTY && o2.setRawMode(r2);
 }
 var getColumns = (e) => "columns" in e && typeof e.columns == "number" ? e.columns : 80;
 var getRows = (e) => "rows" in e && typeof e.rows == "number" ? e.rows : 20;
-function wrapTextWithPrefix(e, r2, o, n3 = o, s = o, t2) {
-  const l = getColumns(e ?? stdout), i2 = dist_default2(o);
+function wrapTextWithPrefix(e, r2, o2, n3 = o2, s = o2, t2) {
+  const l = getColumns(e ?? stdout), i2 = dist_default2(o2);
   return wrapAnsi(r2, l - i2, {
     hard: true,
     trim: false
   }).split(`
 `).map((c3, a2, g) => {
     const m2 = t2 ? t2(c3, a2) : c3;
-    return a2 === 0 ? `${n3}${m2}` : a2 === g.length - 1 ? `${s}${m2}` : `${o}${m2}`;
+    return a2 === 0 ? `${n3}${m2}` : a2 === g.length - 1 ? `${s}${m2}` : `${o2}${m2}`;
   }).join(`
 `);
 }
@@ -7895,8 +7914,8 @@ var C$1 = class C {
     return isAccessible(this.opts.accessible);
   }
   constructor(t2, e = true) {
-    const { input: i2 = stdin, output: s = stdout, render: r2, signal: n3, ...o } = t2;
-    this.opts = o, this.onKeypress = this.onKeypress.bind(this), this.close = this.close.bind(this), this.render = this.render.bind(this), this._render = r2.bind(this), this._track = e, this._abortSignal = n3, this.input = i2, this.output = s;
+    const { input: i2 = stdin, output: s = stdout, render: r2, signal: n3, ...o2 } = t2;
+    this.opts = o2, this.onKeypress = this.onKeypress.bind(this), this.close = this.close.bind(this), this.render = this.render.bind(this), this._render = r2.bind(this), this._track = e, this._abortSignal = n3, this.input = i2, this.output = s;
   }
   /**
    * Unsubscribe all listeners
@@ -8015,16 +8034,16 @@ var C$1 = class C {
         const e = diffLines(this._prevFrame, t2), i2 = getRows(this.output);
         if (this.restoreCursor(), e) {
           const s = Math.max(0, e.numLinesAfter - i2), r2 = Math.max(0, e.numLinesBefore - i2);
-          let n3 = e.lines.find((o) => o >= s);
+          let n3 = e.lines.find((o2) => o2 >= s);
           if (n3 === void 0) {
             this._prevFrame = t2;
             return;
           }
           if (e.lines.length === 1) {
             this.output.write(cursor.move(0, n3 - r2)), this.output.write(erase.lines(1));
-            const o = t2.split(`
+            const o2 = t2.split(`
 `);
-            this.output.write(o[n3]), this._prevFrame = t2, this.output.write(cursor.move(0, o.length - n3 - 1));
+            this.output.write(o2[n3]), this._prevFrame = t2, this.output.write(cursor.move(0, o2.length - n3 - 1));
             return;
           } else if (e.lines.length > 1) {
             if (s < r2)
@@ -8061,6 +8080,101 @@ var r = class extends C$1 {
       this.output.write(cursor.move(0, -1)), this.value = i2, this.state = "submit", this.close();
     }), this.on("cursor", () => {
       this.value = !this.value;
+    });
+  }
+};
+var o = /* @__PURE__ */ new Set(["up", "down", "left", "right"]);
+var h = class extends C$1 {
+  #t = false;
+  #s;
+  focused = "editor";
+  get userInputWithCursor() {
+    if (this.state === "submit")
+      return this.userInput;
+    const t2 = this.userInput;
+    if (this.cursor >= t2.length)
+      return `${t2}\u2588`;
+    const s = t2.slice(0, this.cursor), r2 = t2.slice(this.cursor, this.cursor + 1), i2 = t2.slice(this.cursor + 1);
+    return r2 === `
+` ? `${s}\u2588
+${i2}` : `${s}${styleText("inverse", r2)}${i2}`;
+  }
+  get cursor() {
+    return this._cursor;
+  }
+  #r(t2) {
+    if (this.userInput.length === 0) {
+      this._setUserInput(t2);
+      return;
+    }
+    this._setUserInput(
+      this.userInput.slice(0, this.cursor) + t2 + this.userInput.slice(this.cursor)
+    );
+  }
+  #i(t2) {
+    const s = this.value ?? "";
+    switch (t2) {
+      case "up":
+        this._cursor = findTextCursor(this._cursor, 0, -1, s);
+        return;
+      case "down":
+        this._cursor = findTextCursor(this._cursor, 0, 1, s);
+        return;
+      case "left":
+        this._cursor = findTextCursor(this._cursor, -1, 0, s);
+        return;
+      case "right":
+        this._cursor = findTextCursor(this._cursor, 1, 0, s);
+        return;
+    }
+  }
+  _shouldSubmit(t2, s) {
+    if (this.#s)
+      return this.focused === "submit" ? true : (this.#r(`
+`), this._cursor++, false);
+    const r2 = this.#t;
+    return this.#t = true, r2 && this.cursor === this.userInput.length ? (this.userInput[this.cursor - 1] === `
+` && (this._setUserInput(
+      this.userInput.slice(0, this.cursor - 1) + this.userInput.slice(this.cursor)
+    ), this._cursor--), true) : (this.#r(`
+`), this._cursor++, false);
+  }
+  constructor(t2) {
+    const s = t2.initialUserInput ?? t2.initialValue;
+    super(
+      {
+        ...t2,
+        initialUserInput: s
+      },
+      false
+    ), s !== void 0 && (this._cursor = s.length), this.#s = t2.showSubmit ?? false, this.on("key", (r2, i2) => {
+      if (i2?.name && o.has(i2.name)) {
+        this.#t = false, this.#i(i2.name);
+        return;
+      }
+      if (r2 === "	" && this.#s) {
+        this.focused = this.focused === "editor" ? "submit" : "editor";
+        return;
+      }
+      if (i2?.name !== "return") {
+        if (this.#t = false, i2?.name === "backspace" && this.cursor > 0) {
+          this._setUserInput(
+            this.userInput.slice(0, this.cursor - 1) + this.userInput.slice(this.cursor)
+          ), this._cursor--;
+          return;
+        }
+        if (i2?.name === "delete" && this.cursor < this.userInput.length) {
+          this._setUserInput(
+            this.userInput.slice(0, this.cursor) + this.userInput.slice(this.cursor + 1)
+          );
+          return;
+        }
+        r2 && (this.#s && this.focused === "submit" && (this.focused = "editor"), this.#r(r2 ?? ""), this._cursor++);
+      }
+    }), this.on("userInput", (r2) => {
+      this._setValue(r2);
+    }), this.on("finalize", () => {
+      this.value || (this.value = t2.defaultValue), this.value === void 0 && (this.value = "");
     });
   }
 };
@@ -8126,7 +8240,7 @@ var n$1 = class n extends C$1 {
   }
   constructor(e) {
     super(e, false), this.options = e.options;
-    const o = this.options.findIndex(({ value: s }) => s === e.initialValue), t2 = o === -1 ? 0 : o;
+    const o2 = this.options.findIndex(({ value: s }) => s === e.initialValue), t2 = o2 === -1 ? 0 : o2;
     this.cursor = this.options[t2]?.disabled ? findCursor(t2, 1, this.options) : t2, this.changeValue(), this.on("cursor", (s) => {
       switch (s) {
         case "left":
@@ -8177,7 +8291,7 @@ function isUnicodeSupported() {
   return Boolean(process$1.env.CI) || Boolean(process$1.env.WT_SESSION) || Boolean(process$1.env.TERMINUS_SUBLIME) || process$1.env.ConEmuTask === "{cmd::Cmder}" || process$1.env.TERM_PROGRAM === "Terminus-Sublime" || process$1.env.TERM_PROGRAM === "vscode" || process$1.env.TERM === "xterm-256color" || process$1.env.TERM === "alacritty" || process$1.env.TERMINAL_EMULATOR === "JetBrains-JediTerm";
 }
 var unicode = isUnicodeSupported();
-var unicodeOr = (e, o) => unicode ? e : o;
+var unicodeOr = (e, o2) => unicode ? e : o2;
 var S_STEP_ACTIVE = unicodeOr("\u25C6", "*");
 var S_STEP_CANCEL = unicodeOr("\u25A0", "x");
 var S_STEP_ERROR = unicodeOr("\u25B2", "x");
@@ -8231,8 +8345,8 @@ var symbolBar = (e) => {
       return styleText2("green", S_BAR);
   }
 };
-function formatInstructionFooter(e, o, r2) {
-  const s = r2 ? `${styleText2("cyan", S_BAR)}  ` : "", n3 = wrapTextWithPrefix(e, o.join(" \u2022 "), s).split(`
+function formatInstructionFooter(e, o2, r2) {
+  const s = r2 ? `${styleText2("cyan", S_BAR)}  ` : "", n3 = wrapTextWithPrefix(e, o2.join(" \u2022 "), s).split(`
 `);
   return r2 && n3.push(styleText2("cyan", S_BAR_END)), n3;
 }
@@ -8274,7 +8388,7 @@ var limitOptions = ({
   d && g++, c3 && g++;
   const T = f + (d ? 1 : 0), W = I - (c3 ? 1 : 0);
   for (let t2 = T; t2 < W; t2++) {
-    const n3 = e[t2], o = n3 !== void 0 ? w(n3, t2 === l) : "", h2 = wrapAnsi(o, i2, {
+    const n3 = e[t2], o2 = n3 !== void 0 ? w(n3, t2 === l) : "", h2 = wrapAnsi(o2, i2, {
       hard: true,
       trim: false
     }).split(`
@@ -8282,18 +8396,18 @@ var limitOptions = ({
     s.push(h2), g += h2.length;
   }
   if (g > v) {
-    let t2 = 0, n3 = 0, o = g;
+    let t2 = 0, n3 = 0, o2 = g;
     const h2 = l - T;
     let u3 = v;
-    const L = () => E$1(s, o, 0, h2, u3), y = () => E$1(
+    const L = () => E$1(s, o2, 0, h2, u3), y = () => E$1(
       s,
-      o,
+      o2,
       h2 + 1,
       s.length,
       u3,
       true
     );
-    d ? ({ lineCount: o, removals: t2 } = L(), o > u3 && (c3 || (u3 -= 1), { lineCount: o, removals: n3 } = y())) : (c3 || (u3 -= 1), { lineCount: o, removals: n3 } = y(), o > u3 && (u3 -= 1, { lineCount: o, removals: t2 } = L())), t2 > 0 && (d = true, s.splice(0, t2)), n3 > 0 && (c3 = true, s.splice(s.length - n3, n3));
+    d ? ({ lineCount: o2, removals: t2 } = L(), o2 > u3 && (c3 || (u3 -= 1), { lineCount: o2, removals: n3 } = y())) : (c3 || (u3 -= 1), { lineCount: o2, removals: n3 } = y(), o2 > u3 && (u3 -= 1, { lineCount: o2, removals: t2 } = L())), t2 > 0 && (d = true, s.splice(0, t2)), n3 > 0 && (c3 = true, s.splice(s.length - n3, n3));
   }
   const x = [];
   d && x.push(M);
@@ -8303,10 +8417,10 @@ var limitOptions = ({
   return c3 && x.push(M), x;
 };
 var confirm = (e) => {
-  const a2 = e.active ?? "Yes", o = e.inactive ?? "No";
+  const a2 = e.active ?? "Yes", o2 = e.inactive ?? "No";
   return new r({
     active: a2,
-    inactive: o,
+    inactive: o2,
     signal: e.signal,
     input: e.input,
     output: e.output,
@@ -8319,7 +8433,7 @@ var confirm = (e) => {
         u3
       ), s = `${i2 ? `${styleText2("gray", S_BAR)}
 ` : ""}${f}
-`, c3 = this.value ? a2 : o;
+`, c3 = this.value ? a2 : o2;
       switch (this.state) {
         case "submit": {
           const r2 = i2 ? `${styleText2("gray", S_BAR)}  ` : "";
@@ -8334,7 +8448,7 @@ ${styleText2("gray", S_BAR)}` : ""}`;
           const r2 = i2 ? `${styleText2("cyan", S_BAR)}  ` : "", g = i2 ? styleText2("cyan", S_BAR_END) : "";
           return `${s}${r2}${this.value ? `${styleText2("green", S_RADIO_ACTIVE)} ${a2}` : `${styleText2("dim", S_RADIO_INACTIVE)} ${styleText2("dim", a2)}`}${e.vertical ? i2 ? `
 ${styleText2("cyan", S_BAR)}  ` : `
-` : ` ${styleText2("dim", "/")} `}${this.value ? `${styleText2("dim", S_RADIO_INACTIVE)} ${styleText2("dim", o)}` : `${styleText2("green", S_RADIO_ACTIVE)} ${o}`}
+` : ` ${styleText2("dim", "/")} `}${this.value ? `${styleText2("dim", S_RADIO_INACTIVE)} ${styleText2("dim", o2)}` : `${styleText2("green", S_RADIO_ACTIVE)} ${o2}`}
 ${g}
 `;
         }
@@ -8353,7 +8467,7 @@ var m = (n3, u3) => n3.split(`
 var multiselect = (n3) => {
   const u3 = (t2, a2) => {
     const r2 = t2.label ?? String(t2.value);
-    return a2 === "disabled" ? `${styleText2("gray", S_CHECKBOX_INACTIVE)} ${m(r2, (o) => styleText2(["strikethrough", "gray"], o))}${t2.hint ? ` ${styleText2("dim", `(${t2.hint ?? "disabled"})`)}` : ""}` : a2 === "active" ? `${styleText2("cyan", S_CHECKBOX_ACTIVE)} ${r2}${t2.hint ? ` ${styleText2("dim", `(${t2.hint})`)}` : ""}` : a2 === "selected" ? `${styleText2("green", S_CHECKBOX_SELECTED)} ${m(r2, (o) => styleText2("dim", o))}${t2.hint ? ` ${styleText2("dim", `(${t2.hint})`)}` : ""}` : a2 === "cancelled" ? `${m(r2, (o) => styleText2(["strikethrough", "dim"], o))}` : a2 === "active-selected" ? `${styleText2("green", S_CHECKBOX_SELECTED)} ${r2}${t2.hint ? ` ${styleText2("dim", `(${t2.hint})`)}` : ""}` : a2 === "submitted" ? `${m(r2, (o) => styleText2("dim", o))}` : `${styleText2("dim", S_CHECKBOX_INACTIVE)} ${m(r2, (o) => styleText2("dim", o))}`;
+    return a2 === "disabled" ? `${styleText2("gray", S_CHECKBOX_INACTIVE)} ${m(r2, (o2) => styleText2(["strikethrough", "gray"], o2))}${t2.hint ? ` ${styleText2("dim", `(${t2.hint ?? "disabled"})`)}` : ""}` : a2 === "active" ? `${styleText2("cyan", S_CHECKBOX_ACTIVE)} ${r2}${t2.hint ? ` ${styleText2("dim", `(${t2.hint})`)}` : ""}` : a2 === "selected" ? `${styleText2("green", S_CHECKBOX_SELECTED)} ${m(r2, (o2) => styleText2("dim", o2))}${t2.hint ? ` ${styleText2("dim", `(${t2.hint})`)}` : ""}` : a2 === "cancelled" ? `${m(r2, (o2) => styleText2(["strikethrough", "dim"], o2))}` : a2 === "active-selected" ? `${styleText2("green", S_CHECKBOX_SELECTED)} ${r2}${t2.hint ? ` ${styleText2("dim", `(${t2.hint})`)}` : ""}` : a2 === "submitted" ? `${m(r2, (o2) => styleText2("dim", o2))}` : `${styleText2("dim", S_CHECKBOX_INACTIVE)} ${m(r2, (o2) => styleText2("dim", o2))}`;
   }, d = n3.required ?? true, x = n3.showInstructions ?? true;
   return new a({
     options: n3.options,
@@ -8385,15 +8499,15 @@ ${styleText2(
         `${symbol(this.state)}  `
       ), r2 = `${t2 ? `${styleText2("gray", S_BAR)}
 ` : ""}${a2}
-`, o = this.value ?? [], g = (i2, l) => {
+`, o2 = this.value ?? [], g = (i2, l) => {
         if (i2.disabled)
           return u3(i2, "disabled");
-        const s = o.includes(i2.value);
+        const s = o2.includes(i2.value);
         return l && s ? u3(i2, "active-selected") : s ? u3(i2, "selected") : u3(i2, l ? "active" : "inactive");
       };
       switch (this.state) {
         case "submit": {
-          const i2 = this.options.filter(({ value: s }) => o.includes(s)).map((s) => u3(s, "submitted")).join(styleText2("dim", ", ")) || styleText2("dim", "none"), l = wrapTextWithPrefix(
+          const i2 = this.options.filter(({ value: s }) => o2.includes(s)).map((s) => u3(s, "submitted")).join(styleText2("dim", ", ")) || styleText2("dim", "none"), l = wrapTextWithPrefix(
             n3.output,
             i2,
             t2 ? `${styleText2("gray", S_BAR)}  ` : ""
@@ -8401,7 +8515,7 @@ ${styleText2(
           return `${r2}${l}`;
         }
         case "cancel": {
-          const i2 = this.options.filter(({ value: s }) => o.includes(s)).map((s) => u3(s, "cancelled")).join(styleText2("dim", ", "));
+          const i2 = this.options.filter(({ value: s }) => o2.includes(s)).map((s) => u3(s, "cancelled")).join(styleText2("dim", ", "));
           if (i2.trim() === "")
             return `${r2}${styleText2("gray", S_BAR)}`;
           const l = wrapTextWithPrefix(
@@ -8454,6 +8568,61 @@ ${h2}
     }
   }).prompt();
 };
+var multiline = (e) => new h({
+  validate: e.validate,
+  placeholder: e.placeholder,
+  defaultValue: e.defaultValue,
+  initialValue: e.initialValue,
+  showSubmit: e.showSubmit,
+  output: e.output,
+  signal: e.signal,
+  input: e.input,
+  render() {
+    const i2 = e?.withGuide ?? settings.withGuide, o2 = `${`${i2 ? `${styleText2("gray", S_BAR)}
+` : ""}${symbol(this.state)}  `}${e.message}
+`, h2 = e.placeholder && e.placeholder.length > 0 ? (
+      // biome-ignore lint/style/noNonNullAssertion: guarded by placeholder.length > 0
+      styleText2("inverse", e.placeholder[0]) + styleText2("dim", e.placeholder.slice(1))
+    ) : styleText2(["inverse", "hidden"], "_"), a2 = this.userInput ? this.userInputWithCursor : h2, l = this.value ?? "", d = e.showSubmit ? `
+  ${styleText2(this.focused === "submit" ? "cyan" : "dim", "[ submit ]")}` : "";
+    switch (this.state) {
+      case "error": {
+        const n3 = `${styleText2("yellow", S_BAR)}  `, r2 = i2 ? wrapTextWithPrefix(e.output, a2, n3, void 0) : a2, u3 = styleText2("yellow", S_BAR_END);
+        return `${o2}${r2}
+${u3}  ${styleText2("yellow", this.error)}${d}
+`;
+      }
+      case "submit": {
+        const n3 = `${styleText2("gray", S_BAR)}  `, r2 = i2 ? wrapTextWithPrefix(
+          e.output,
+          l,
+          n3,
+          void 0,
+          void 0,
+          (u3) => styleText2("dim", u3)
+        ) : l ? styleText2("dim", l) : "";
+        return `${o2}${r2}`;
+      }
+      case "cancel": {
+        const n3 = `${styleText2("gray", S_BAR)}  `, r2 = i2 ? wrapTextWithPrefix(
+          e.output,
+          l,
+          n3,
+          void 0,
+          void 0,
+          (u3) => styleText2(["strikethrough", "dim"], u3)
+        ) : l ? styleText2(["strikethrough", "dim"], l) : "";
+        return `${o2}${r2}`;
+      }
+      default: {
+        const n3 = i2 ? `${styleText2("cyan", S_BAR)}  ` : "", r2 = i2 ? styleText2("cyan", S_BAR_END) : "", u3 = i2 ? wrapTextWithPrefix(e.output, a2, n3) : a2;
+        return `${o2}${u3}
+${r2}${d}
+`;
+      }
+    }
+  }
+}).prompt();
 var u2 = {
   light: unicodeOr("\u2500", "-"),
   heavy: unicodeOr("\u2501", "="),
@@ -8463,12 +8632,12 @@ var SELECT_INSTRUCTIONS = [
   `${styleText2("dim", "\u2191/\u2193")} to navigate`,
   `${styleText2("dim", "Enter:")} confirm`
 ];
-var c2 = (t2, o) => t2.includes(`
+var c2 = (t2, o2) => t2.includes(`
 `) ? t2.split(`
-`).map((d) => o(d)).join(`
-`) : o(t2);
+`).map((d) => o2(d)).join(`
+`) : o2(t2);
 var select = (t2) => {
-  const o = (n3, m2) => {
+  const o2 = (n3, m2) => {
     if (n3 === void 0)
       return "";
     const s = n3.label ?? String(n3.value);
@@ -8504,7 +8673,7 @@ var select = (t2) => {
         case "submit": {
           const r2 = n3 ? `${styleText2("gray", S_BAR)}  ` : "", a2 = wrapTextWithPrefix(
             t2.output,
-            o(this.options[this.cursor], "selected"),
+            o2(this.options[this.cursor], "selected"),
             r2
           );
           return `${u3}${a2}`;
@@ -8512,7 +8681,7 @@ var select = (t2) => {
         case "cancel": {
           const r2 = n3 ? `${styleText2("gray", S_BAR)}  ` : "", a2 = wrapTextWithPrefix(
             t2.output,
-            o(this.options[this.cursor], "cancelled"),
+            o2(this.options[this.cursor], "cancelled"),
             r2
           );
           return `${u3}${a2}${n3 ? `
@@ -8529,7 +8698,7 @@ ${styleText2("gray", S_BAR)}` : ""}`;
             maxItems: t2.maxItems,
             columnPadding: r2.length,
             rowPadding: a2 + b,
-            style: (g, x) => o(g, g.disabled ? "disabled" : x ? "active" : "inactive")
+            style: (g, x) => o2(g, g.disabled ? "disabled" : x ? "active" : "inactive")
           }).join(`
 ${r2}`)}
 ${f}
@@ -8554,10 +8723,10 @@ var text = (t2) => new n2({
 `, d = t2.placeholder && t2.placeholder.length > 0 ? (
       // biome-ignore lint/style/noNonNullAssertion: guarded by placeholder.length > 0
       styleText2("inverse", t2.placeholder[0]) + styleText2("dim", t2.placeholder.slice(1))
-    ) : styleText2(["inverse", "hidden"], "_"), o = this.userInput ? this.userInputWithCursor : d, s = this.value ?? "";
+    ) : styleText2(["inverse", "hidden"], "_"), o2 = this.userInput ? this.userInputWithCursor : d, s = this.value ?? "";
     switch (this.state) {
       case "validating": {
-        const n3 = r2 ? `${styleText2("cyan", S_BAR)}  ` : "", i2 = r2 ? styleText2("cyan", S_BAR_END) : "", c3 = styleText2("dim", o), $ = styleText2("dim", "Validating...");
+        const n3 = r2 ? `${styleText2("cyan", S_BAR)}  ` : "", i2 = r2 ? styleText2("cyan", S_BAR_END) : "", c3 = styleText2("dim", o2), $ = styleText2("dim", "Validating...");
         return `${l}${n3}${c3}
 ${i2}  ${$}
 `;
@@ -8565,7 +8734,7 @@ ${i2}  ${$}
       case "error": {
         const n3 = this.error ? `  ${styleText2("yellow", this.error)}` : "", i2 = r2 ? `${styleText2("yellow", S_BAR)}  ` : "", c3 = r2 ? styleText2("yellow", S_BAR_END) : "";
         return `${l.trim()}
-${i2}${o}
+${i2}${o2}
 ${c3}${n3}
 `;
       }
@@ -8580,7 +8749,7 @@ ${i2}` : ""}`;
       }
       default: {
         const n3 = r2 ? `${styleText2("cyan", S_BAR)}  ` : "", i2 = r2 ? styleText2("cyan", S_BAR_END) : "";
-        return `${l}${n3}${o}
+        return `${l}${n3}${o2}
 ${i2}
 `;
       }
@@ -8613,11 +8782,22 @@ async function promptConfirm(message, initialValue = false) {
   if (isCancel(value)) throw new PromptCanceled();
   return value;
 }
-async function promptSelect(message, options, initialValue) {
+async function promptMultiline(options) {
+  const { validate, ...rest } = options;
+  const value = await multiline({
+    ...rest,
+    showSubmit: true,
+    ...validate !== void 0 ? { validate: (input) => validate(input ?? "") } : {}
+  });
+  if (isCancel(value)) throw new PromptCanceled();
+  return value;
+}
+async function promptSelect(message, options, initialValue, settings2 = {}) {
   const value = await select({
     message,
     options: [...options],
-    ...initialValue !== void 0 ? { initialValue } : {}
+    ...initialValue !== void 0 ? { initialValue } : {},
+    ...settings2.maxItems !== void 0 ? { maxItems: settings2.maxItems } : {}
   });
   if (isCancel(value)) throw new PromptCanceled();
   return value;
@@ -8640,10 +8820,15 @@ var defaultPromptPort = {
   text: promptText,
   confirm: promptConfirm,
   select: promptSelect,
-  multiselect: promptMultiselect
+  multiselect: promptMultiselect,
+  multiline: promptMultiline
 };
 var SELECT_ALL = "*";
-var SKILL_LIST_MAX_ITEMS = 12;
+var LIST_MAX_ITEMS = 12;
+function truncatePromptHint(value) {
+  const chars = [...value];
+  return chars.length <= 60 ? value : `${chars.slice(0, 59).join("")}\u2026`;
+}
 function skillChoiceOptions(options, context) {
   const installed = new Set(context.installed);
   return [
@@ -8663,12 +8848,12 @@ function promptSkillSelection(options, context) {
     `Select skills to install into role "${context.role}" (space: toggle, a: all, i: invert)`,
     skillChoiceOptions(options, context),
     [],
-    { maxItems: SKILL_LIST_MAX_ITEMS }
+    { maxItems: LIST_MAX_ITEMS }
   );
 }
 
 // packages/core/src/version.ts
-var NEO_VERSION = "0.2.9";
+var NEO_VERSION = "0.2.10";
 
 // packages/core/src/error.ts
 var NeoError = class extends Error {
@@ -8692,9 +8877,12 @@ var WINDOWS_RESERVED = /* @__PURE__ */ new Set([
   ...Array.from({ length: 9 }, (_, i2) => `com${i2 + 1}`),
   ...Array.from({ length: 9 }, (_, i2) => `lpt${i2 + 1}`)
 ]);
+function isWindowsReservedName(name) {
+  return WINDOWS_RESERVED.has(name.toLowerCase());
+}
 function isSafeSkillName(name) {
   if (!SKILL_NAME_PATTERN.test(name) || name === "." || name === "..") return false;
-  if (WINDOWS_RESERVED.has(name.toLowerCase())) return false;
+  if (isWindowsReservedName(name)) return false;
   if (/[.\s]$/.test(name)) return false;
   return true;
 }
@@ -8872,6 +9060,7 @@ var locksDir = (home) => path3.join(stateDir(home), "locks");
 var roleMcpPath = (home, role) => path3.join(roleDir(home, role), "mcp.yaml");
 var roleYamlPath = (home, role) => path3.join(roleDir(home, role), "role.yaml");
 var libraryDir = (home) => path3.join(home, "library");
+var promptDir = (home) => path3.join(home, "prompts");
 var domainDir = (home, domain) => path3.join(libraryDir(home), domain);
 var roleModelsPath = (home, role) => path3.join(roleDir(home, role), "models.yaml");
 var rootsDir = (home) => path3.join(home, "roots");
@@ -10955,6 +11144,7 @@ var GITIGNORE = [
   "!/.gitattributes",
   "!/roles/",
   "!/library/",
+  "!/prompts/",
   "!/state/",
   "/state/*",
   "!/state/locks/",
@@ -10981,6 +11171,7 @@ var GITATTRIBUTES = [
   "*.ps1 text eol=crlf",
   "/roles/** -text",
   "/library/** -text",
+  "/prompts/** -text",
   "/state/locks/*.yaml text eol=lf",
   "*.png binary",
   "*.jpg binary",
@@ -11014,6 +11205,28 @@ async function detectRepoScope(home) {
     dir = parent;
   }
 }
+async function promptsWhitelistGap(home) {
+  let entries;
+  try {
+    entries = await fs14.readdir(promptDir(home));
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  }
+  if (entries.length === 0) return false;
+  const missingLine = async (file, needle) => {
+    let content;
+    try {
+      content = await fs14.readFile(path10.join(home, file), "utf8");
+    } catch (error) {
+      if (error.code === "ENOENT") return false;
+      throw error;
+    }
+    return !content.includes(needle);
+  };
+  return await missingLine(".gitignore", "!/prompts/") || await missingLine(".gitattributes", "/prompts/** -text");
+}
+var PROMPTS_WHITELIST_HINT = 'prompts/ is not in the git sync whitelist \u2014 add "!/prompts/" to .gitignore and "/prompts/** -text" to .gitattributes (neo never rewrites these files)';
 async function ensureSyncFiles(home) {
   await fs14.mkdir(home, { recursive: true });
   const written = [];
@@ -11126,26 +11339,26 @@ function isInsidePath(base, target) {
   const t2 = caseFoldPath(target);
   return t2 === b || t2.startsWith(b + path11.sep);
 }
-async function resolveLinkTarget(port, slot) {
+async function resolveLinkTarget(port2, slot) {
   let current = slot;
   for (let hop = 0; hop < MAX_LINK_HOPS; hop++) {
-    const raw = await port.readlink(current);
+    const raw = await port2.readlink(current);
     const resolved = path11.resolve(path11.dirname(current), normalizeLinkTarget(raw));
-    const info = await port.lstat(resolved);
+    const info = await port2.lstat(resolved);
     if (info === null) return { final: resolved, exists: false, broken: "missing" };
     if (!info.symlink) return { final: resolved, exists: true };
     current = resolved;
   }
   return { final: current, exists: false, broken: "cycle" };
 }
-async function classifySlot(port, input) {
-  const info = await port.lstat(input.slot);
+async function classifySlot(port2, input) {
+  const info = await port2.lstat(input.slot);
   if (info === null) return { kind: "empty" };
   if (!info.symlink) {
     return { kind: "F", real: info.directory ? "dir" : "file" };
   }
   if (input.recorded) return { kind: "A" };
-  const resolution = await resolveLinkTarget(port, input.slot);
+  const resolution = await resolveLinkTarget(port2, input.slot);
   if (!resolution.exists) {
     return {
       kind: "E",
@@ -11171,30 +11384,30 @@ var isMissing = (error) => {
 function nodeLinkPort() {
   const isWindows2 = process.platform === "win32";
   return {
-    async lstat(path28) {
+    async lstat(path30) {
       try {
-        const stat = await fs15.lstat(path28);
+        const stat = await fs15.lstat(path30);
         return { symlink: stat.isSymbolicLink(), directory: stat.isDirectory(), file: stat.isFile() };
       } catch (error) {
         if (isMissing(error)) return null;
         throw error;
       }
     },
-    readlink(path28) {
-      return fs15.readlink(path28);
+    readlink(path30) {
+      return fs15.readlink(path30);
     },
     linkDir(target, linkPath) {
       return fs15.symlink(target, linkPath, isWindows2 ? "junction" : "dir");
     },
-    async unlink(path28) {
+    async unlink(path30) {
       try {
-        await fs15.unlink(path28);
+        await fs15.unlink(path30);
       } catch (error) {
         const code = error?.code;
         if (isWindows2 && (code === "EPERM" || code === "EISDIR")) {
-          const stat = await fs15.lstat(path28).catch(() => null);
+          const stat = await fs15.lstat(path30).catch(() => null);
           if (stat?.isSymbolicLink() === true) {
-            await fs15.rmdir(path28);
+            await fs15.rmdir(path30);
             return;
           }
         }
@@ -11835,7 +12048,7 @@ async function convergeOneTarget(ports, home, target, desired, ledger, opts) {
     agentsMd: [],
     warnings: []
   };
-  const port = ports.link;
+  const port2 = ports.link;
   try {
     await fs19.mkdir(target.skillsDir, { recursive: true });
   } catch (error) {
@@ -11851,7 +12064,7 @@ async function convergeOneTarget(ports, home, target, desired, ledger, opts) {
     const slot = path16.join(target.skillsDir, name);
     let info;
     try {
-      info = await port.lstat(slot);
+      info = await port2.lstat(slot);
     } catch (error) {
       report.errors.push({ skill: name, error: `lstat failed: ${error.message}` });
       stuckSkills.add(name);
@@ -11867,7 +12080,7 @@ async function convergeOneTarget(ports, home, target, desired, ledger, opts) {
       continue;
     }
     try {
-      await port.unlink(slot);
+      await port2.unlink(slot);
       report.actions.push({ skill: name, kind: "removed" });
     } catch (error) {
       report.errors.push({ skill: name, error: `unlink failed: ${error.message}` });
@@ -11892,13 +12105,13 @@ async function convergeOneTarget(ports, home, target, desired, ledger, opts) {
     const source = skill.dir;
     const replace = async (note, kind) => {
       try {
-        await port.unlink(slot);
-        const sourceInfo = await port.lstat(source);
+        await port2.unlink(slot);
+        const sourceInfo = await port2.lstat(source);
         if (sourceInfo === null) {
           report.errors.push({ skill: name, error: `skill source missing: ${source}` });
           return false;
         }
-        await port.linkDir(source, slot);
+        await port2.linkDir(source, slot);
         report.actions.push({
           skill: name,
           kind: kind ?? "repointed",
@@ -11913,7 +12126,7 @@ async function convergeOneTarget(ports, home, target, desired, ledger, opts) {
     };
     let classification;
     try {
-      classification = await classifySlot(port, {
+      classification = await classifySlot(port2, {
         slot,
         recorded: recorded.has(name),
         home,
@@ -11926,12 +12139,12 @@ async function convergeOneTarget(ports, home, target, desired, ledger, opts) {
     switch (classification.kind) {
       case "empty": {
         try {
-          const sourceInfo = await port.lstat(source);
+          const sourceInfo = await port2.lstat(source);
           if (sourceInfo === null) {
             report.errors.push({ skill: name, error: `skill source missing: ${source}` });
             break;
           }
-          await port.linkDir(source, slot);
+          await port2.linkDir(source, slot);
           report.actions.push({ skill: name, kind: "mounted", sourceRole });
           finalSkills.add(name);
         } catch (error) {
@@ -11942,7 +12155,7 @@ async function convergeOneTarget(ports, home, target, desired, ledger, opts) {
       case "A": {
         let resolved = null;
         try {
-          const raw = await port.readlink(slot);
+          const raw = await port2.readlink(slot);
           resolved = path16.resolve(path16.dirname(slot), normalizeLinkTarget(raw));
         } catch {
           resolved = null;
@@ -12040,18 +12253,18 @@ async function convergeOneTarget(ports, home, target, desired, ledger, opts) {
     for (const name of entries) {
       if (keep.has(name)) continue;
       const slot = path16.join(target.skillsDir, name);
-      const info = await port.lstat(slot);
+      const info = await port2.lstat(slot);
       if (info === null || !info.symlink) continue;
       let pointsHome = false;
       try {
-        const resolution = await resolveLinkTarget(port, slot);
+        const resolution = await resolveLinkTarget(port2, slot);
         pointsHome = isInsidePath(home, resolution.final);
       } catch {
         pointsHome = false;
       }
       if (!pointsHome) continue;
       try {
-        await port.unlink(slot);
+        await port2.unlink(slot);
         report.actions.push({ skill: name, kind: "swept-orphan" });
       } catch (error) {
         report.errors.push({ skill: name, error: `orphan sweep unlink failed: ${error.message}` });
@@ -13317,11 +13530,11 @@ function probeModelEntry(raw) {
   if (reasoning !== void 0) entry.reasoning = reasoning;
   return entry;
 }
-async function fetchModelList(port, request) {
+async function fetchModelList(port2, request) {
   const url = modelListUrl(request.baseUrl);
   let response;
   try {
-    response = await port(url, {
+    response = await port2(url, {
       headers: request.headers,
       signal: AbortSignal.timeout(2e4)
     });
@@ -13552,8 +13765,8 @@ async function freePort() {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () => {
       const address = server.address();
-      const port = typeof address === "object" && address !== null ? address.port : 0;
-      server.close(() => resolve(port));
+      const port2 = typeof address === "object" && address !== null ? address.port : 0;
+      server.close(() => resolve(port2));
     });
   });
 }
@@ -14100,6 +14313,9 @@ async function statusAudit(ports, home, opts) {
     report.notes.push(
       "legacy neo home found at ~/neo; move it to ~/.neo (or set NEO_HOME=~/neo to keep using it)"
     );
+  }
+  if (await promptsWhitelistGap(home)) {
+    report.notes.push(PROMPTS_WHITELIST_HINT);
   }
   for (const [dir, entry] of Object.entries(ledger.targets)) {
     const skills = [...entry.skills ?? []].length;
@@ -15071,21 +15287,21 @@ async function gitignoreHint(root) {
 
 // packages/core/src/detect.ts
 import path25 from "node:path";
-async function detectAgent(entry, homedir, port) {
+async function detectAgent(entry, homedir, port2) {
   const signals = [];
   if (entry.detect !== void 0) {
     if (entry.detect.dir !== void 0) {
       const expanded = expandTilde(entry.detect.dir, homedir);
-      if (path25.isAbsolute(expanded) && await port.exists(expanded)) signals.push("dir");
+      if (path25.isAbsolute(expanded) && await port2.exists(expanded)) signals.push("dir");
     }
-    if (entry.detect.binary !== void 0 && await port.binaryOnPath(entry.detect.binary)) {
+    if (entry.detect.binary !== void 0 && await port2.binaryOnPath(entry.detect.binary)) {
       signals.push("binary");
     }
   }
   return { id: entry.id, signals };
 }
-async function detectAgents(entries, homedir, port) {
-  return Promise.all(entries.map((entry) => detectAgent(entry, homedir, port)));
+async function detectAgents(entries, homedir, port2) {
+  return Promise.all(entries.map((entry) => detectAgent(entry, homedir, port2)));
 }
 
 // packages/core/src/detect-node.ts
@@ -15120,6 +15336,145 @@ function nodeDetectPort() {
       return false;
     }
   };
+}
+
+// packages/core/src/prompt-library.ts
+import fs29 from "node:fs/promises";
+import path27 from "node:path";
+var PROMPT_NAME_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N}_-]{0,63}$/u;
+var NAME_RULE = 'use letters/digits (any script) with "-" and "_" inside, 1-64 chars, no leading - _ ., no dots, spaces or path separators';
+function isValidPromptName(name) {
+  return PROMPT_NAME_PATTERN.test(name);
+}
+function validatePromptName(name) {
+  if (!isValidPromptName(name)) {
+    throw new NeoError("usage", `invalid prompt name ${JSON.stringify(name)}: ${NAME_RULE}`);
+  }
+  if (isWindowsReservedName(name)) {
+    throw new NeoError(
+      "usage",
+      `invalid prompt name ${JSON.stringify(name)}: CON/PRN/AUX/NUL/COM1-9/LPT1-9 are reserved device names on Windows`
+    );
+  }
+}
+var MD_SUFFIX = ".md";
+function entryPath(name) {
+  return `${name}${MD_SUFFIX}`;
+}
+function baseNameOf(fileName) {
+  return fileName.toLowerCase().endsWith(MD_SUFFIX) ? fileName.slice(0, -MD_SUFFIX.length) : null;
+}
+function countLines(text2) {
+  return text2.length === 0 ? 0 : text2.split(/\r\n|\r|\n/).length;
+}
+function firstLineSummary(text2) {
+  const first = text2.split(/\r\n|\r|\n/, 1)[0] ?? "";
+  return first.trim();
+}
+async function listPrompts(home) {
+  let files;
+  try {
+    files = await fs29.readdir(promptDir(home));
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
+  const entries = [];
+  for (const fileName of files) {
+    const base = baseNameOf(fileName);
+    if (base === null) continue;
+    const target = path27.join(promptDir(home), fileName);
+    let stat;
+    try {
+      stat = await fs29.stat(target);
+    } catch (error) {
+      if (error.code === "ENOENT") continue;
+      throw error;
+    }
+    if (!stat.isFile()) continue;
+    const text2 = await fs29.readFile(target, "utf8");
+    entries.push({
+      name: base,
+      path: target,
+      bytes: Buffer.byteLength(text2, "utf8"),
+      lines: countLines(text2),
+      summary: firstLineSummary(text2)
+    });
+  }
+  return entries.sort((a2, b) => a2.name.localeCompare(b.name, "en"));
+}
+async function findPromptName(home, name) {
+  const wanted = name.toLowerCase();
+  let files;
+  try {
+    files = await fs29.readdir(promptDir(home));
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+  for (const fileName of files) {
+    const base = baseNameOf(fileName);
+    if (base !== null && base.toLowerCase() === wanted) return base;
+  }
+  return null;
+}
+async function readPrompt(home, name) {
+  validatePromptName(name);
+  const found = await findPromptName(home, name);
+  if (found === null) {
+    throw new NeoError("state", `prompt "${name}" not found in ${promptDir(home)}`);
+  }
+  const target = path27.join(promptDir(home), entryPath(found));
+  const text2 = await fs29.readFile(target, "utf8");
+  return {
+    name: found,
+    path: target,
+    text: text2,
+    bytes: Buffer.byteLength(text2, "utf8"),
+    lines: countLines(text2)
+  };
+}
+async function writePrompt(home, name, text2) {
+  validatePromptName(name);
+  if (text2.trim().length === 0) {
+    throw new NeoError("state", `prompt "${name}" body is empty or whitespace-only; refusing to write`);
+  }
+  const found = await findPromptName(home, name);
+  const entryName = found ?? name;
+  const target = path27.join(promptDir(home), entryPath(entryName));
+  let existing = null;
+  try {
+    existing = await fs29.readFile(target, "utf8");
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  if (existing === text2) {
+    return {
+      name: entryName,
+      path: target,
+      created: false,
+      unchanged: true,
+      bytes: Buffer.byteLength(text2, "utf8")
+    };
+  }
+  await writeFileAtomic(target, text2);
+  return {
+    name: entryName,
+    path: target,
+    created: existing === null,
+    unchanged: false,
+    bytes: Buffer.byteLength(text2, "utf8")
+  };
+}
+async function deletePrompt(home, name) {
+  validatePromptName(name);
+  const found = await findPromptName(home, name);
+  if (found === null) {
+    throw new NeoError("state", `prompt "${name}" not found in ${promptDir(home)}`);
+  }
+  const target = path27.join(promptDir(home), entryPath(found));
+  await fs29.rm(target);
+  return { name: found, path: target };
 }
 
 // packages/cli/src/cli-util.ts
@@ -15178,6 +15533,24 @@ function expectSinglePositional(parsed, usage) {
 function lastFlag(parsed, name) {
   const list = parsed.flags.get(name);
   return list && list.length > 0 ? list[list.length - 1] : void 0;
+}
+function absorbStdinDash(args, flagNames) {
+  const out = [];
+  for (let i2 = 0; i2 < args.length; i2++) {
+    const arg = args[i2];
+    if (flagNames.includes(arg) && args[i2 + 1] === "-") {
+      out.push(`${arg}=-`);
+      i2++;
+      continue;
+    }
+    out.push(arg);
+  }
+  return out;
+}
+async function readStdinAll() {
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 // packages/cli/src/model-command.ts
@@ -16140,6 +16513,358 @@ var MODEL_FLAGS_HELP = [
   "--prune                 refresh: drop models that disappeared upstream"
 ];
 
+// packages/cli/src/prompt-command.ts
+import fs30 from "node:fs/promises";
+import path28 from "node:path";
+
+// packages/cli/src/clipboard.ts
+import { spawn as spawn2 } from "node:child_process";
+function nativeTransports(platform) {
+  switch (platform) {
+    case "win32":
+      return [{ name: "clip", command: ["clip"] }];
+    case "darwin":
+      return [{ name: "pbcopy", command: ["pbcopy"] }];
+    default:
+      return [
+        { name: "wl-copy", command: ["wl-copy"] },
+        { name: "xclip", command: ["xclip", "-selection", "clipboard"] },
+        { name: "xsel", command: ["xsel", "-b"] }
+      ];
+  }
+}
+function osc52Sequence(text2) {
+  return `\x1B]52;c;${Buffer.from(text2, "utf8").toString("base64")}\x07`;
+}
+function nodeSpawnLine(command, stdin2) {
+  return new Promise((resolve) => {
+    const [bin, ...args] = command;
+    let child;
+    try {
+      child = spawn2(bin, [...args], { stdio: ["pipe", "ignore", "pipe"] });
+    } catch (error) {
+      resolve(
+        error.code === "ENOENT" ? { kind: "missing" } : { kind: "fail", detail: error.message }
+      );
+      return;
+    }
+    let stderr = "";
+    child.stderr?.on("data", (chunk) => {
+      if (stderr.length < 512) stderr += String(chunk);
+    });
+    child.stdin?.on("error", () => void 0);
+    child.once("error", (error) => {
+      resolve(
+        error.code === "ENOENT" ? { kind: "missing" } : { kind: "fail", detail: error.message }
+      );
+    });
+    child.once("close", (code) => {
+      resolve(
+        code === 0 ? { kind: "ok" } : { kind: "fail", detail: `exit ${code}${stderr.trim().length > 0 ? `: ${stderr.trim()}` : ""}` }
+      );
+    });
+    child.stdin?.end(stdin2, "utf8");
+  });
+}
+function nodeClipboardPort(view) {
+  const proc = {
+    platform: process.platform,
+    stdoutIsTty: process.stdout.isTTY === true,
+    stdoutWrite: (text2) => process.stdout.write(text2),
+    spawnLine: nodeSpawnLine,
+    ...view
+  };
+  return {
+    async write(text2) {
+      const reasons = [];
+      for (const transport of nativeTransports(proc.platform)) {
+        const attempt = await proc.spawnLine(transport.command, text2);
+        if (attempt.kind === "ok") return { ok: true, transport: transport.name, reasons };
+        reasons.push(
+          attempt.kind === "missing" ? `${transport.name}: not installed` : `${transport.name}: ${attempt.detail}`
+        );
+      }
+      if (proc.stdoutIsTty) {
+        proc.stdoutWrite(osc52Sequence(text2));
+        return { ok: true, transport: "osc52", reasons };
+      }
+      reasons.push("osc52 skipped: stdout is not a terminal");
+      return { ok: false, reasons };
+    }
+  };
+}
+
+// packages/cli/src/prompt-command.ts
+var NAME_HINT = "letters/digits (any script) with - and _ inside, 1\u201364 chars, no leading - _ .";
+function displayWidth(text2) {
+  let width = 0;
+  for (const ch of text2) {
+    const cp = ch.codePointAt(0) ?? 0;
+    const wide = cp >= 4352 && cp <= 4447 || cp >= 11904 && cp <= 42191 || cp >= 44032 && cp <= 55203 || cp >= 63744 && cp <= 64255 || cp >= 65072 && cp <= 65135 || cp >= 65280 && cp <= 65376 || cp >= 65504 && cp <= 65510 || cp >= 127744 && cp <= 128591 || cp >= 129280 && cp <= 129535 || cp >= 131072 && cp <= 262141;
+    width += wide ? 2 : 1;
+  }
+  return width;
+}
+function port(deps) {
+  return deps.prompts ?? defaultPromptPort;
+}
+function promptOptions(entries) {
+  return entries.map(
+    (entry) => entry.summary.length > 0 ? { value: entry.name, label: entry.name, hint: truncatePromptHint(entry.summary) } : { value: entry.name, label: entry.name }
+  );
+}
+async function pickPromptName(deps, home, message) {
+  const entries = await listPrompts(home);
+  if (entries.length === 0) {
+    throw new NeoError("usage", `prompt: no prompts yet in ${promptDir(home)} (create one: neo prompt add <name>)`);
+  }
+  return port(deps).select(message, promptOptions(entries), void 0, { maxItems: LIST_MAX_ITEMS });
+}
+async function knownNamesList(home) {
+  const names = (await listPrompts(home)).map((entry) => entry.name);
+  return names.length > 0 ? names.join(", ") : "(none yet)";
+}
+async function missingNameUsage(home, command) {
+  throw new NeoError(
+    "usage",
+    `prompt ${command}: <name> is required when not interactive (prompts: ${await knownNamesList(home)})`
+  );
+}
+async function readBodyFile(value, deps) {
+  if (value === "-") return (deps.readStdin ?? readStdinAll)();
+  const cwd = deps.cwd ?? process.cwd();
+  try {
+    return await fs30.readFile(path28.resolve(cwd, value), "utf8");
+  } catch (error) {
+    throw new NeoError(
+      "failure",
+      `prompt: cannot read --file ${JSON.stringify(value)}: ${error.message}`
+    );
+  }
+}
+function nonEmptyValidate(message) {
+  return (value) => value.trim().length === 0 ? message : void 0;
+}
+function rejectJson(sub, bools) {
+  if (bools.has("json")) {
+    throw new NeoError("usage", `prompt ${sub}: --json is only available on "prompt list"`);
+  }
+}
+async function cmdPrompt(args, io, deps) {
+  const first = args[0];
+  const sub = first === void 0 || first.startsWith("-") ? void 0 : first;
+  const rest = sub === void 0 ? args : args.slice(1);
+  switch (sub) {
+    case void 0:
+      return promptBare(rest, io, deps);
+    case "list":
+    case "ls":
+      return promptList(rest, io, deps);
+    case "copy":
+      return promptCopy(rest, io, deps);
+    case "add":
+      return promptAdd(rest, io, deps);
+    case "edit":
+      return promptEdit(rest, io, deps);
+    case "rm":
+      return promptRm(rest, io, deps);
+    default:
+      throw new NeoError(
+        "usage",
+        `prompt: unknown subcommand "${sub}" (expected list|copy|add|edit|rm; or bare "neo prompt" for the picker)`
+      );
+  }
+}
+async function deliverCopy(name, io, deps, print) {
+  const home = resolveHome(deps);
+  const prompt = await readPrompt(home, name);
+  if (prompt.text.trim().length === 0) {
+    throw new NeoError(
+      "state",
+      `prompt "${prompt.name}" is empty or whitespace-only; refusing to copy (edit it: neo prompt edit ${prompt.name})`
+    );
+  }
+  if (print) {
+    io.stdout(prompt.text);
+    return 0;
+  }
+  const clipboard = deps.clipboard ?? nodeClipboardPort();
+  const result = await clipboard.write(prompt.text);
+  if (result.ok) {
+    const chars = Array.from(prompt.text).length;
+    io.stderr(`copied "${prompt.name}" (${chars} chars) via ${result.transport ?? "clipboard"}
+`);
+    return 0;
+  }
+  io.stdout(prompt.text);
+  io.stderr(`prompt: could not reach the clipboard: ${result.reasons.join("; ")}
+`);
+  return 1;
+}
+async function promptBare(args, io, deps) {
+  parseArgs(args, { valued: /* @__PURE__ */ new Set(), boolean: boolFlags() });
+  if (!interactiveTty(deps)) {
+    const home = resolveHome(deps);
+    throw new NeoError(
+      "usage",
+      `prompt: a bare run needs an interactive terminal to pick a prompt (prompts: ${await knownNamesList(home)}); or use "neo prompt copy <name>"`
+    );
+  }
+  const name = await pickPromptName(deps, resolveHome(deps), "prompt: which to copy?");
+  return deliverCopy(name, io, deps, false);
+}
+async function promptList(args, io, deps) {
+  const parsed = parseArgs(args, { valued: /* @__PURE__ */ new Set(), boolean: boolFlags("json") });
+  if (parsed.positionals.length > 0) throw new NeoError("usage", "prompt list: takes no arguments");
+  const home = resolveHome(deps);
+  const entries = await listPrompts(home);
+  if (parsed.bools.has("json")) {
+    io.stdout(`${JSON.stringify({ prompts: entries }, null, 2)}
+`);
+    return 0;
+  }
+  if (entries.length === 0) return 0;
+  const width = Math.max(...entries.map((entry) => displayWidth(entry.name)));
+  for (const entry of entries) {
+    io.stdout(`${entry.name}${" ".repeat(width - displayWidth(entry.name))}  ${entry.summary}
+`);
+  }
+  return 0;
+}
+async function promptCopy(args, io, deps) {
+  const parsed = parseArgs(args, { valued: /* @__PURE__ */ new Set(), boolean: boolFlags("print", "json") });
+  if (parsed.bools.has("json")) {
+    throw new NeoError("usage", "prompt copy: --json is not available (use --print to put raw bytes on stdout)");
+  }
+  if (parsed.positionals.length > 1) throw new NeoError("usage", "prompt copy: too many arguments");
+  const home = resolveHome(deps);
+  let name = parsed.positionals[0];
+  if (name === void 0) {
+    if (!interactiveTty(deps)) await missingNameUsage(home, "copy");
+    name = await pickPromptName(deps, home, "prompt copy: which to copy?");
+  }
+  return deliverCopy(name, io, deps, parsed.bools.has("print"));
+}
+async function promptAdd(args, io, deps) {
+  const parsed = parseArgs(absorbStdinDash(args, ["--file"]), {
+    valued: /* @__PURE__ */ new Set(["file"]),
+    boolean: boolFlags("json")
+  });
+  rejectJson("add", parsed.bools);
+  if (parsed.positionals.length > 1) throw new NeoError("usage", `prompt add: too many arguments (expected <name>, ${NAME_HINT})`);
+  const home = resolveHome(deps);
+  const file = lastFlag(parsed, "file");
+  let name = parsed.positionals[0];
+  const isTty = interactiveTty(deps);
+  if (name === void 0) {
+    if (!isTty) throw new NeoError("usage", `prompt add: <name> is required (name rules: ${NAME_HINT})`);
+    name = (await port(deps).text({
+      message: "New prompt name",
+      validate: (value) => {
+        try {
+          validatePromptName(value.trim());
+        } catch (error) {
+          return error.message;
+        }
+        return void 0;
+      }
+    })).trim();
+  }
+  validatePromptName(name);
+  let text2;
+  if (file !== void 0) {
+    text2 = await readBodyFile(file, deps);
+  } else if (isTty) {
+    text2 = await port(deps).multiline({
+      message: `Body for prompt "${name}" (Tab: submit, Enter: newline)`,
+      validate: nonEmptyValidate("body cannot be empty (copying an empty prompt would blank your clipboard)")
+    });
+  } else {
+    throw new NeoError("usage", "prompt add: --file <path>|- is required when not interactive");
+  }
+  const result = await withHomeLock(home, async () => {
+    const clash = await findPromptName(home, name);
+    if (clash !== null) {
+      throw new NeoError("state", `prompt "${clash}" already exists (edit it: neo prompt edit ${clash})`);
+    }
+    return writePrompt(home, name, text2);
+  });
+  const verb = result.created ? "added" : "updated";
+  io.stdout(`${verb} prompt "${result.name}" (${result.bytes} bytes) at ${result.path}
+`);
+  return 0;
+}
+async function promptEdit(args, io, deps) {
+  const parsed = parseArgs(absorbStdinDash(args, ["--file"]), {
+    valued: /* @__PURE__ */ new Set(["file"]),
+    boolean: boolFlags("json")
+  });
+  rejectJson("edit", parsed.bools);
+  if (parsed.positionals.length > 1) throw new NeoError("usage", "prompt edit: too many arguments (expected <name>)");
+  const home = resolveHome(deps);
+  const file = lastFlag(parsed, "file");
+  let name = parsed.positionals[0];
+  const isTty = interactiveTty(deps);
+  if (name === void 0) {
+    if (!isTty) await missingNameUsage(home, "edit");
+    name = await pickPromptName(deps, home, "prompt edit: which to edit?");
+  }
+  validatePromptName(name);
+  const current = await readPrompt(home, name);
+  let text2;
+  if (file !== void 0) {
+    text2 = await readBodyFile(file, deps);
+  } else if (isTty) {
+    text2 = await port(deps).multiline({
+      message: `Edit prompt "${current.name}" (Tab: submit, Enter: newline)`,
+      initialValue: current.text,
+      validate: nonEmptyValidate("body cannot be empty (copying an empty prompt would blank your clipboard)")
+    });
+  } else {
+    throw new NeoError("usage", "prompt edit: --file <path>|- is required when not interactive");
+  }
+  const result = await withHomeLock(home, () => writePrompt(home, current.name, text2));
+  if (result.unchanged) {
+    io.stdout(`unchanged prompt "${result.name}" (no bytes written)
+`);
+  } else {
+    io.stdout(`updated prompt "${result.name}" (${result.bytes} bytes) at ${result.path}
+`);
+  }
+  return 0;
+}
+async function promptRm(args, io, deps) {
+  const parsed = parseArgs(args, { valued: /* @__PURE__ */ new Set(), boolean: boolFlags("json") });
+  rejectJson("rm", parsed.bools);
+  if (parsed.positionals.length > 1) throw new NeoError("usage", "prompt rm: too many arguments (expected <name>)");
+  const home = resolveHome(deps);
+  let name = parsed.positionals[0];
+  const isTty = interactiveTty(deps);
+  if (name === void 0) {
+    if (!isTty) await missingNameUsage(home, "rm");
+    name = await pickPromptName(deps, home, "prompt rm: which to delete?");
+  }
+  validatePromptName(name);
+  const target = await findPromptName(home, name);
+  if (target === null) {
+    throw new NeoError("state", `prompt "${name}" not found in ${promptDir(home)}`);
+  }
+  if (!parsed.bools.has("yes")) {
+    if (!isTty) {
+      throw new NeoError("usage", "prompt rm is destructive: pass --yes when not running interactively");
+    }
+    const confirmed = await port(deps).confirm(`delete prompt "${target}"?`, false);
+    if (!confirmed) {
+      io.stderr("aborted, nothing deleted\n");
+      return 0;
+    }
+  }
+  const removed = await withHomeLock(home, () => deletePrompt(home, name));
+  io.stdout(`removed prompt "${removed.name}"
+`);
+  return 0;
+}
+
 // packages/cli/src/cli.ts
 function defaultCliDeps() {
   return {
@@ -16319,9 +17044,27 @@ var COMMANDS = [
     summary: "model providers and models: list/add/edit/remove/refresh (config.yaml)",
     usage: MODEL_USAGE,
     flags: MODEL_FLAGS_HELP
+  },
+  {
+    name: "prompt",
+    summary: "user-level prompt library (~/.neo/prompts): picker \u2192 clipboard, plus list/copy/add/edit/rm",
+    usage: [
+      "neo prompt",
+      "neo prompt list [--json]",
+      "neo prompt copy [name] [--print]",
+      "neo prompt add [name] [--file <path>|'-']",
+      "neo prompt edit [name] [--file <path>|'-']",
+      "neo prompt rm [name] [--yes]"
+    ],
+    flags: [
+      "  --file <path>        add/edit body source ('-' = stdin; skips the editor)",
+      "  --print              copy: raw bytes to stdout instead of the clipboard",
+      "  --yes                rm: skip the TTY confirmation (required when not interactive)",
+      "  --json               read-only list only (copy uses --print for machine bytes)"
+    ]
   }
 ];
-var JSON_MATRIX = /* @__PURE__ */ new Set(["status", "list", "role", "migrate", "sync", "update", "model", "materialize"]);
+var JSON_MATRIX = /* @__PURE__ */ new Set(["status", "list", "role", "migrate", "sync", "update", "model", "materialize", "prompt"]);
 function resolveCommand2(name) {
   return COMMANDS.find(
     (spec) => spec.name === name || spec.aliases?.includes(name)
@@ -16357,7 +17100,7 @@ async function printFullHelp(io, deps) {
     "  --version   print version and exit",
     "  --help      show this help (per command: neo <command> --help)",
     "  --yes       assume yes (v1: only remove consumes it; elsewhere a no-op)",
-    "  --json      machine output (only: status, list, role, update --dry-run, migrate, sync, materialize)",
+    "  --json      machine output (only: status, list, role, update --dry-run, migrate, sync, materialize, prompt list)",
     "",
     "aliases: ls \u2192 list \xB7 rm \u2192 remove",
     `home: ${helpHome(deps)} (override with NEO_HOME)`
@@ -16382,9 +17125,13 @@ async function printCommandHelp(io, spec, deps) {
     for (const flag of spec.flags) lines.push(`  ${flag}`);
   }
   lines.push("", "global flags: --version, --help, --yes (no-op unless listed above)");
-  lines.push(
-    JSON_MATRIX.has(spec.name) ? "--json: available (machine output on stdout)" : "--json: not available (machine output is for read-only/preview commands only)"
-  );
+  if (!JSON_MATRIX.has(spec.name)) {
+    lines.push("--json: not available (machine output is for read-only/preview commands only)");
+  } else if (spec.name === "prompt") {
+    lines.push('--json: available on "prompt list" only (add/edit/rm reject it)');
+  } else {
+    lines.push("--json: available (machine output on stdout)");
+  }
   io.stdout(`${lines.join("\n")}
 `);
 }
@@ -16404,7 +17151,7 @@ async function runCli(argv, io, deps = defaultCliDeps()) {
   }
   try {
     const home = resolveHome(deps);
-    if (argv[0] === "model") return await dispatch(argv, io, deps);
+    if (argv[0] === "model" || argv[0] === "prompt") return await dispatch(argv, io, deps);
     return await withHomeLock(home, () => dispatch(argv, io, deps));
   } catch (error) {
     if (error instanceof PromptCanceled) {
@@ -16472,6 +17219,8 @@ async function dispatch(argv, io, deps) {
       return cmdStatus(rest, io, deps);
     case "model":
       return cmdModel(rest, io, deps);
+    case "prompt":
+      return cmdPrompt(rest, io, deps);
   }
   throw new NeoError("usage", `unknown command "${name}"`);
 }
@@ -16488,14 +17237,14 @@ async function cmdInit(args, io, deps) {
   const home = resolveHome(deps);
   const loaded = await readConfig(home);
   const registry = await readRegistry(home);
-  const port = deps.detect ?? nodeDetectPort();
-  const detections = await detectAgents(registry, deps.homedir, port);
+  const port2 = deps.detect ?? nodeDetectPort();
+  const detections = await detectAgents(registry, deps.homedir, port2);
   const detected = detections.filter((detection) => detection.signals.length > 0);
   io.stdout(`neo init: ${home}
 `);
-  if (home !== path27.join(deps.homedir, "neo")) {
+  if (home !== path29.join(deps.homedir, "neo")) {
     try {
-      await fs29.stat(path27.join(deps.homedir, "neo", "config.yaml"));
+      await fs31.stat(path29.join(deps.homedir, "neo", "config.yaml"));
       io.stderr(
         "hint: legacy home ~/neo still exists; this version uses ~/.neo \u2014 move it (mv ~/neo ~/.neo) or set NEO_HOME=~/neo\n"
       );
@@ -16521,8 +17270,15 @@ async function cmdInit(args, io, deps) {
   const importExit = await importExistingSkills(home, io, deps);
   if (importExit !== 0) return importExit;
   await setupGitSync(home, io, deps);
+  await promptSyncHint(home, io);
   io.stdout('next: add skills with "neo add <source> --skill <skill>", then launch with "neo run <agent>"\n');
   return 0;
+}
+async function promptSyncHint(home, io) {
+  if (await promptsWhitelistGap(home)) {
+    io.stderr(`hint: ${PROMPTS_WHITELIST_HINT}
+`);
+  }
 }
 async function setupGitSync(home, io, deps) {
   const scope = await detectRepoScope(home);
@@ -16781,7 +17537,7 @@ async function cmdAdd(args, io, deps) {
 }
 async function listDomainSkillNames(home, domain) {
   try {
-    return await fs29.readdir(path27.join(libraryDir(home), domain));
+    return await fs31.readdir(path29.join(libraryDir(home), domain));
   } catch {
     return [];
   }
@@ -16809,26 +17565,8 @@ async function cmdRole(args, io, deps) {
   }
   return cmdRoleSet(cleaned.slice(1), io, deps);
 }
-function absorbStdinDash(args) {
-  const out = [];
-  for (let i2 = 0; i2 < args.length; i2++) {
-    const arg = args[i2];
-    if ((arg === "--agents-md" || arg === "--mcp") && args[i2 + 1] === "-") {
-      out.push(`${arg}=-`);
-      i2++;
-      continue;
-    }
-    out.push(arg);
-  }
-  return out;
-}
-async function readStdinAll() {
-  const chunks = [];
-  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
-  return Buffer.concat(chunks).toString("utf8");
-}
 async function cmdRoleSet(args, io, deps) {
-  const parsed = parseArgs(absorbStdinDash(args), {
+  const parsed = parseArgs(absorbStdinDash(args, ["--agents-md", "--mcp"]), {
     valued: /* @__PURE__ */ new Set(["agents-md", "domains", "mcp"]),
     boolean: boolFlags("dry-run", "json")
   });
@@ -16846,7 +17584,7 @@ async function cmdRoleSet(args, io, deps) {
   const readInputText = async (value, flag) => {
     if (value === "-") return (deps.readStdin ?? readStdinAll)();
     try {
-      return await fs29.readFile(path27.resolve(cwd, value), "utf8");
+      return await fs31.readFile(path29.resolve(cwd, value), "utf8");
     } catch (error) {
       throw new NeoError(
         "failure",
@@ -16942,9 +17680,9 @@ async function cmdList(args, io, deps) {
   }
   if (sub === "agents") {
     const registry = await readRegistry(home);
-    const port = deps.detect ?? nodeDetectPort();
+    const port2 = deps.detect ?? nodeDetectPort();
     const detections = new Map(
-      (await detectAgents(registry, deps.homedir, port)).map((detection) => [detection.id, detection.signals])
+      (await detectAgents(registry, deps.homedir, port2)).map((detection) => [detection.id, detection.signals])
     );
     const view = registry.map((entry) => {
       const configured = config.targets.find((target) => target.agent === entry.id);
@@ -17244,7 +17982,7 @@ async function spawnAgentNode(plan) {
 }
 function runChild(command, args, plan, env, extra = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn2(command, [...args], {
+    const child = spawn3(command, [...args], {
       cwd: plan.cwd,
       env,
       stdio: "inherit",
@@ -17258,16 +17996,16 @@ var isWindowsShim = (command) => process.platform === "win32" && /\.(cmd|bat)$/i
 async function resolveShimTarget(shim) {
   let text2;
   try {
-    text2 = await fs29.readFile(shim, "utf8");
+    text2 = await fs31.readFile(shim, "utf8");
   } catch {
     return null;
   }
   const match = /%dp0%[\\/](node_modules[\\/][^"%\r\n]+?\.(?:js|exe))/i.exec(text2);
   const relative = match?.[1];
   if (relative === void 0) return null;
-  const target = path27.join(path27.dirname(shim), relative);
+  const target = path29.join(path29.dirname(shim), relative);
   try {
-    const stat = await fs29.stat(target);
+    const stat = await fs31.stat(target);
     if (!stat.isFile()) return null;
   } catch {
     return null;
@@ -17340,7 +18078,7 @@ async function cmdMaterialize(args, io, deps) {
     {
       role,
       agent,
-      out: path27.resolve(cwd, out),
+      out: path29.resolve(cwd, out),
       env: deps.env,
       ...parsed.bools.has("agent-models") ? { skipModels: true } : {},
       ...parsed.bools.has("no-auth") ? { noAuth: true } : {}
@@ -17405,6 +18143,7 @@ async function cmdOff(args, io, deps) {
 async function cmdSync(args, io, deps) {
   const parsed = parseArgs(args, { valued: /* @__PURE__ */ new Set(), boolean: boolFlags("apply", "force", "json") });
   if (parsed.positionals.length > 0) throw new NeoError("usage", "sync: takes no positional arguments");
+  await promptSyncHint(resolveHome(deps), io);
   const cwd = deps.cwd ?? process.cwd();
   const found = await discoverProjectManifest(cwd);
   if (found === null) {
@@ -17533,7 +18272,7 @@ function printMigrateReport(io, report) {
     switch (item.disposition) {
       case "absorb": {
         const dest = roleSkillsDir(report.home, report.role);
-        io.stdout(`  absorb ${item.skill}:${hashTag(item.winner?.hash)} ${item.winner?.origin ?? ""} -> ${path27.join(dest, item.skill)}
+        io.stdout(`  absorb ${item.skill}:${hashTag(item.winner?.hash)} ${item.winner?.origin ?? ""} -> ${path29.join(dest, item.skill)}
 `);
         for (const loser of item.losers ?? []) {
           io.stdout(`    quarantine ${loser.origin}${hashTag(loser.hash)} -> ${report.quarantineDir ?? "(none)"}

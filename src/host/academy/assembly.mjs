@@ -287,7 +287,11 @@ export function createAcademyAssembler({ dataDir, nodeBinary, cliEntry, env = pr
 
     // Fingerprint: everything a live engine session would need to re-open for.
     // The manifest hash covers skill content; MCP rides as name/transport +
-    // command shape (secret VALUES never enter the fingerprint).
+    // command shape (secret VALUES never enter the fingerprint). The Role
+    // prompt is NOT covered by the manifest hash (0.2.10 实测: AGENTS.md 从 A
+    // 改到 B,hash 不变), yet materialize exports it into the agent's
+    // instruction file — without it a prompt edit would leave the live session
+    // on the stale text.
     const mcpShape = JSON.stringify(
       Object.entries(rawServers)
         .sort(([a], [b]) => (a < b ? -1 : 1))
@@ -297,8 +301,9 @@ export function createAcademyAssembler({ dataDir, nodeBinary, cliEntry, env = pr
             : { name, transport: "http", url: server.url, headers: server.headers ?? {} },
         ),
     );
+    const promptShape = await rolePromptShape(neoHome, roleKey);
     return {
-      fingerprint: `${roleKey}|${engine}|${manifest.hash}|${hashOf(mcpShape)}`,
+      fingerprint: `${roleKey}|${engine}|${manifest.hash}|${hashOf(mcpShape)}|${promptShape}`,
       roleKey,
       skills: manifest.skills.map((skill) => ({ name: skill.name, hash: skill.hash, source: skill.source })),
       mcp: serverNames.map((name) => ({ name, transport: rawServers[name].transport })),
@@ -344,6 +349,29 @@ function crossCheckEnvRefs(roleKey, servers, envRefs) {
       `角色「${roleKey}」的 mcp.yaml 引用与 materialize 清单的 mcp.envRefs 不一致（装配前后角色被改过或导出形状变了）；本次派工中止，重派即可收敛`,
     );
   }
+}
+
+/**
+ * Role prompt (角色提示词) bytes behind this role's instruction file.
+ *
+ * Neo composes `roles/default/AGENTS.md` + `roles/<role>/AGENTS.md` at
+ * materialize time (ADR 0002 的 default ∪ role 基底), and the exported
+ * AGENTS.md / CLAUDE.md carries both. Neither file rides the manifest hash
+ * (v0.2.10 实测:A→B 的提示词编辑 hash 不变), so a live engine session would
+ * survive a prompt edit and keep the stale instruction file.
+ *
+ * Interim door: hash the two source files' bytes (missing = ""). A future
+ * Neo manifest field (prompt hash) should replace this — Cubicle must not own
+ * the composition rule; over-retiring is the safe direction until then.
+ *
+ * @param {string} neoHome @param {string} roleKey
+ * @returns {Promise<string>}
+ */
+async function rolePromptShape(neoHome, roleKey) {
+  const read = (/** @type {string} */ p) => fs.readFile(p, "utf8").catch(() => "");
+  const base = await read(path.join(neoHome, "roles", "default", "AGENTS.md"));
+  const own = await read(path.join(neoHome, "roles", roleKey, "AGENTS.md"));
+  return hashOf(`${base}\u0000${own}`);
 }
 
 /** @param {string} text @returns {string} */

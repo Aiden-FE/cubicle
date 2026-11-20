@@ -64,7 +64,15 @@ Cubicle 里长出一个**学院**：本机级的公共能力资源库（技能 +
 | [N4 导出合同 T1–T5](neo-tickets/N4-export-contract.md) | `envRefs` / env 校验归 run / `--no-auth` / `--agent-models` / help | **已交付并复验**（Neo `894e5bf`）；Cubicle 恒传 `--no-auth --agent-models` |
 | [N5 junction 吞内容](neo-tickets/N5-materialize-junction-eats-content.md) | 重复 materialize 不得跟进链接删内容 | **已关闭**：Neo `b0767f9` 修复，vendor 重钉该提交，缓解已移除，e2e:15 绿 |
 
-**vendor 钉**：当前 `b0767f9`（含票 05 链接安全删除）；装配前自清 out 的缓解已移除。重钉不得低于该提交。
+**vendor 钉**：当前 `v0.2.10`（已发布 tag；含票 05 链接安全删除 + 票 01 提示词库）。重钉不得低于 `b0767f9`（N5 修复），且只准钉已发布 tag（见 `vendor/README.md`）。
+
+**Prompt(提示词) 与 Role prompt(角色提示词) 的边界**（Neo 0.2.10 / ADR 0010）
+- **Role prompt** = `~/.neo/roles/<role>/AGENTS.md`，materialize 时渲染成引擎的指令文件；Cubicle 只读投影（`persona` 字段）。
+  实测它**不进** manifest hash，所以装配指纹额外纳入 `roles/default/AGENTS.md` + `roles/<role>/AGENTS.md` 的字节——
+  改提示词会让活引擎会话退役重开（否则员工继续用旧指令文件）。
+- **Prompt** = `~/.neo/prompts/<name>.md`，交付方式是**剪贴板**，不参与启动、不被 agent 读取、不被角色引用（ADR 0010 非目标）。
+  Cubicle v1 **不做**提示词的 GUI 面：它是用户级一次性复制资产，`neo prompt` 已覆盖；真要做得先开票
+  （只读列表 + 填进对话输入框是唯一合理的宿主形态，写入仍归 CLI，避免第二个「字节保真」实现）。
 
 **消费侧注意**：`materialize` 默认与启动根同形（含 auth 凭据副本）；Cubicle **恒传 `--no-auth`**，导出目录不得出现 `auth.json`。`--out` 必须是本命令独占目录（`root.json` marker 认领），不要指向已有员工引擎根；模型由 Cubicle 自带，**恒传 `--agent-models`**。
 

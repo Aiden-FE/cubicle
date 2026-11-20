@@ -339,7 +339,7 @@ test("no MCP configured: no config files written (three engines still pass empty
   }
 });
 
-test("fingerprint: stable per role content, changes when the role's skills change", async () => {
+test("fingerprint: stable per role content, changes when the role's skills OR its Role prompt change", async () => {
   const { dir, dispose } = await withTempDir("fingerprint");
   try {
     const neoHome = path.join(dir, "neo-home");
@@ -360,6 +360,27 @@ test("fingerprint: stable per role content, changes when the role's skills chang
     const a3 = await assembler.assemble({ employee, engine: "pi" });
     assert.ok(a3);
     assert.notEqual(a1.fingerprint, a3.fingerprint);
+
+    // Role prompt (角色提示词): Neo exports roles/<role>/AGENTS.md into the
+    // agent instruction file but keeps it OUT of the manifest hash (v0.2.10).
+    // A prompt edit must still retire the live session — otherwise the
+    // employee keeps running on the stale instruction text.
+    await writeFile(path.join(neoHome, "roles", "dev", "AGENTS.md"), "# 角色提示词 V1\n", "utf8");
+    const p1 = await assembler.assemble({ employee, engine: "pi" });
+    const p2 = await assembler.assemble({ employee, engine: "pi" });
+    assert.ok(p1 && p2);
+    assert.equal(p1.fingerprint, p2.fingerprint, "same prompt bytes → same fingerprint");
+    await writeFile(path.join(neoHome, "roles", "dev", "AGENTS.md"), "# 角色提示词 V2 —— 改过了\n", "utf8");
+    const p3 = await assembler.assemble({ employee, engine: "pi" });
+    assert.ok(p3);
+    assert.notEqual(p1.fingerprint, p3.fingerprint, "role prompt edit must move the fingerprint");
+
+    // The default role's prompt is the shared base (ADR 0002) — it counts too.
+    await mkdir(path.join(neoHome, "roles", "default"), { recursive: true });
+    await writeFile(path.join(neoHome, "roles", "default", "AGENTS.md"), "# 默认基底\n", "utf8");
+    const p4 = await assembler.assemble({ employee, engine: "pi" });
+    assert.ok(p4);
+    assert.notEqual(p3.fingerprint, p4.fingerprint, "default role prompt edit must move the fingerprint");
   } finally {
     await dispose();
   }
