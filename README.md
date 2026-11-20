@@ -4,7 +4,7 @@
 
 - **形态**：Windows 优先的桌面应用（Electron + React + Three.js）
 - **引擎**：不绑定任何 agent 引擎 —— 统一适配层调用本机已装的 pi / codex / claude / dsh / qoder…
-- **状态**：**M0-M7 全部通过（2026-11-12）+ 员工学院 effort 结项（2026-11-18）**——18 张 v1 研发票 + 学院四票全部 done，`e2e:15` 全链路正反断言一条命令全绿；首个发布 **v0.1.0**（GitHub Release，win-x64 / mac-x64 zip）。
+- **状态**：**M0-M7 全部通过（2026-11-12）+ 员工学院 effort 结项（2026-11-18）**——18 张 v1 研发票 + 学院四票全部 done，`e2e:15` 全链路正反断言一条命令全绿；发布 **v0.1.0** / **v0.1.1**（GitHub Release，win-x64 / mac-x64 zip；v0.1.1 带 vendored neo 0.2.10 与角色提示词入指纹）。
 
 ## 从这里开始
 

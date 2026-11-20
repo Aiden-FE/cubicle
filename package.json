@@ -1,7 +1,7 @@
 {
   "name": "cubicle",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "一间看得见的办公室：AI 数字员工在工位上干活，你招聘、派活、验收。",
   "engines": {

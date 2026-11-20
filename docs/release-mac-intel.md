@@ -86,7 +86,7 @@ cat tmp/e2e-15/summary.json   # 若有
 
 | 仓 | 提交 / tag | 内容 |
 |---|---|---|
-| Cubicle | tag `v0.1.0`（GitHub Release 带 `Cubicle-mac-x64.zip` / `Cubicle-win-x64.zip`） | 学院 a01–a04 + MCP 加固 + vendor 重钉 `b0767f9` |
+| Cubicle | tag `v0.1.1`（GitHub Release 带 `Cubicle-mac-x64.zip` / `Cubicle-win-x64.zip`） | 学院 a01–a04 + MCP 加固 + vendor 重钉 `v0.2.10`（提示词库/Role prompt 概念）+ 角色提示词入装配指纹 |
 | Neo | tag `academy-2026-11-18`（`b0767f9`） | academy 01–05（materialize / library+domain / role set / 导出合同 / 链接安全删除） |
 
 > 也可以不用打包产物：直接拉源码 `npm install && npm start` 验收开发态。
